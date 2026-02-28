@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { useQuery } from '@tanstack/react-query';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { StanceGauge } from '@/components/analytics/StanceGauge';
 import { BankPanel } from '@/components/dashboard/BankPanel';
@@ -9,9 +10,15 @@ import {
   officialToneHistory, divergenceHistory, communicationVolumeHistory,
 } from '@/data/mock-data';
 import {
+  getCachedSentimentScores,
+  type CachedSentimentScore,
+} from '@/lib/api/sentiment';
+import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, BarChart, Bar, ReferenceLine,
 } from 'recharts';
+import { MessageSquare, Database } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const Dashboard = () => {
   const fedToneData = officialToneHistory.filter(d => d.label === 'FED');
@@ -22,6 +29,14 @@ const Dashboard = () => {
     fed: f.value,
     ecb: ecbToneData[i]?.value ?? 0,
   }));
+
+  const { data: scores = [] } = useQuery({
+    queryKey: ['sentiment-scores'],
+    queryFn: getCachedSentimentScores,
+  });
+
+  const fedScore = scores.find(s => s.bank === 'FED');
+  const ecbScore = scores.find(s => s.bank === 'ECB');
 
   return (
     <div className="space-y-6 animate-slide-in">
@@ -42,6 +57,77 @@ const Dashboard = () => {
           <MetricCard label="Comm. Volume" value="25" sublabel="30d events" trend="up" trendValue="+25%" />
         </div>
       </div>
+
+      {/* Live Algorithm Dual Scores */}
+      {(fedScore || ecbScore) && (
+        <div className="rounded-lg border border-chart-3/30 bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-chart-3 animate-pulse-glow" />
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Algorithm v2.2 — Live Dual Scores</span>
+            </div>
+            <Link to="/stats" className="text-[10px] text-primary hover:underline">View Details →</Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {fedScore && (
+              <>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3 text-chart-2" />
+                    <span className="text-[10px] text-muted-foreground">FED Score 1</span>
+                  </div>
+                  <p className={cn('text-lg font-mono font-bold',
+                    Number(fedScore.score_1_avg) > 0.05 ? 'text-signal-hawkish' : Number(fedScore.score_1_avg) < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+                  )}>
+                    {Number(fedScore.score_1_avg) > 0 ? '+' : ''}{Number(fedScore.score_1_avg).toFixed(3)}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">{fedScore.score_1_label} ({fedScore.score_1_count} items)</p>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <Database className="w-3 h-3 text-chart-3" />
+                    <span className="text-[10px] text-muted-foreground">FED Score 2</span>
+                  </div>
+                  <p className={cn('text-lg font-mono font-bold',
+                    Number(fedScore.score_2_avg) > 0.05 ? 'text-signal-hawkish' : Number(fedScore.score_2_avg) < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+                  )}>
+                    {Number(fedScore.score_2_avg) > 0 ? '+' : ''}{Number(fedScore.score_2_avg).toFixed(3)}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">{fedScore.score_2_label} ({fedScore.score_2_count} items)</p>
+                </div>
+              </>
+            )}
+            {ecbScore && (
+              <>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3 text-chart-2" />
+                    <span className="text-[10px] text-muted-foreground">ECB Score 1</span>
+                  </div>
+                  <p className={cn('text-lg font-mono font-bold',
+                    Number(ecbScore.score_1_avg) > 0.05 ? 'text-signal-hawkish' : Number(ecbScore.score_1_avg) < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+                  )}>
+                    {Number(ecbScore.score_1_avg) > 0 ? '+' : ''}{Number(ecbScore.score_1_avg).toFixed(3)}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">{ecbScore.score_1_label} ({ecbScore.score_1_count} items)</p>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <Database className="w-3 h-3 text-chart-3" />
+                    <span className="text-[10px] text-muted-foreground">ECB Score 2</span>
+                  </div>
+                  <p className={cn('text-lg font-mono font-bold',
+                    Number(ecbScore.score_2_avg) > 0.05 ? 'text-signal-hawkish' : Number(ecbScore.score_2_avg) < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+                  )}>
+                    {Number(ecbScore.score_2_avg) > 0 ? '+' : ''}{Number(ecbScore.score_2_avg).toFixed(3)}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">{ecbScore.score_2_label} ({ecbScore.score_2_count} items)</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Bank Panels */}
       <div className="grid lg:grid-cols-2 gap-4">
