@@ -10,6 +10,7 @@ import EventDetail from "./pages/EventDetail";
 import Speakers from "./pages/Speakers";
 import MeetingCycles from "./pages/MeetingCycles";
 import Predictions from "./pages/Predictions";
+import StatisticalData from "./pages/StatisticalData";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
@@ -28,6 +29,7 @@ const App = () => (
             <Route path="/events/:eventId" element={<EventDetail />} />
             <Route path="/speakers" element={<Speakers />} />
             <Route path="/meetings" element={<MeetingCycles />} />
+            <Route path="/stats" element={<StatisticalData />} />
             <Route path="/predictions" element={<Predictions />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
