@@ -14,7 +14,114 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      sentiment_items: {
+        Row: {
+          bank: string
+          created_at: string
+          dove_pts: number | null
+          fetched_at: string
+          hawk_pts: number | null
+          id: string
+          is_statistical: boolean
+          item_date: string
+          label: string | null
+          net_score: number | null
+          reasons: string[] | null
+          source: string
+          stat_metric: string | null
+          stat_value: number | null
+          stat_weight: number | null
+          title: string
+          url: string | null
+          word_count: number | null
+        }
+        Insert: {
+          bank: string
+          created_at?: string
+          dove_pts?: number | null
+          fetched_at?: string
+          hawk_pts?: number | null
+          id?: string
+          is_statistical?: boolean
+          item_date: string
+          label?: string | null
+          net_score?: number | null
+          reasons?: string[] | null
+          source: string
+          stat_metric?: string | null
+          stat_value?: number | null
+          stat_weight?: number | null
+          title: string
+          url?: string | null
+          word_count?: number | null
+        }
+        Update: {
+          bank?: string
+          created_at?: string
+          dove_pts?: number | null
+          fetched_at?: string
+          hawk_pts?: number | null
+          id?: string
+          is_statistical?: boolean
+          item_date?: string
+          label?: string | null
+          net_score?: number | null
+          reasons?: string[] | null
+          source?: string
+          stat_metric?: string | null
+          stat_value?: number | null
+          stat_weight?: number | null
+          title?: string
+          url?: string | null
+          word_count?: number | null
+        }
+        Relationships: []
+      }
+      sentiment_scores: {
+        Row: {
+          bank: string
+          created_at: string
+          fetched_at: string
+          id: string
+          score_1_avg: number | null
+          score_1_count: number | null
+          score_1_dist: Json | null
+          score_1_label: string | null
+          score_2_avg: number | null
+          score_2_count: number | null
+          score_2_dist: Json | null
+          score_2_label: string | null
+        }
+        Insert: {
+          bank: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          score_1_avg?: number | null
+          score_1_count?: number | null
+          score_1_dist?: Json | null
+          score_1_label?: string | null
+          score_2_avg?: number | null
+          score_2_count?: number | null
+          score_2_dist?: Json | null
+          score_2_label?: string | null
+        }
+        Update: {
+          bank?: string
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          score_1_avg?: number | null
+          score_1_count?: number | null
+          score_1_dist?: Json | null
+          score_1_label?: string | null
+          score_2_avg?: number | null
+          score_2_count?: number | null
+          score_2_dist?: Json | null
+          score_2_label?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
