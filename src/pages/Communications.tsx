@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
+import { ExpandableTitle } from '@/components/analytics/ExpandableTitle';
 import {
   getCommunicationItems,
   getCachedSentimentScores,
@@ -130,7 +131,7 @@ const Communications = () => {
                     </span>
                   </td>
                   <td className="p-2.5 text-muted-foreground max-w-[120px] truncate">{item.source}</td>
-                  <td className="p-2.5 max-w-[300px] truncate font-medium" title={item.title}>{item.title}</td>
+                  <td className="p-2.5"><ExpandableTitle title={item.title} /></td>
                   <td className="p-2.5 text-right font-mono text-signal-hawkish">{item.hawk_pts}</td>
                   <td className="p-2.5 text-right font-mono text-signal-dovish">{item.dove_pts}</td>
                   <td className={cn(

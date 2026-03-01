@@ -180,10 +180,14 @@ function td(t: string): string | null {
   try { const d = new Date(t); return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0]; } catch { return null; }
 }
 function xn(title: string): number | null {
-  const m = title.toLowerCase().match(new RegExp('(-?\\d+\\.?\\d*)\\s*%'));
+  const tl = title.toLowerCase();
+  const m = tl.match(new RegExp('(-?\\d+\\.?\\d*)\\s*%'));
   if (!m) return null;
-  const v = parseFloat(m[1]);
-  return isNaN(v) ? null : v;
+  let v = parseFloat(m[1]);
+  if (isNaN(v)) return null;
+  // If title says "down by X%" or "fell by X%", make the value negative
+  if (v > 0 && /\b(down|fell|drop|decrease|decline|contract)\b/.test(tl)) v = -v;
+  return v;
 }
 
 // ── FRED ──
@@ -289,6 +293,8 @@ async function fetchFomcMinutes(cutoffDate: string): Promise<It[]> {
 
 // ── RSS feeds with full text fetching ──
 const SKIP = new Set(['enforcement actions', 'orders on banking applications', 'other announcements', 'banking and consumer regulatory policy', 'community development']);
+// Skip non-FOMC minutes items that contain "minutes" in the title (e.g. advisory committee minutes)
+const MINUTES_SKIP = /minutes/i;
 
 async function fetchRss(cs: string, bank: string): Promise<It[]> {
   const items: It[] = [];
@@ -312,8 +318,10 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
       const p = td(ri.pubDate);
       if (!p || p < cs) return false;
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
+      // Exclude any non-FOMC "minutes" items (advisory council minutes etc.)
+      if (bank === 'FED' && MINUTES_SKIP.test(ri.title)) return false;
       return true;
-    }).slice(0, 30); // increased from 15 to 30 for 1-year lookback
+    }).slice(0, 50); // increased for 1-year lookback
 
     // Fetch full text for each item (in batches of 5 to avoid overwhelming)
     const scored: It[] = [];
@@ -349,7 +357,9 @@ const EU: SR[] = [
   { pattern: 'gdp', met: 'GDP', ht: 0.4, dt: 0.1, dir: 'hh', w: 3 },
   { pattern: 'unemployment', met: 'Unemployment', ht: 6, dt: 7.5, dir: 'lh', w: 3 },
   { pattern: 'industrial production', met: 'Ind Prod', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
+  { pattern: 'production in construction', met: 'Construction', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
   { pattern: 'producer prices', met: 'PPI', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
+  { pattern: 'retail trade', met: 'Retail', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
 ];
 
 function ss(title: string): { ns: number; lb: string; met: string; val: number | null; w: number } | null {
@@ -373,7 +383,7 @@ async function fetchEcbStats(cs: string): Promise<It[]> {
     if (r && r.ok) {
       let xml = await r.text();
       xml = xml.replace(new RegExp('&(?!amp;|lt;|gt;|quot;|apos;|#)', 'g'), '&amp;');
-      for (const ri of pi(xml).filter(ri => { const p = td(ri.pubDate); return p && p >= cs; }).slice(0, 30)) {
+      for (const ri of pi(xml).filter(ri => { const p = td(ri.pubDate); return p && p >= cs; }).slice(0, 50)) {
         const pub = td(ri.pubDate)!;
         const st = ss(ri.title);
         if (st) items.push({ bank: 'ECB', source: 'ECB Stats', item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: st.ns, label: st.lb, word_count: 0, reasons: ['numeric'], stat_metric: st.met, stat_value: st.val, stat_weight: st.w });
@@ -396,14 +406,16 @@ async function fetchEcbStats(cs: string): Promise<It[]> {
   return items;
 }
 
-// ── Aggregation ──
+// ── Aggregation (excludes zero-score neutral items) ──
 function ag(sub: It[]) {
-  if (!sub.length) return { avg: 0, n: 0, dist: {} as Record<string, number>, sentiment: 'NEUTRAL' };
-  const avg = Math.round(sub.reduce((s, i) => s + i.net_score, 0) / sub.length * 1000) / 1000;
+  // Filter out items with exactly 0.000 net_score — they add noise without signal
+  const scored = sub.filter(i => Math.abs(i.net_score) > 0.001);
+  if (!scored.length) return { avg: 0, n: 0, dist: {} as Record<string, number>, sentiment: 'NEUTRAL' };
+  const avg = Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
   const sentiment = avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
   const dist: Record<string, number> = {};
-  for (const i of sub) dist[i.label] = (dist[i.label] || 0) + 1;
-  return { avg, n: sub.length, dist, sentiment };
+  for (const i of scored) dist[i.label] = (dist[i.label] || 0) + 1;
+  return { avg, n: scored.length, dist, sentiment };
 }
 
 // ── DB persistence ──

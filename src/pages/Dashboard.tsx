@@ -22,9 +22,9 @@ import {
 import { MessageSquare, Database, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-/** Group items by month and compute average net_score */
+/** Group items by month and compute average net_score (excluding zero-score items) */
 function monthlyAverages(items: SentimentItem[], bank?: string) {
-  const filtered = bank ? items.filter(i => i.bank === bank) : items;
+  const filtered = (bank ? items.filter(i => i.bank === bank) : items).filter(i => Math.abs(i.net_score) > 0.001);
   const byMonth: Record<string, { sum: number; count: number }> = {};
   for (const it of filtered) {
     const month = it.item_date.slice(0, 7);
@@ -72,10 +72,10 @@ const Dashboard = () => {
   const fedScore = scores.find(s => s.bank === 'FED');
   const ecbScore = scores.find(s => s.bank === 'ECB');
 
-  // 30-day items for current score
+  // 30-day items for current score (exclude zero-score neutrals)
   const recent30 = recentItems(allItems, 30);
-  const fed30Comms = recent30.filter(i => i.bank === 'FED' && !i.is_statistical);
-  const ecb30Comms = recent30.filter(i => i.bank === 'ECB' && !i.is_statistical);
+  const fed30Comms = recent30.filter(i => i.bank === 'FED' && !i.is_statistical && Math.abs(i.net_score) > 0.001);
+  const ecb30Comms = recent30.filter(i => i.bank === 'ECB' && !i.is_statistical && Math.abs(i.net_score) > 0.001);
   const fed30Avg = fed30Comms.length ? Math.round(fed30Comms.reduce((s, i) => s + i.net_score, 0) / fed30Comms.length * 1000) / 1000 : null;
   const ecb30Avg = ecb30Comms.length ? Math.round(ecb30Comms.reduce((s, i) => s + i.net_score, 0) / ecb30Comms.length * 1000) / 1000 : null;
 
