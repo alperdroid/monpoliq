@@ -28,7 +28,7 @@ const Communications = () => {
   });
 
   const refreshMutation = useMutation({
-    mutationFn: () => runSentimentAnalysis('both', 60, false),
+    mutationFn: () => runSentimentAnalysis('both', 365, false),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comm-items'] });
       queryClient.invalidateQueries({ queryKey: ['stat-items'] });
