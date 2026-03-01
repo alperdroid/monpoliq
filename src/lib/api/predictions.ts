@@ -1,5 +1,13 @@
 import type { PredictionOutput, CurrencyPrediction } from '@/types/central-bank';
 
+export interface TreasuryPrediction {
+  instrument: string;
+  direction: 'bullish' | 'bearish' | 'neutral';
+  yield_bias: 'higher' | 'lower' | 'stable';
+  signal_strength: number;
+  confidence: number;
+}
+
 export interface AIPredictionResponse {
   fed: {
     next_decision: 'hike' | 'hold' | 'cut';
@@ -19,6 +27,13 @@ export interface AIPredictionResponse {
   };
   eurusd: {
     direction: 'bullish' | 'bearish' | 'neutral';
+    signal_strength: number;
+    confidence: number;
+    reasoning: string;
+  };
+  us10y: {
+    direction: 'bullish' | 'bearish' | 'neutral';
+    yield_bias: 'higher' | 'lower' | 'stable';
     signal_strength: number;
     confidence: number;
     reasoning: string;
@@ -77,6 +92,17 @@ export function toCurrencyPrediction(ai: AIPredictionResponse['eurusd']): Curren
   return {
     pair: 'EUR/USD',
     direction: ai.direction,
+    signal_strength: ai.signal_strength,
+    confidence: ai.confidence,
+  };
+}
+
+/** Convert AI response to TreasuryPrediction */
+export function toTreasuryPrediction(ai: AIPredictionResponse['us10y']): TreasuryPrediction {
+  return {
+    instrument: 'US 10Y Treasury',
+    direction: ai.direction,
+    yield_bias: ai.yield_bias,
     signal_strength: ai.signal_strength,
     confidence: ai.confidence,
   };

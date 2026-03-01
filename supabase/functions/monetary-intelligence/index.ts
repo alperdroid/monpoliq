@@ -96,7 +96,7 @@ serve(async (req) => {
         `- [${i.item_date}] "${i.title}" → score: ${i.net_score}, label: ${i.label}${i.stat_metric ? `, metric: ${i.stat_metric}=${i.stat_value}` : ""}`
       ).join("\n");
 
-    const systemPrompt = `You are a senior monetary policy analyst AI. You analyze central bank communications, economic statistics, and market expectations to predict the next policy decision.
+    const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, and market expectations to predict the next policy decision. Do not mention any AI model names in your reasoning.
 
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:
 {
@@ -121,6 +121,13 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
     "signal_strength": 0.0-1.0,
     "confidence": 0.0-1.0,
     "reasoning": "Brief 1-2 sentence explanation"
+  },
+  "us10y": {
+    "direction": "bullish" | "bearish" | "neutral",
+    "yield_bias": "higher" | "lower" | "stable",
+    "signal_strength": 0.0-1.0,
+    "confidence": 0.0-1.0,
+    "reasoning": "Brief 1-2 sentence explanation based on monetary policy outlook and inflation expectations"
   }
 }
 
