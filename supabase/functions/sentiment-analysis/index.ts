@@ -510,7 +510,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CH });
   try {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
-    const bank = body.bank || 'both';
+    const rawBank = (body.bank || 'both').toLowerCase();
+    const bank = rawBank === 'fed' ? 'FED' : rawBank === 'ecb' ? 'ECB' : 'both';
     const days = body.days || 365;
     console.log('SA v3.0 (AI-scored): bank=' + bank + ' days=' + days);
     const co = new Date(); co.setDate(co.getDate() - days);
