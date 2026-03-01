@@ -333,7 +333,6 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
-        { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
@@ -449,7 +448,7 @@ async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2:
     // Split into batches of 50 to avoid payload size issues
     for (let i = 0; i < items.length; i += 50) {
       const batch = items.slice(i, i + 50);
-      const resp = await fetch(sbUrl + '/rest/v1/sentiment_items', {
+      const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
         method: 'POST', headers: hd,
         body: JSON.stringify(batch.map(it => ({
           bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
