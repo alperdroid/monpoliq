@@ -56,7 +56,7 @@ export interface CachedSentimentScore {
  */
 export async function runSentimentAnalysis(
   bank: 'FED' | 'ECB' | 'both' = 'both',
-  days: number = 60,
+  days: number = 365,
   _fetchText: boolean = false,
 ): Promise<SentimentResponse> {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
