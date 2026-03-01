@@ -5,8 +5,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const HAWKISH_DIRECT = new Set(['rate hike','rate increase','tightening','hawkish','restrictive','above target','overheating','persistent inflation','price pressures','upside risks to inflation','insufficiently restrictive','further tightening','additional rate increases','need to raise','strong demand']);
-const DOVISH_DIRECT = new Set(['rate cut','rate reduction','easing','dovish','accommodative','below target','disinflation','slowing','weaker growth','downside risks','disinflationary','progress on inflation','cutting rates','lower rates','policy pivot','sufficiently restrictive','well into restrictive territory']);
+// ── Sentiment words ──
+const HAWKISH_DIRECT = new Set([
+  'rate hike','rate increase','tightening','hawkish','restrictive',
+  'above target','overheating','persistent inflation','price pressures',
+  'upside risks to inflation','insufficiently restrictive','further tightening',
+  'additional rate increases','need to raise','strong demand',
+]);
+const DOVISH_DIRECT = new Set([
+  'rate cut','rate reduction','easing','dovish','accommodative',
+  'below target','disinflation','slowing','weaker growth',
+  'downside risks','disinflationary','progress on inflation',
+  'cutting rates','lower rates','policy pivot',
+  'sufficiently restrictive','well into restrictive territory',
+]);
 const DIRECTIONAL_PHRASES: Record<string, {hawk:string[];dove:string[]}> = {
   'wage growth':{hawk:['accelerat','rising','elevated','strong','above','picking up','remain high','persistently'],dove:['moderat','eased','easing','slowing','soften','deceler','cool','coming down']},
   'inflation':{hawk:['above target','persistently','sticky','broad-based','underlying','accelerat','rebound','uptick'],dove:['falling','declining','easing','retreating','moderat','approach.*target','path to','heading toward','lower','disinflation']},
@@ -16,10 +28,11 @@ const DIRECTIONAL_PHRASES: Record<string, {hawk:string[];dove:string[]}> = {
   'economic activity':{hawk:['expanding','strong','above expect','robust','accelerat'],dove:['contract','weak','below expect','deteriorat','slow']},
 };
 
+// ── FRED ──
 interface FredSpec { series_id:string; metric:string; transform:string; hawkish_threshold:number; dovish_threshold:number; direction:string; weight:number; }
 const FRED_POLICY_SERIES: FredSpec[] = [
   {series_id:'CPIAUCSL',metric:'CPI Inflation (YoY)',transform:'pct_change_12',hawkish_threshold:3.0,dovish_threshold:2.0,direction:'high_hawk',weight:3.0},
-  {series_id:'PAYEMS',metric:'Nonfarm Payrolls (MoM \u0394k)',transform:'diff_1',hawkish_threshold:200,dovish_threshold:100,direction:'high_hawk',weight:3.0},
+  {series_id:'PAYEMS',metric:'Nonfarm Payrolls (MoM Δk)',transform:'diff_1',hawkish_threshold:200,dovish_threshold:100,direction:'high_hawk',weight:3.0},
   {series_id:'UNRATE',metric:'Unemployment Rate',transform:'level',hawkish_threshold:4.0,dovish_threshold:5.0,direction:'low_hawk',weight:3.0},
   {series_id:'GDP',metric:'Real GDP Growth (QoQ ann.)',transform:'pct_change_1_ann',hawkish_threshold:2.5,dovish_threshold:1.0,direction:'high_hawk',weight:3.0},
   {series_id:'PCEPILFE',metric:'Core PCE Inflation (YoY)',transform:'pct_change_12',hawkish_threshold:2.5,dovish_threshold:2.0,direction:'high_hawk',weight:3.0},
@@ -28,6 +41,7 @@ const FRED_POLICY_SERIES: FredSpec[] = [
   {series_id:'INDPRO',metric:'Industrial Production (MoM %)',transform:'pct_change_1',hawkish_threshold:0.3,dovish_threshold:-0.3,direction:'high_hawk',weight:2.0},
 ];
 
+// ── Stat rules ──
 interface StatRule { pattern:string; metric:string; number_regex:string|null; hawkish_threshold:number|null; dovish_threshold:number|null; direction:string; weight:number; }
 const EUROSTAT_RULES: StatRule[] = [
   {pattern:'inflation',metric:'HICP inflation',number_regex:'(\\d+\\.?\\d*)\\s*%',hawkish_threshold:2.5,dovish_threshold:1.8,direction:'high_hawk',weight:3},
@@ -48,7 +62,10 @@ const FED_STAT_RULES: StatRule[] = [
   {pattern:'minutes.*(?:fomc|federal open market|meeting)|fomc\\s+minutes',metric:'FOMC Minutes sentiment',number_regex:null,hawkish_threshold:null,dovish_threshold:null,direction:'text_only',weight:3.0},
   {pattern:'beige book|summary of commentary',metric:'Beige Book sentiment',number_regex:null,hawkish_threshold:null,dovish_threshold:null,direction:'text_only',weight:2.5},
 ];
-const FED_SKIP_CATEGORIES = new Set(['enforcement actions','orders on banking applications','other announcements','banking and consumer regulatory policy','community development']);
+const FED_SKIP_CATEGORIES = new Set([
+  'enforcement actions','orders on banking applications','other announcements',
+  'banking and consumer regulatory policy','community development',
+]);
 const MIN_BOUNDARY_SCORE = 0.15;
 
 interface SentimentItem {
@@ -60,7 +77,7 @@ interface SentimentItem {
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-async function safeFetch(url:string, timeoutMs:number=12000):Promise<Response|null> {
+async function safeFetch(url:string, timeoutMs=12000):Promise<Response|null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -150,7 +167,7 @@ function parseRssDate(text:string):string|null {
   } catch(_e) { return null; }
 }
 
-function scoreSentiment(text:string, title:string='') {
+function scoreSentiment(text:string, title='') {
   const combined = (title + ' ' + text).toLowerCase();
   let hawk_pts = 0, dove_pts = 0;
   const reasons:string[] = [];
@@ -163,8 +180,8 @@ function scoreSentiment(text:string, title:string='') {
       const ctx = combined.slice(ws, we);
       const hasH = mods.hawk.some(h => ctx.includes(h));
       const hasD = mods.dove.some(d => ctx.includes(d));
-      if (hasH && !hasD) { hawk_pts += 5; const hit = mods.hawk.find(h => ctx.includes(h))!; reasons.push(`directional_hawk:"${phrase}"+"${hit}"`); }
-      else if (hasD && !hasH) { dove_pts += 5; const hit = mods.dove.find(d => ctx.includes(d))!; reasons.push(`directional_dove:"${phrase}"+"${hit}"`); }
+      if (hasH && !hasD) { hawk_pts += 5; reasons.push(`directional_hawk:"${phrase}"`); }
+      else if (hasD && !hasH) { dove_pts += 5; reasons.push(`directional_dove:"${phrase}"`); }
       idx = combined.indexOf(phrase, idx + 1);
     }
   }
@@ -195,8 +212,6 @@ function extractNum(title:string):number|null {
   let val = parseFloat(m[1]);
   if (isNaN(val)) return null;
   const prefix = tl.slice(Math.max(0, m.index - 40), m.index);
-  const levelPhrases = ['down to','fell to','decreased to','declined to','dropped to','up to','rose to','increased to'];
-  if (levelPhrases.some(lp => prefix.includes(lp))) return Math.abs(val);
   const neg = ['down by','down ','fell by','fell ','decreased by','decreased ','declined by','declined ','dropped by','dropped ','contraction'];
   const pos = ['up by','up ','grew by','grew ','increased by','increased ','rose by','rose '];
   const hasNeg = neg.some(n => prefix.includes(n));
@@ -220,26 +235,15 @@ async function analyzeStatRelease(title:string, url:string, summary:string, rule
     const combo = title + ' ' + summary;
     const nm = combo.match(new RegExp(rule.number_regex, 'i'));
     if (nm) { const v = parseFloat(nm[1]); if (!isNaN(v)) { const r = scoreFromValue(v, rule.hawkish_threshold!, rule.dovish_threshold!, rule.direction, rule.weight, rule.metric); return { ...r, method: 'numeric' }; } }
-    if (url) {
-      const pt = await fetchPageText(url);
-      if (pt) {
-        const nm2 = pt.match(new RegExp(rule.number_regex, 'i'));
-        if (nm2) { const v = parseFloat(nm2[1]); if (!isNaN(v)) { const r = scoreFromValue(v, rule.hawkish_threshold!, rule.dovish_threshold!, rule.direction, rule.weight, rule.metric); return { ...r, method: 'numeric' }; } }
-      }
-    }
   }
   if (rule && rule.direction === 'text_only' && url) {
     const pt = await fetchPageText(url);
     if (pt) { const s = scoreSentiment(pt, title); return { net_score: Math.round(s.net_score * rule.weight * 1000) / 1000, label: s.label, metric: rule.metric, value_found: null, weight: rule.weight, method: 'text' }; }
   }
-  if (url) {
-    const pt = await fetchPageText(url);
-    if (pt) { const s = scoreSentiment(pt, title); return { net_score: Math.round(s.net_score * 0.5 * 1000) / 1000, label: s.label, metric: 'unclassified', value_found: null, weight: 0.5, method: 'text_fallback' }; }
-  }
-  return { net_score: 0, label: 'neutral', metric: 'unavailable', value_found: null, weight: 0, method: 'none' };
+  return { net_score: 0, label: 'neutral', metric: rule?.metric || 'unavailable', value_found: null, weight: rule?.weight || 0, method: 'none' };
 }
 
-async function fetchFredData(apiKey:string, daysCutoff:number=90):Promise<SentimentItem[]> {
+async function fetchFredData(apiKey:string, daysCutoff=90):Promise<SentimentItem[]> {
   const items:SentimentItem[] = [];
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - daysCutoff);
   const cutoffStr = cutoff.toISOString().split('T')[0];
@@ -260,26 +264,19 @@ async function fetchFredData(apiKey:string, daysCutoff:number=90):Promise<Sentim
       else if (spec.transform === 'pct_change_12' && vals.length >= 13 && vals[12] !== 0) val = ((vals[0] - vals[12]) / Math.abs(vals[12])) * 100;
       if (val === null) return null;
       const result = scoreFromValue(val, spec.hawkish_threshold, spec.dovish_threshold, spec.direction, spec.weight, spec.metric);
-      return { bank: 'FED', source: 'FRED', item_date: obs[0].date, title: `${spec.metric}: ${val.toFixed(2)} (${spec.series_id})`, url: `https://fred.stlouisfed.org/series/${spec.series_id}`, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: result.net_score, label: result.label, word_count: 0, reasons: ['fred_api'], stat_metric: result.metric, stat_value: result.value_found, stat_weight: result.weight } as SentimentItem;
+      return { bank:'FED', source:'FRED', item_date:obs[0].date, title:`${spec.metric}: ${val.toFixed(2)} (${spec.series_id})`, url:`https://fred.stlouisfed.org/series/${spec.series_id}`, is_statistical:true, hawk_pts:0, dove_pts:0, net_score:result.net_score, label:result.label, word_count:0, reasons:['fred_api'], stat_metric:result.metric, stat_value:result.value_found, stat_weight:result.weight } as SentimentItem;
     })
   );
   for (const r of results) { if (r.status === 'fulfilled' && r.value) items.push(r.value); }
   return items;
 }
 
-async function batchFetchTexts(urls:string[], concurrency:number=5):Promise<Map<string,string>> {
+async function batchFetchTexts(urls:string[], concurrency=5):Promise<Map<string,string>> {
   const results = new Map<string,string>();
   for (let i = 0; i < urls.length; i += concurrency) {
     const batch = urls.slice(i, i + concurrency);
-    const settled = await Promise.allSettled(
-      batch.map(async (url) => {
-        const text = await fetchPageText(url);
-        return { url, text };
-      })
-    );
-    for (const r of settled) {
-      if (r.status === 'fulfilled') results.set(r.value.url, r.value.text);
-    }
+    const settled = await Promise.allSettled(batch.map(async (url) => ({ url, text: await fetchPageText(url) })));
+    for (const r of settled) { if (r.status === 'fulfilled') results.set(r.value.url, r.value.text); }
   }
   return results;
 }
@@ -314,10 +311,7 @@ async function parseBoardRss(feedUrl:string, sourceLabel:string, key:string, cut
   let xml = await resp.text();
   xml = xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
   const rssItems = parseXmlItems(xml);
-  const validItems = rssItems.filter(ri => {
-    const pub = parseRssDate(ri.pubDate);
-    return pub && pub >= cutoffStr;
-  }).slice(0, limit);
+  const validItems = rssItems.filter(ri => { const pub = parseRssDate(ri.pubDate); return pub && pub >= cutoffStr; }).slice(0, limit);
 
   const textUrls:string[] = [];
   const statItems:{ri:typeof rssItems[0];pub:string}[] = [];
@@ -328,10 +322,8 @@ async function parseBoardRss(feedUrl:string, sourceLabel:string, key:string, cut
     if (key === 'press') {
       if (FED_SKIP_CATEGORIES.has(ri.category)) continue;
       const tl = ri.title.toLowerCase();
-      if (tl.includes('minutes of the federal open market') || tl.includes('fomc minutes') ||
-          (tl.includes('discount rate') && tl.includes('minutes'))) {
-        statItems.push({ ri, pub });
-        continue;
+      if (tl.includes('minutes of the federal open market') || tl.includes('fomc minutes') || (tl.includes('discount rate') && tl.includes('minutes'))) {
+        statItems.push({ ri, pub }); continue;
       }
     }
     commItems.push({ ri, pub });
@@ -341,73 +333,60 @@ async function parseBoardRss(feedUrl:string, sourceLabel:string, key:string, cut
   const textMap = fetchText ? await batchFetchTexts(textUrls, 5) : new Map<string,string>();
 
   for (const { ri, pub } of statItems) {
+    const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
     const tl = ri.title.toLowerCase();
-    if (tl.includes('minutes of the federal open market') || tl.includes('fomc minutes')) {
-      const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
-      items.push({ bank: 'FED', source: 'FOMC Minutes (press)', item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method], stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight });
-    } else {
-      const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
-      items.push({ bank: 'FED', source: 'Fed Discount Rate Minutes', item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method], stat_metric: 'Discount rate minutes sentiment', stat_value: sa.value_found, stat_weight: 1.5 });
-    }
+    const src = (tl.includes('discount rate')) ? 'Fed Discount Rate Minutes' : 'FOMC Minutes (press)';
+    items.push({ bank:'FED', source:src, item_date:pub, title:ri.title, url:ri.link, is_statistical:true, hawk_pts:0, dove_pts:0, net_score:sa.net_score, label:sa.label, word_count:0, reasons:[sa.method], stat_metric:sa.metric, stat_value:sa.value_found, stat_weight:sa.weight });
   }
 
   for (const { ri, pub } of commItems) {
     const text = textMap.get(ri.link) || '';
     const score = scoreSentiment(text, ri.title);
-    items.push({ bank: 'FED', source: sourceLabel, item_date: pub, title: ri.title, url: ri.link, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
+    items.push({ bank:'FED', source:sourceLabel, item_date:pub, title:ri.title, url:ri.link, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
   }
   return items;
 }
-
-const REGIONAL_FED_FEEDS: [string,string][] = [
-  ['SF Fed', 'https://www.frbsf.org/feed/'],
-];
 
 async function parseRegionalFed(cutoffStr:string, fetchText:boolean):Promise<SentimentItem[]> {
   const items:SentimentItem[] = [];
-  for (const [fedName, feedUrl] of REGIONAL_FED_FEEDS) {
-    try {
-      const resp = await safeFetch(feedUrl, 8000);
-      if (!resp || !resp.ok) continue;
-      let xml = await resp.text();
-      xml = xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
-      const rssItems = parseXmlItems(xml).filter(ri => {
-        const pub = parseRssDate(ri.pubDate);
-        return pub && pub >= cutoffStr;
-      }).slice(0, 5);
-      const urls = fetchText ? rssItems.map(ri => ri.link).filter(Boolean) : [];
-      const textMap = await batchFetchTexts(urls, 3);
-      for (const ri of rssItems) {
-        const pub = parseRssDate(ri.pubDate)!;
-        const text = textMap.get(ri.link) || '';
-        const score = scoreSentiment(text, ri.title);
-        items.push({ bank: 'FED', source: fedName + ' Speech', item_date: pub, title: `[${fedName}] ${ri.title}`, url: ri.link, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
-      }
-    } catch(_e) { /* skip */ }
-  }
+  try {
+    const resp = await safeFetch('https://www.frbsf.org/feed/', 8000);
+    if (!resp || !resp.ok) return items;
+    let xml = await resp.text();
+    xml = xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
+    const rssItems = parseXmlItems(xml).filter(ri => { const pub = parseRssDate(ri.pubDate); return pub && pub >= cutoffStr; }).slice(0, 5);
+    const urls = fetchText ? rssItems.map(ri => ri.link).filter(Boolean) : [];
+    const textMap = await batchFetchTexts(urls, 3);
+    for (const ri of rssItems) {
+      const pub = parseRssDate(ri.pubDate)!;
+      const text = textMap.get(ri.link) || '';
+      const score = scoreSentiment(text, ri.title);
+      items.push({ bank:'FED', source:'SF Fed Speech', item_date:pub, title:`[SF Fed] ${ri.title}`, url:ri.link, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
+    }
+  } catch(_e) { /* skip */ }
   return items;
 }
 
-async function fetchFedData(daysBack:number=60, fetchText:boolean=true):Promise<SentimentItem[]> {
+async function fetchFedData(daysBack=60, fetchText=true):Promise<SentimentItem[]> {
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - daysBack);
   const cutoffStr = cutoff.toISOString().split('T')[0];
   const items:SentimentItem[] = [];
 
-  console.log('Fed: fetching FOMC calendar...');
-  const calHtml = await fetchFomcCalendarHtml();
-
-  console.log('Fed: fetching RSS feeds in parallel...');
-  const [speechesResult, testimonyResult, pressResult, regionalResult] = await Promise.allSettled([
+  console.log('Fed: fetching FOMC calendar + RSS in parallel...');
+  const [calResult, speechesResult, testimonyResult, pressResult, regionalResult] = await Promise.allSettled([
+    fetchFomcCalendarHtml(),
     parseBoardRss('https://www.federalreserve.gov/feeds/speeches.xml', 'Fed Speech', 'speeches', cutoffStr, 20, fetchText),
     parseBoardRss('https://www.federalreserve.gov/feeds/testimony.xml', 'Fed Testimony', 'testimony', cutoffStr, 15, fetchText),
     parseBoardRss('https://www.federalreserve.gov/feeds/press_all.xml', 'Fed Press', 'press', cutoffStr, 20, fetchText),
     parseRegionalFed(cutoffStr, fetchText),
   ]);
-  if (speechesResult.status === 'fulfilled') { items.push(...speechesResult.value); console.log(`Fed: ${speechesResult.value.length} speeches`); }
-  if (testimonyResult.status === 'fulfilled') { items.push(...testimonyResult.value); console.log(`Fed: ${testimonyResult.value.length} testimony`); }
-  if (pressResult.status === 'fulfilled') { items.push(...pressResult.value); console.log(`Fed: ${pressResult.value.length} press`); }
-  if (regionalResult.status === 'fulfilled') { items.push(...regionalResult.value); console.log(`Fed: ${regionalResult.value.length} regional`); }
 
+  if (speechesResult.status === 'fulfilled') { items.push(...speechesResult.value); console.log(`Fed speeches: ${speechesResult.value.length}`); }
+  if (testimonyResult.status === 'fulfilled') { items.push(...testimonyResult.value); console.log(`Fed testimony: ${testimonyResult.value.length}`); }
+  if (pressResult.status === 'fulfilled') { items.push(...pressResult.value); console.log(`Fed press: ${pressResult.value.length}`); }
+  if (regionalResult.status === 'fulfilled') { items.push(...regionalResult.value); console.log(`Regional: ${regionalResult.value.length}`); }
+
+  const calHtml = calResult.status === 'fulfilled' ? calResult.value : '';
   if (calHtml) {
     const stmtLinks = parseFomcLinks(calHtml, /href="([^"]*newsevents\/pressreleases\/monetary\d{8}[^"]*)"/gi);
     const recentStmts = stmtLinks.filter(l => l.date >= cutoffStr).slice(0, 3);
@@ -416,18 +395,16 @@ async function fetchFedData(daysBack:number=60, fetchText:boolean=true):Promise<
       for (const { date, url } of recentStmts) {
         const text = stmtTexts.get(url) || '';
         const score = scoreSentiment(text, 'FOMC Statement');
-        items.push({ bank: 'FED', source: 'FOMC Statement', item_date: date, title: `FOMC Statement - ${date}`, url, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
+        items.push({ bank:'FED', source:'FOMC Statement', item_date:date, title:`FOMC Statement - ${date}`, url, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
       }
-      console.log(`Fed: ${recentStmts.length} FOMC statements`);
     }
 
     const minLinks = parseFomcLinks(calHtml, /href="([^"]*fomcminutes\d{8}[^"]*)"/gi);
     const recentMins = minLinks.filter(l => l.date >= cutoffStr).slice(0, 2);
     for (const { date, url } of recentMins) {
       const sa = await analyzeStatRelease(`Minutes of the FOMC meeting ${date}`, url, '', FED_STAT_RULES);
-      items.push({ bank: 'FED', source: 'FOMC Minutes', item_date: date, title: `FOMC Minutes - ${date}`, url, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method], stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight });
+      items.push({ bank:'FED', source:'FOMC Minutes', item_date:date, title:`FOMC Minutes - ${date}`, url, is_statistical:true, hawk_pts:0, dove_pts:0, net_score:sa.net_score, label:sa.label, word_count:0, reasons:[sa.method], stat_metric:sa.metric, stat_value:sa.value_found, stat_weight:sa.weight });
     }
-    console.log(`Fed: ${recentMins.length} FOMC minutes`);
 
     const pcLinks = parseFomcLinks(calHtml, /href="([^"]*fomcpresconf\d{8}[^"]*)"/gi);
     const recentPc = pcLinks.filter(l => l.date >= cutoffStr).slice(0, 2);
@@ -437,47 +414,41 @@ async function fetchFedData(daysBack:number=60, fetchText:boolean=true):Promise<
         const text = pcTexts.get(url) || '';
         if (text.length < 200) continue;
         const score = scoreSentiment(text, `FOMC Press Conference ${date} (Powell)`);
-        items.push({ bank: 'FED', source: 'FOMC Press Conference', item_date: date, title: `FOMC Press Conference - ${date} (Powell)`, url, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
+        items.push({ bank:'FED', source:'FOMC Press Conference', item_date:date, title:`FOMC Press Conference - ${date} (Powell)`, url, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
       }
-      console.log(`Fed: ${recentPc.length} press conferences`);
     }
   }
 
   return items;
 }
 
-async function fetchEcbData(daysBack:number=60, fetchText:boolean=true):Promise<SentimentItem[]> {
+async function fetchEcbData(daysBack=60, fetchText=true):Promise<SentimentItem[]> {
   const items:SentimentItem[] = [];
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - daysBack);
   const cutoffStr = cutoff.toISOString().split('T')[0];
 
   const feeds = [
-    { url: 'https://www.ecb.europa.eu/rss/press.html', label: 'ECB Press', key: 'press' },
-    { url: 'https://www.ecb.europa.eu/rss/blog.html', label: 'ECB Blog', key: 'blog' },
-    { url: 'https://www.ecb.europa.eu/rss/statpress.html', label: 'ECB Stats', key: 'stats' },
+    { url:'https://www.ecb.europa.eu/rss/press.html', label:'ECB Press', key:'press' },
+    { url:'https://www.ecb.europa.eu/rss/blog.html', label:'ECB Blog', key:'blog' },
+    { url:'https://www.ecb.europa.eu/rss/statpress.html', label:'ECB Stats', key:'stats' },
   ];
 
-  const feedResults = await Promise.allSettled(
-    feeds.map(async (feed) => {
-      const resp = await safeFetch(feed.url);
-      if (!resp || !resp.ok) return { feed, xml: '' };
-      return { feed, xml: await resp.text() };
-    })
-  );
+  const feedResults = await Promise.allSettled(feeds.map(async (feed) => {
+    const resp = await safeFetch(feed.url);
+    if (!resp || !resp.ok) return { feed, xml: '' };
+    return { feed, xml: await resp.text() };
+  }));
 
   for (const fr of feedResults) {
     if (fr.status !== 'fulfilled' || !fr.value.xml) continue;
     const { feed, xml } = fr.value;
-    const rssItems = parseXmlItems(xml).filter(ri => {
-      const pub = parseRssDate(ri.pubDate);
-      return pub && pub >= cutoffStr;
-    }).slice(0, 20);
+    const rssItems = parseXmlItems(xml).filter(ri => { const pub = parseRssDate(ri.pubDate); return pub && pub >= cutoffStr; }).slice(0, 20);
 
     if (feed.key === 'stats') {
       for (const ri of rssItems) {
         const pub = parseRssDate(ri.pubDate)!;
         const sa = await analyzeStatRelease(ri.title, ri.link, '', EUROSTAT_RULES);
-        items.push({ bank: 'ECB', source: feed.label, item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method], stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight });
+        items.push({ bank:'ECB', source:feed.label, item_date:pub, title:ri.title, url:ri.link, is_statistical:true, hawk_pts:0, dove_pts:0, net_score:sa.net_score, label:sa.label, word_count:0, reasons:[sa.method], stat_metric:sa.metric, stat_value:sa.value_found, stat_weight:sa.weight });
       }
     } else {
       const urls = fetchText ? rssItems.map(ri => ri.link).filter(Boolean) : [];
@@ -486,11 +457,12 @@ async function fetchEcbData(daysBack:number=60, fetchText:boolean=true):Promise<
         const pub = parseRssDate(ri.pubDate)!;
         const text = textMap.get(ri.link) || '';
         const score = scoreSentiment(text, ri.title);
-        items.push({ bank: 'ECB', source: feed.label, item_date: pub, title: ri.title, url: ri.link, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
+        items.push({ bank:'ECB', source:feed.label, item_date:pub, title:ri.title, url:ri.link, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
       }
     }
   }
 
+  // Eurostat Atom feed
   try {
     const euroUrl = 'https://ec.europa.eu/eurostat/web/main/news/euro-indicators?p_p_id=estatsearchportlet_WAR_estatsearchportlet_INSTANCE_OaTpFrwlabNK&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=atom&p_p_cacheability=cacheLevelPage&_estatsearchportlet_WAR_estatsearchportlet_INSTANCE_OaTpFrwlabNK_pageNumber=1&_estatsearchportlet_WAR_estatsearchportlet_INSTANCE_OaTpFrwlabNK_pageSize=20&_estatsearchportlet_WAR_estatsearchportlet_INSTANCE_OaTpFrwlabNK_sort=lastUpdateDate&_estatsearchportlet_WAR_estatsearchportlet_INSTANCE_OaTpFrwlabNK_collection=CAT_PREREL';
     const resp = await safeFetch(euroUrl);
@@ -501,32 +473,30 @@ async function fetchEcbData(daysBack:number=60, fetchText:boolean=true):Promise<
         const pub = entry.updated ? new Date(entry.updated).toISOString().split('T')[0] : null;
         if (!pub || pub < cutoffStr) continue;
         const sa = await analyzeStatRelease(entry.title, entry.link, entry.summary, EUROSTAT_RULES);
-        items.push({ bank: 'ECB', source: 'Eurostat', item_date: pub, title: entry.title, url: entry.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method], stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight });
+        items.push({ bank:'ECB', source:'Eurostat', item_date:pub, title:entry.title, url:entry.link, is_statistical:true, hawk_pts:0, dove_pts:0, net_score:sa.net_score, label:sa.label, word_count:0, reasons:[sa.method], stat_metric:sa.metric, stat_value:sa.value_found, stat_weight:sa.weight });
       }
     }
   } catch(e) { console.error('Eurostat error:', e); }
 
+  // ECB monetary policy statement
   try {
     const stmtResp = await safeFetch('https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/html/index.en.html');
     if (stmtResp && stmtResp.ok) {
       const html = await stmtResp.text();
       const linkRe = /href="([^"]*(?:ecb\.is|ecb\.mp)[^"]*\.en\.html)"/gi;
-      const stmtLinks:{date:string;url:string;title:string}[] = [];
+      const stmtLinks:{date:string;url:string}[] = [];
       let lm;
       while ((lm = linkRe.exec(html)) !== null) {
         const href = lm[1].startsWith('http') ? lm[1] : 'https://www.ecb.europa.eu' + lm[1];
         const dm = href.match(/(?:is|mp)(\d{2})(\d{2})(\d{2})/);
-        if (dm) {
-          const d = `20${dm[1]}-${dm[2]}-${dm[3]}`;
-          stmtLinks.push({ date: d, url: href, title: 'ECB Monetary Policy Statement' });
-        }
+        if (dm) stmtLinks.push({ date:`20${dm[1]}-${dm[2]}-${dm[3]}`, url:href });
       }
       stmtLinks.sort((a, b) => b.date.localeCompare(a.date));
       if (stmtLinks.length > 0 && stmtLinks[0].date >= cutoffStr) {
-        const { date, url, title } = stmtLinks[0];
+        const { date, url } = stmtLinks[0];
         const text = await fetchPageText(url);
-        const score = scoreSentiment(text, title);
-        items.push({ bank: 'ECB', source: 'ECB Monetary Policy Statement', item_date: date, title, url, is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0 });
+        const score = scoreSentiment(text, 'ECB Monetary Policy Statement');
+        items.push({ bank:'ECB', source:'ECB Monetary Policy Statement', item_date:date, title:'ECB Monetary Policy Statement', url, is_statistical:false, ...score, stat_metric:null, stat_value:null, stat_weight:0 });
       }
     }
   } catch(e) { console.error('ECB statement error:', e); }
@@ -537,7 +507,7 @@ async function fetchEcbData(daysBack:number=60, fetchText:boolean=true):Promise<
 function computeDualScores(items:SentimentItem[]) {
   const comms = items.filter(i => !i.is_statistical);
   function agg(sub:SentimentItem[]) {
-    if (!sub.length) return { avg: 0, n: 0, dist: {} as Record<string,number>, sentiment: 'NEUTRAL' };
+    if (!sub.length) return { avg:0, n:0, dist:{} as Record<string,number>, sentiment:'NEUTRAL' };
     const avg = Math.round(sub.reduce((s, i) => s + i.net_score, 0) / sub.length * 1000) / 1000;
     let sentiment:string;
     if (avg <= -0.5) sentiment = 'STRONGLY DOVISH';
@@ -547,7 +517,7 @@ function computeDualScores(items:SentimentItem[]) {
     else sentiment = 'NEUTRAL';
     const dist:Record<string,number> = {};
     for (const i of sub) dist[i.label] = (dist[i.label] || 0) + 1;
-    return { avg, n: sub.length, dist, sentiment };
+    return { avg, n:sub.length, dist, sentiment };
   }
   return { score_1: agg(comms), score_2: agg(items) };
 }
@@ -563,7 +533,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    const result:Record<string,any> = {};
+    const result:Record<string, any> = {};
 
     if (bank === 'both' || bank === 'FED') {
       console.log('=== Fetching Fed data ===');
@@ -583,24 +553,22 @@ Deno.serve(async (req) => {
 
       try {
         await supabase.from('sentiment_items').delete().eq('bank', 'FED');
-        if (deduped.length > 0) {
-          for (let i = 0; i < deduped.length; i += 50) {
-            await supabase.from('sentiment_items').insert(
-              deduped.slice(i, i + 50).map(item => ({
-                bank: item.bank, source: item.source, item_date: item.item_date,
-                title: item.title, url: item.url, is_statistical: item.is_statistical,
-                hawk_pts: item.hawk_pts, dove_pts: item.dove_pts, net_score: item.net_score,
-                label: item.label, word_count: item.word_count, reasons: item.reasons,
-                stat_metric: item.stat_metric, stat_value: item.stat_value, stat_weight: item.stat_weight,
-              }))
-            );
-          }
+        for (let i = 0; i < deduped.length; i += 50) {
+          await supabase.from('sentiment_items').insert(
+            deduped.slice(i, i + 50).map(item => ({
+              bank:item.bank, source:item.source, item_date:item.item_date,
+              title:item.title, url:item.url, is_statistical:item.is_statistical,
+              hawk_pts:item.hawk_pts, dove_pts:item.dove_pts, net_score:item.net_score,
+              label:item.label, word_count:item.word_count, reasons:item.reasons,
+              stat_metric:item.stat_metric, stat_value:item.stat_value, stat_weight:item.stat_weight,
+            }))
+          );
         }
         await supabase.from('sentiment_scores').insert({
-          bank: 'FED', score_1_avg: fedScores.score_1.avg, score_1_count: fedScores.score_1.n,
-          score_1_label: fedScores.score_1.sentiment, score_1_dist: fedScores.score_1.dist,
-          score_2_avg: fedScores.score_2.avg, score_2_count: fedScores.score_2.n,
-          score_2_label: fedScores.score_2.sentiment, score_2_dist: fedScores.score_2.dist,
+          bank:'FED', score_1_avg:fedScores.score_1.avg, score_1_count:fedScores.score_1.n,
+          score_1_label:fedScores.score_1.sentiment, score_1_dist:fedScores.score_1.dist,
+          score_2_avg:fedScores.score_2.avg, score_2_count:fedScores.score_2.n,
+          score_2_label:fedScores.score_2.sentiment, score_2_dist:fedScores.score_2.dist,
         });
       } catch(e) { console.error('DB store error (FED):', e); }
     }
@@ -617,24 +585,22 @@ Deno.serve(async (req) => {
 
       try {
         await supabase.from('sentiment_items').delete().eq('bank', 'ECB');
-        if (deduped.length > 0) {
-          for (let i = 0; i < deduped.length; i += 50) {
-            await supabase.from('sentiment_items').insert(
-              deduped.slice(i, i + 50).map(item => ({
-                bank: item.bank, source: item.source, item_date: item.item_date,
-                title: item.title, url: item.url, is_statistical: item.is_statistical,
-                hawk_pts: item.hawk_pts, dove_pts: item.dove_pts, net_score: item.net_score,
-                label: item.label, word_count: item.word_count, reasons: item.reasons,
-                stat_metric: item.stat_metric, stat_value: item.stat_value, stat_weight: item.stat_weight,
-              }))
-            );
-          }
+        for (let i = 0; i < deduped.length; i += 50) {
+          await supabase.from('sentiment_items').insert(
+            deduped.slice(i, i + 50).map(item => ({
+              bank:item.bank, source:item.source, item_date:item.item_date,
+              title:item.title, url:item.url, is_statistical:item.is_statistical,
+              hawk_pts:item.hawk_pts, dove_pts:item.dove_pts, net_score:item.net_score,
+              label:item.label, word_count:item.word_count, reasons:item.reasons,
+              stat_metric:item.stat_metric, stat_value:item.stat_value, stat_weight:item.stat_weight,
+            }))
+          );
         }
         await supabase.from('sentiment_scores').insert({
-          bank: 'ECB', score_1_avg: ecbScores.score_1.avg, score_1_count: ecbScores.score_1.n,
-          score_1_label: ecbScores.score_1.sentiment, score_1_dist: ecbScores.score_1.dist,
-          score_2_avg: ecbScores.score_2.avg, score_2_count: ecbScores.score_2.n,
-          score_2_label: ecbScores.score_2.sentiment, score_2_dist: ecbScores.score_2.dist,
+          bank:'ECB', score_1_avg:ecbScores.score_1.avg, score_1_count:ecbScores.score_1.n,
+          score_1_label:ecbScores.score_1.sentiment, score_1_dist:ecbScores.score_1.dist,
+          score_2_avg:ecbScores.score_2.avg, score_2_count:ecbScores.score_2.n,
+          score_2_label:ecbScores.score_2.sentiment, score_2_dist:ecbScores.score_2.dist,
         });
       } catch(e) { console.error('DB store error (ECB):', e); }
     }
