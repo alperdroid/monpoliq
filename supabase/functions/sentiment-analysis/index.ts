@@ -490,7 +490,7 @@ async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2:
       }
     }
   }
-  const scoreResp = await fetch(sbUrl + '/rest/v1/sentiment_scores', {
+  const scoreResp = await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
     method: 'POST', headers: { ...hd, 'Prefer': 'resolution=merge-duplicates' },
     body: JSON.stringify([{
       bank,
@@ -571,12 +571,34 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Persist new items first, then aggregate from FULL DB
-      await persist('FED', fi, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' }, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' });
+      // Persist new items, then aggregate from FULL DB
+      const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+      if (fi.length) {
+        for (let i = 0; i < fi.length; i += 50) {
+          const batch = fi.slice(i, i + 50);
+          await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+            method: 'POST', headers: persistHd,
+            body: JSON.stringify(batch.map(it => ({
+              bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+              url: it.url || '', is_statistical: it.is_statistical,
+              hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+              label: it.label, word_count: it.word_count, reasons: it.reasons,
+              stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+            }))),
+          });
+        }
+      }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
       const s1 = ag(allFedItems.filter(i => !i.is_statistical)), s2 = ag(allFedItems);
-      // Update scores with correct aggregation
-      await persist('FED', [], s1, s2);
+      await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
+        method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify([{
+          bank: 'FED',
+          score_1_avg: s1.avg, score_1_count: s1.n, score_1_label: s1.sentiment, score_1_dist: s1.dist,
+          score_2_avg: s2.avg, score_2_count: s2.n, score_2_label: s2.sentiment, score_2_dist: s2.dist,
+          fetched_at: new Date().toISOString(),
+        }]),
+      });
       result.fed = { items: allFedItems, score_1: s1, score_2: s2 };
       console.log('Fed: ' + allFedItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
@@ -616,11 +638,35 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Persist new items first, then aggregate from FULL DB
-      await persist('ECB', ei, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' }, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' });
+      // Persist new items, then aggregate from FULL DB
+      if (ei.length) {
+        const persistHd2 = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+        for (let i = 0; i < ei.length; i += 50) {
+          const batch = ei.slice(i, i + 50);
+          await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+            method: 'POST', headers: persistHd2,
+            body: JSON.stringify(batch.map(it => ({
+              bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+              url: it.url || '', is_statistical: it.is_statistical,
+              hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+              label: it.label, word_count: it.word_count, reasons: it.reasons,
+              stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+            }))),
+          });
+        }
+      }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
       const s1 = ag(allEcbItems.filter(i => !i.is_statistical)), s2 = ag(allEcbItems);
-      await persist('ECB', [], s1, s2);
+      const persistHd3 = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' };
+      await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
+        method: 'POST', headers: persistHd3,
+        body: JSON.stringify([{
+          bank: 'ECB',
+          score_1_avg: s1.avg, score_1_count: s1.n, score_1_label: s1.sentiment, score_1_dist: s1.dist,
+          score_2_avg: s2.avg, score_2_count: s2.n, score_2_label: s2.sentiment, score_2_dist: s2.dist,
+          fetched_at: new Date().toISOString(),
+        }]),
+      });
       result.ecb = { items: allEcbItems, score_1: s1, score_2: s2 };
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
