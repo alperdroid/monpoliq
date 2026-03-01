@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { PredictionOutput, CurrencyPrediction } from '@/types/central-bank';
+import type { TreasuryPrediction } from '@/lib/api/predictions';
 import { ProbabilityBar } from '@/components/analytics/ProbabilityBar';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 
@@ -7,17 +8,19 @@ interface PredictionPanelProps {
   fedPrediction: PredictionOutput;
   ecbPrediction: PredictionOutput;
   currencyPrediction: CurrencyPrediction;
+  treasuryPrediction?: TreasuryPrediction;
   fedReasoning?: string;
   ecbReasoning?: string;
   eurusdReasoning?: string;
+  us10yReasoning?: string;
   generatedAt?: string;
   dataSummary?: { fed_comms_count: number; ecb_comms_count: number; fed_stats_count: number; ecb_stats_count: number };
   className?: string;
 }
 
 export function PredictionPanel({
-  fedPrediction, ecbPrediction, currencyPrediction,
-  fedReasoning, ecbReasoning, eurusdReasoning,
+  fedPrediction, ecbPrediction, currencyPrediction, treasuryPrediction,
+  fedReasoning, ecbReasoning, eurusdReasoning, us10yReasoning,
   generatedAt, dataSummary,
   className,
 }: PredictionPanelProps) {
@@ -100,6 +103,26 @@ export function PredictionPanel({
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed italic">{eurusdReasoning}</p>
           )}
         </div>
+
+        {/* US 10Y Treasury */}
+        {treasuryPrediction && (
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium">{treasuryPrediction.instrument}</span>
+              <div className="flex items-center gap-1.5">
+                <SignalBadge
+                  label={treasuryPrediction.yield_bias.toUpperCase()}
+                  variant={treasuryPrediction.yield_bias === 'higher' ? 'hawkish' : treasuryPrediction.yield_bias === 'lower' ? 'dovish' : 'neutral'}
+                  size="md"
+                />
+                <span className="text-[10px] text-muted-foreground font-mono">str: {(treasuryPrediction.signal_strength * 100).toFixed(0)}%</span>
+              </div>
+            </div>
+            {us10yReasoning && (
+              <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed italic">{us10yReasoning}</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

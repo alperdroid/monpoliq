@@ -1,18 +1,33 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { ExpandableTitle } from '@/components/analytics/ExpandableTitle';
 import {
-  getCachedSentimentScores,
   getStatisticalItems,
   runSentimentAnalysis,
   type SentimentItem,
-  type CachedSentimentScore,
 } from '@/lib/api/sentiment';
-import { RefreshCw, ExternalLink, Database, BarChart3 } from 'lucide-react';
+import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+
+/** Compute 30-day average from items (stats only) */
+function compute30dStatScore(items: SentimentItem[], bank: string) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cs = cutoff.toISOString().split('T')[0];
+  const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
+  if (!recent.length) return null;
+  return {
+    avg: Math.round(recent.reduce((s, i) => s + i.net_score, 0) / recent.length * 1000) / 1000,
+    count: recent.length,
+    label: (() => {
+      const avg = recent.reduce((s, i) => s + i.net_score, 0) / recent.length;
+      return avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
+    })(),
+  };
+}
 
 const StatisticalData = () => {
   const [bankFilter, setBankFilter] = useState<'FED' | 'ECB' | undefined>(undefined);
@@ -23,15 +38,17 @@ const StatisticalData = () => {
     queryFn: () => getStatisticalItems(bankFilter),
   });
 
-  const { data: scores = [] } = useQuery({
-    queryKey: ['sentiment-scores'],
-    queryFn: getCachedSentimentScores,
+  // Fetch ALL stat items (unfiltered) for score computation
+  const { data: allStatItems = [] } = useQuery({
+    queryKey: ['stat-items-all'],
+    queryFn: () => getStatisticalItems(),
   });
 
   const refreshMutation = useMutation({
     mutationFn: () => runSentimentAnalysis('both', 60, false),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stat-items'] });
+      queryClient.invalidateQueries({ queryKey: ['stat-items-all'] });
       queryClient.invalidateQueries({ queryKey: ['comm-items'] });
       queryClient.invalidateQueries({ queryKey: ['sentiment-scores'] });
       toast.success('Sentiment analysis complete');
@@ -41,8 +58,8 @@ const StatisticalData = () => {
     },
   });
 
-  const fedScore = scores.find(s => s.bank === 'FED');
-  const ecbScore = scores.find(s => s.bank === 'ECB');
+  const fedStatScore = useMemo(() => compute30dStatScore(allStatItems, 'FED'), [allStatItems]);
+  const ecbStatScore = useMemo(() => compute30dStatScore(allStatItems, 'ECB'), [allStatItems]);
 
   const filteredItems = bankFilter
     ? statItems.filter(i => i.bank === bankFilter)
@@ -54,7 +71,7 @@ const StatisticalData = () => {
         <div>
           <h1 className="text-lg font-semibold">Statistical Releases</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score 2 — economic data from FRED, Eurostat, FOMC minutes & statistical publications
+            Score based on statistical data only (FRED, Eurostat, FOMC minutes) — 30-day window
           </p>
         </div>
         <Button
@@ -69,10 +86,10 @@ const StatisticalData = () => {
         </Button>
       </div>
 
-      {/* Score 2 Summary Cards */}
+      {/* Score Cards — Stats Only */}
       <div className="grid lg:grid-cols-2 gap-4">
-        <StatScoreCard bank="FED" label="Federal Reserve" score={fedScore} />
-        <StatScoreCard bank="ECB" label="European Central Bank" score={ecbScore} />
+        <StatScoreCard bank="FED" label="Federal Reserve" score={fedStatScore} />
+        <StatScoreCard bank="ECB" label="European Central Bank" score={ecbStatScore} />
       </div>
 
       {/* Filter */}
@@ -115,7 +132,7 @@ const StatisticalData = () => {
               )}
               {!loadingItems && filteredItems.length === 0 && (
                 <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">
-                  No data yet. Click "Refresh Data" to run the sentiment analysis algorithm.
+                  No data yet. Click "Refresh Data" to run the analysis.
                 </td></tr>
               )}
               {filteredItems.map((item, idx) => (
@@ -169,35 +186,30 @@ const StatisticalData = () => {
 function StatScoreCard({ bank, label, score }: {
   bank: string;
   label: string;
-  score?: CachedSentimentScore;
+  score: { avg: number; count: number; label: string } | null;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <div className="flex items-center gap-2">
         <div className={cn('w-2 h-2 rounded-full', bank === 'FED' ? 'bg-primary' : 'bg-prediction')} />
         <h3 className="text-sm font-semibold">{label}</h3>
-        {score && (
-          <span className="text-[10px] text-muted-foreground font-mono ml-auto">
-            Updated {new Date(score.fetched_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-          </span>
-        )}
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No scores yet. Run analysis to populate.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No statistical data in the last 30 days. Run analysis to populate.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Score 2 — Comms + Statistical Data</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data Only (30-Day)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
-            score.score_2_avg > 0.05 ? 'text-signal-hawkish' : score.score_2_avg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+            score.avg > 0.05 ? 'text-signal-hawkish' : score.avg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
           )}>
-            {score.score_2_avg > 0 ? '+' : ''}{Number(score.score_2_avg).toFixed(3)}
+            {score.avg > 0 ? '+' : ''}{score.avg.toFixed(3)}
           </p>
-          <p className="text-[10px] text-muted-foreground">{score.score_2_label}</p>
-          <p className="text-[10px] text-muted-foreground">{score.score_2_count} items</p>
+          <p className="text-[10px] text-muted-foreground">{score.label}</p>
+          <p className="text-[10px] text-muted-foreground">{score.count} items (30d)</p>
         </div>
       )}
     </div>
