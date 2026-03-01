@@ -1,23 +1,12 @@
-// ── Sentiment Analysis v2.3 — Full Monolithic (POST-based) ──
-// CRITICAL: Do NOT use new URL(req.url) — crashes this edge runtime.
+// ── Sentiment Analysis v3.0 — AI-Powered (Gemini) + Cached Scoring ──
+// Communication items are scored by Gemini AI for contextual understanding.
+// Statistical items use numeric formula scoring (unchanged).
+// Already-scored items are loaded from DB and skipped.
+
 const CH = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-// ── Hawkish / Dovish keyword lists ──
-const HW = ['rate hike','tightening','hawkish','restrictive','overheating','persistent inflation','price pressures','strong demand','upside risks to inflation','insufficiently restrictive','further tightening','remain vigilant','data dependent','not yet convinced','more work to do','premature to','too early to declare victory'];
-const DW = ['rate cut','easing','dovish','accommodative','disinflation','slowing','weaker growth','downside risks','disinflationary','progress on inflation','cutting rates','lower rates','policy pivot','sufficiently restrictive','confident','well positioned','normalization','recalibrate','appropriate to reduce','gradual reduction'];
-
-// ── Directional phrase scoring (context-aware, ±5 pts) ──
-const DP: Record<string,{h:string[];d:string[]}> = {
-  'wage growth':{h:['accelerat','rising','elevated','strong','above','persistent','robust'],d:['moderat','eased','easing','slowing','soften','deceler','cooling']},
-  'inflation':{h:['above target','persistently','sticky','broad-based','accelerat','elevated','upside'],d:['falling','declining','easing','retreating','moderat','lower','disinflation','progress','moving toward']},
-  'growth':{h:['robust','strong','solid','resilient','accelerat','above trend'],d:['slowing','contract','recession','weak','stagnant','deteriorat','modest','below trend']},
-  'unemployment':{h:['historic low','tight','below natural','record low','strong labor'],d:['rising','elevated','increasing','higher','deteriorat','softening','loosening']},
-  'labor market':{h:['tight','strong','robust','resilient','demand exceeds'],d:['cooling','softening','rebalancing','easing','normalizing','loosening']},
-  'financial conditions':{h:['loose','accommodative','easy','stimulative'],d:['tight','restrictive','tightened','constraining']},
 };
 
 interface It {
@@ -27,48 +16,7 @@ interface It {
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
 }
 
-// ── Non-monetary-policy topic keywords — speeches about these are structural, not policy signals ──
-const NON_MONETARY_TOPICS = /\b(digital euro|cbdc|cyber|climate change|sustainability|green bond|financial stability|banking supervision|prudential|payment system|market infrastructure|competition|competitiveness|turning size into scale|single market|capital markets union|european model|geopolit|defence|sovereignty|enlargement|education|innovation ecosystem)\b/i;
-
-// ── Sentiment scoring function — works on full text ──
-function sc(text: string, title = '') {
-  const c = (title + ' ' + text).toLowerCase();
-
-  // If the speech is primarily about non-monetary structural topics, apply a large dampening factor
-  const isStructural = NON_MONETARY_TOPICS.test(title.toLowerCase());
-  // Check how much monetary-policy content is actually present
-  const monetarySignals = ['interest rate','monetary policy','inflation target','price stability','rate decision','policy stance','rate path','quantitative','balance sheet','forward guidance'];
-  const monetaryHits = monetarySignals.filter(s => c.includes(s)).length;
-  // Structural speech with few monetary references → dampen heavily
-  const dampening = isStructural && monetaryHits < 3 ? 0.15 : 1.0;
-
-  let hp = 0, dp = 0;
-  const rs: string[] = [];
-  for (const w of HW) if (c.includes(w)) { hp++; rs.push('h:' + w); }
-  for (const w of DW) if (c.includes(w)) { dp++; rs.push('d:' + w); }
-  for (const [p, m] of Object.entries(DP)) {
-    let i = c.indexOf(p);
-    while (i !== -1) {
-      const ctx = c.slice(Math.max(0, i - 120), Math.min(c.length, i + p.length + 120));
-      const hh = m.h.some(x => ctx.includes(x)), dd = m.d.some(x => ctx.includes(x));
-      if (hh && !dd) { hp += 5; rs.push('dh:' + p); }
-      else if (dd && !hh) { dp += 5; rs.push('dd:' + p); }
-      i = c.indexOf(p, i + 1);
-    }
-  }
-  const wc = Math.max(c.split(/\s+/).length, 1);
-  const rawNet = ((hp - dp) / wc) * 100;
-  const net = rawNet * dampening;
-  if (isStructural && dampening < 1) rs.push('dampened:structural-topic');
-  return {
-    hawk_pts: hp, dove_pts: dp,
-    net_score: Math.round(net * 1000) / 1000,
-    label: net > 0.05 ? 'hawkish' : net < -0.05 ? 'dovish' : 'neutral',
-    word_count: wc, reasons: rs,
-  };
-}
-
-// ── Statistical value scoring ──
+// ── Statistical value scoring (unchanged) ──
 function sv(v:number, ht:number, dt:number, dir:string, w:number, met:string) {
   let raw: number, lb: string;
   const B = 0.15;
@@ -96,67 +44,41 @@ async function sf(url: string, ms = 15000): Promise<Response | null> {
 }
 
 // ── Extract readable text from HTML ──
-// Uses index-based extraction to handle nested divs properly
 function extractText(html: string): string {
-  // Remove script/style tags
   let t = html.replace(/<script[\s\S]*?<\/script>/gi, '');
   t = t.replace(/<style[\s\S]*?<\/style>/gi, '');
-
-  // Try to find main content by locating the start tag and tracking nesting
   const contentMarkers = [
     { pattern: /<div[^>]*id="article"[^>]*>/i, tag: 'div' },
     { pattern: /<div[^>]*id="content"[^>]*>/i, tag: 'div' },
     { pattern: /<article[^>]*>/i, tag: 'article' },
     { pattern: /<main[^>]*>/i, tag: 'main' },
   ];
-
   for (const marker of contentMarkers) {
     const startMatch = t.match(marker.pattern);
     if (!startMatch || startMatch.index === undefined) continue;
-
-    // Find the matching closing tag by tracking nesting depth
     const startIdx = startMatch.index + startMatch[0].length;
     const openRe = new RegExp(`<${marker.tag}[\\s>]`, 'gi');
     const closeRe = new RegExp(`</${marker.tag}>`, 'gi');
     let depth = 1;
-    let pos = startIdx;
     const sub = t.slice(startIdx);
-    
-    // Walk through all open/close tags to find the matching close
     const allTags: { idx: number; isOpen: boolean }[] = [];
     let m2;
-    openRe.lastIndex = 0;
-    closeRe.lastIndex = 0;
+    openRe.lastIndex = 0; closeRe.lastIndex = 0;
     while ((m2 = openRe.exec(sub)) !== null) allTags.push({ idx: m2.index, isOpen: true });
     while ((m2 = closeRe.exec(sub)) !== null) allTags.push({ idx: m2.index, isOpen: false });
     allTags.sort((a, b) => a.idx - b.idx);
-    
     for (const tag of allTags) {
       if (tag.isOpen) depth++;
-      else {
-        depth--;
-        if (depth === 0) {
-          const content = sub.slice(0, tag.idx);
-          if (content.length > 200) {
-            t = content;
-            break;
-          }
-        }
-      }
+      else { depth--; if (depth === 0) { const content = sub.slice(0, tag.idx); if (content.length > 200) { t = content; break; } } }
     }
     if (depth === 0 || t.length < html.length / 2) break;
   }
-
-  // Strip remaining HTML tags
   t = t.replace(/<[^>]+>/g, ' ');
-  // Decode entities
   t = t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
-  // Normalize whitespace
   t = t.replace(/\s+/g, ' ').trim();
   return t;
 }
 
-// ── Fetch page text content ──
 async function fetchPageText(url: string): Promise<string> {
   try {
     const r = await sf(url, 12000);
@@ -199,9 +121,123 @@ function xn(title: string): number | null {
   if (!m) return null;
   let v = parseFloat(m[1]);
   if (isNaN(v)) return null;
-  // If title says "down by X%" or "fell by X%", make the value negative
   if (v > 0 && /\b(down|fell|drop|decrease|decline|contract)\b/.test(tl)) v = -v;
   return v;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── AI-POWERED SCORING via Gemini (Lovable AI Gateway) ──
+// ══════════════════════════════════════════════════════════════
+
+const AI_SCORING_PROMPT = `You are a senior monetary policy analyst. Score this central bank communication on the hawkish-dovish spectrum.
+
+SCORING RULES:
+- Score from -1.0 (extremely dovish) to +1.0 (extremely hawkish), with 0.0 being neutral
+- DOVISH signals: rate cuts, easing, weak growth concerns, disinflation progress, labor market softening, dissent favoring cuts, downside risks
+- HAWKISH signals: rate hikes, tightening, inflation persistence, strong economy, labor market tightness, upside risks to inflation
+- NEUTRAL: administrative matters, non-monetary topics (digital euro, climate, banking supervision, counterfeit notes, appointments)
+- If the speech is NOT about monetary policy (structural reforms, digital currency, climate), score near 0.0
+- Pay attention to CONTEXT: "inflation is falling" is dovish, "inflation is persistent" is hawkish
+- Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish even if they're traditionally hawkish
+- Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
+
+Respond with ONLY a JSON object (no markdown):
+{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>"}`;
+
+interface AIScore {
+  score: number;
+  label: string;
+  reasoning: string;
+}
+
+async function scoreWithAI(
+  title: string,
+  text: string,
+  bank: string,
+  apiKey: string,
+): Promise<AIScore> {
+  // Truncate text to ~3000 chars to save tokens while preserving key content
+  const truncated = text.length > 3000 ? text.slice(0, 1500) + '\n...[middle truncated]...\n' + text.slice(-1500) : text;
+
+  const userMsg = `Bank: ${bank}
+Title: ${title}
+Content: ${truncated}`;
+
+  try {
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [
+          { role: 'system', content: AI_SCORING_PROMPT },
+          { role: 'user', content: userMsg },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      console.error('AI scoring failed:', resp.status);
+      return { score: 0, label: 'neutral', reasoning: 'AI scoring unavailable' };
+    }
+
+    const data = await resp.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    const parsed = JSON.parse(content);
+    const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
+    const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
+
+    return {
+      score: Math.round(score * 1000) / 1000,
+      label,
+      reasoning: parsed.reasoning || '',
+    };
+  } catch (e) {
+    console.error('AI score parse error:', e);
+    return { score: 0, label: 'neutral', reasoning: 'AI scoring error' };
+  }
+}
+
+// Score a batch of communication items with AI (sequential to respect rate limits)
+async function scoreBatchWithAI(
+  items: { title: string; text: string; bank: string }[],
+  apiKey: string,
+): Promise<AIScore[]> {
+  const results: AIScore[] = [];
+  // Process in batches of 3 with small delays between batches
+  for (let i = 0; i < items.length; i += 3) {
+    const batch = items.slice(i, i + 3);
+    const batchResults = await Promise.allSettled(
+      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey))
+    );
+    for (const r of batchResults) {
+      results.push(r.status === 'fulfilled' ? r.value : { score: 0, label: 'neutral', reasoning: 'error' });
+    }
+    // Small delay between batches to avoid rate limiting
+    if (i + 3 < items.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  return results;
+}
+
+// ── Load existing scored items from DB to skip re-scoring ──
+async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Promise<Set<string>> {
+  try {
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
+      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
+    );
+    if (!resp.ok) return new Set();
+    const data = await resp.json();
+    // Create a set of "title|date" keys for deduplication
+    return new Set((data || []).map((d: any) => `${d.title}|${d.item_date}`));
+  } catch { return new Set(); }
 }
 
 // ── FRED ──
@@ -245,73 +281,47 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
   return res.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<It>).value);
 }
 
-// ── FOMC Minutes — iterate through known meeting dates ──
-async function fetchFomcMinutes(cutoffDate: string): Promise<It[]> {
-  const items: It[] = [];
+// ── FOMC Minutes ──
+async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+  const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
   const cutoff = new Date(cutoffDate);
-  
-  // Generate potential FOMC meeting dates (typically every 6 weeks, Tue-Wed)
-  // We check every Wednesday in the lookback period
-  const candidates: Date[] = [];
-  const d = new Date(now);
-  while (d >= cutoff) {
-    // FOMC meets ~8 times/year. Check all dates.
-    candidates.push(new Date(d));
-    d.setDate(d.getDate() - 1);
-  }
-  
-  // Known FOMC meeting end-dates for 2025-2026 (public schedule)
   const knownDates = [
     '20260128','20260318','20260506','20260617','20260729','20260917','20261028','20261216',
     '20250129','20250319','20250507','20250618','20250730','20250917','20251029','20251210',
   ];
-  
-  // Filter to dates within our lookback window
   const relevantDates = knownDates.filter(ds => {
     const y = parseInt(ds.slice(0, 4)), m = parseInt(ds.slice(4, 6)) - 1, day = parseInt(ds.slice(6, 8));
     const meetDate = new Date(y, m, day);
     return meetDate >= cutoff && meetDate <= now;
   });
-
   console.log('FOMC: checking ' + relevantDates.length + ' known meeting dates');
-
-  // Try each date — minutes are published ~3 weeks after meeting
   const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
     const url = 'https://www.federalreserve.gov/monetarypolicy/fomcminutes' + dateStr + '.htm';
     const r = await sf(url, 12000);
     if (!r || !r.ok) return null;
     const html = await r.text();
     if (html.toLowerCase().includes('page not found') || html.length < 2000) return null;
-    
     const text = extractText(html);
     if (text.length < 500) return null;
-    
     console.log('FOMC Minutes found: ' + dateStr + ' (' + text.length + ' chars)');
-    const s = sc(text, 'FOMC Minutes ' + dateStr);
     const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
-    
-    return {
-      bank: 'FED', source: 'FOMC Minutes', item_date: y + '-' + m + '-' + day,
-      title: 'FOMC Minutes — ' + m + '/' + day + '/' + y, url,
-      is_statistical: false, ...s,
-      stat_metric: null, stat_value: null, stat_weight: 0,
-    } as It;
+    return { title: 'FOMC Minutes — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url };
   }));
-
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value) items.push(r.value);
   }
   return items;
 }
 
-// ── RSS feeds with full text fetching ──
+// ── RSS feeds — returns raw items with text (scoring happens later via AI) ──
 const SKIP = new Set(['enforcement actions', 'orders on banking applications', 'other announcements', 'banking and consumer regulatory policy', 'community development']);
-// Skip non-FOMC minutes items that contain "minutes" in the title (e.g. advisory committee minutes)
 const MINUTES_SKIP = /minutes/i;
 
-async function fetchRss(cs: string, bank: string): Promise<It[]> {
-  const items: It[] = [];
+interface RawComm { title: string; text: string; date: string; url: string; source: string; bank: string }
+
+async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
+  const items: RawComm[] = [];
   const feeds = bank === 'FED'
     ? [
         { url: 'https://www.federalreserve.gov/feeds/speeches.xml', lbl: 'Fed Speech' },
@@ -329,7 +339,6 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
     if (!r || !r.ok) return [];
     let xml = await r.text();
     xml = xml.replace(new RegExp('&(?!amp;|lt;|gt;|quot;|apos;|#)', 'g'), '&amp;');
-    // Parse as RSS first, fallback to Atom (ECB speeches use Atom format)
     let rssItems = pi(xml).map(ri => ({ title: ri.title, link: ri.link, pubDate: ri.pubDate, cat: ri.cat }));
     if (!rssItems.length) {
       rssItems = ae(xml).map(e => ({ title: e.title, link: e.link, pubDate: e.updated, cat: '' }));
@@ -338,13 +347,11 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
       const p = td(ri.pubDate);
       if (!p || p < cs) return false;
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
-      // Exclude any non-FOMC "minutes" items (advisory council minutes etc.)
       if (bank === 'FED' && MINUTES_SKIP.test(ri.title)) return false;
       return true;
-    }).slice(0, 50); // increased for 1-year lookback
+    }).slice(0, 50);
 
-    // Fetch full text for each item (in batches of 5 to avoid overwhelming)
-    const scored: It[] = [];
+    const rawComms: RawComm[] = [];
     for (let i = 0; i < filtered.length; i += 5) {
       const batch = filtered.slice(i, i + 5);
       const textResults = await Promise.allSettled(
@@ -354,23 +361,17 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
         const ri = batch[j];
         const pub = td(ri.pubDate)!;
         const pageText = textResults[j].status === 'fulfilled' ? textResults[j].value : '';
-        const s = sc(pageText, ri.title);
-        scored.push({
-          bank, source: f.lbl, item_date: pub,
-          title: ri.title, url: ri.link,
-          is_statistical: false, ...s,
-          stat_metric: null, stat_value: null, stat_weight: 0,
-        } as It);
+        rawComms.push({ title: ri.title, text: pageText, date: pub, url: ri.link, source: f.lbl, bank });
       }
     }
-    return scored;
+    return rawComms;
   }));
 
   for (const r of res) if (r.status === 'fulfilled') items.push(...r.value);
   return items;
 }
 
-// ── ECB Stats + Eurostat ──
+// ── ECB Stats + Eurostat (unchanged — formula scoring) ──
 interface SR { pattern: string; met: string; ht: number | null; dt: number | null; dir: string; w: number }
 const EU: SR[] = [
   { pattern: 'inflation', met: 'HICP', ht: 2.5, dt: 1.8, dir: 'hh', w: 3 },
@@ -428,7 +429,6 @@ async function fetchEcbStats(cs: string): Promise<It[]> {
 
 // ── Aggregation (excludes zero-score neutral items) ──
 function ag(sub: It[]) {
-  // Filter out items with exactly 0.000 net_score — they add noise without signal
   const scored = sub.filter(i => Math.abs(i.net_score) > 0.001);
   if (!scored.length) return { avg: 0, n: 0, dist: {} as Record<string, number>, sentiment: 'NEUTRAL' };
   const avg = Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
@@ -473,22 +473,65 @@ Deno.serve(async (req) => {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const bank = body.bank || 'both';
     const days = body.days || 365;
-    console.log('SA v2.3: bank=' + bank + ' days=' + days);
+    console.log('SA v3.0 (AI-scored): bank=' + bank + ' days=' + days);
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
     const fk = Deno.env.get('FRED_API_KEY') || '';
+    const aiKey = Deno.env.get('LOVABLE_API_KEY') || '';
+    const sbUrl = Deno.env.get('SUPABASE_URL')!;
+    const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const result: Record<string, any> = {};
 
     if (bank === 'both' || bank === 'FED') {
-      const [fr, rs, fomc] = await Promise.allSettled([
+      // Load existing items from DB
+      const existing = await loadExistingItems('FED', sbUrl, sbKey);
+      console.log('FED: ' + existing.size + ' existing items in DB');
+
+      const [fr, rawComms, fomcRaw] = await Promise.allSettled([
         fk ? fetchFred(fk, days) : Promise.resolve([]),
-        fetchRss(cs, 'FED'),
+        fetchRssRaw(cs, 'FED'),
         fetchFomcMinutes(cs),
       ]);
+
       const fi: It[] = [];
       if (fr.status === 'fulfilled') fi.push(...fr.value);
-      if (rs.status === 'fulfilled') fi.push(...rs.value);
-      if (fomc.status === 'fulfilled') fi.push(...fomc.value);
+
+      // Filter to only NEW communication items (not already in DB)
+      const allRawComms: RawComm[] = [];
+      if (rawComms.status === 'fulfilled') allRawComms.push(...rawComms.value);
+      if (fomcRaw.status === 'fulfilled') {
+        for (const m of fomcRaw.value) {
+          allRawComms.push({ title: m.title, text: m.text, date: m.date, url: m.url, source: 'FOMC Minutes', bank: 'FED' });
+        }
+      }
+
+      const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
+      console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
+
+      // Score new items with AI
+      if (newComms.length > 0 && aiKey) {
+        const scores = await scoreBatchWithAI(
+          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank })),
+          aiKey,
+        );
+        for (let i = 0; i < newComms.length; i++) {
+          const c = newComms[i];
+          const s = scores[i];
+          fi.push({
+            bank: 'FED', source: c.source, item_date: c.date,
+            title: c.title, url: c.url,
+            is_statistical: false,
+            hawk_pts: s.score > 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+            dove_pts: s.score < 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+            net_score: s.score,
+            label: s.label,
+            word_count: c.text.split(/\s+/).length,
+            reasons: ['ai:' + s.reasoning],
+            stat_metric: null, stat_value: null, stat_weight: 0,
+          });
+        }
+      }
+
       const s1 = ag(fi.filter(i => !i.is_statistical)), s2 = ag(fi);
       await persist('FED', fi, s1, s2);
       result.fed = { items: fi, score_1: s1, score_2: s2 };
@@ -496,10 +539,40 @@ Deno.serve(async (req) => {
     }
 
     if (bank === 'both' || bank === 'ECB') {
-      const [er, st] = await Promise.allSettled([fetchRss(cs, 'ECB'), fetchEcbStats(cs)]);
+      const existing = await loadExistingItems('ECB', sbUrl, sbKey);
+      console.log('ECB: ' + existing.size + ' existing items in DB');
+
+      const [rawComms, st] = await Promise.allSettled([fetchRssRaw(cs, 'ECB'), fetchEcbStats(cs)]);
       const ei: It[] = [];
-      if (er.status === 'fulfilled') ei.push(...er.value);
       if (st.status === 'fulfilled') ei.push(...st.value);
+
+      const allRawComms: RawComm[] = rawComms.status === 'fulfilled' ? rawComms.value : [];
+      const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
+      console.log('ECB: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
+
+      if (newComms.length > 0 && aiKey) {
+        const scores = await scoreBatchWithAI(
+          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank })),
+          aiKey,
+        );
+        for (let i = 0; i < newComms.length; i++) {
+          const c = newComms[i];
+          const s = scores[i];
+          ei.push({
+            bank: 'ECB', source: c.source, item_date: c.date,
+            title: c.title, url: c.url,
+            is_statistical: false,
+            hawk_pts: s.score > 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+            dove_pts: s.score < 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+            net_score: s.score,
+            label: s.label,
+            word_count: c.text.split(/\s+/).length,
+            reasons: ['ai:' + s.reasoning],
+            stat_metric: null, stat_value: null, stat_weight: 0,
+          });
+        }
+      }
+
       const s1 = ag(ei.filter(i => !i.is_statistical)), s2 = ag(ei);
       await persist('ECB', ei, s1, s2);
       result.ecb = { items: ei, score_1: s1, score_2: s2 };
