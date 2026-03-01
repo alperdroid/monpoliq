@@ -296,7 +296,7 @@ function parseRssDate(text: string): string | null {
     const d = new Date(text);
     if (isNaN(d.getTime())) return null;
     return d.toISOString().split('T')[0];
-  } catch { return null; }
+  } catch (_e) { return null; }
 }
 
 // ============================================================
@@ -323,7 +323,7 @@ async function fetchPageText(url: string): Promise<string> {
     if (!resp.ok) return '';
     const html = await resp.text();
     return extractTextFromHtml(html);
-  } catch { return ''; }
+  } catch (_e) { return ''; }
 }
 
 // ============================================================
@@ -528,75 +528,274 @@ async function fetchEcbData(daysBack: number = 60, fetchText: boolean = true): P
 }
 
 // ============================================================
-// FED RETRIEVER
+// REGIONAL FED RSS FEEDS
 // ============================================================
-async function fetchFedData(daysBack: number = 60, fetchText: boolean = true): Promise<SentimentItem[]> {
+const REGIONAL_FED_FEEDS: Record<string, string> = {
+  'NY Fed':         'https://www.newyorkfed.org/rss/feeds/pressspeeches',
+  'Chicago Fed':    'https://www.chicagofed.org/rss/speeches',
+  'SF Fed':         'https://www.frbsf.org/feed/',
+  'Atlanta Fed':    'https://www.atlantafed.org/rss/speeches',
+  'Dallas Fed':     'https://www.dallasfed.org/feeds/speeches',
+  'Richmond Fed':   'https://www.richmondfed.org/rss/speeches',
+  'Cleveland Fed':  'https://www.clevelandfed.org/rss/speeches',
+  'St Louis Fed':   'https://www.stlouisfed.org/rss/speeches',
+  'Boston Fed':     'https://www.bostonfed.org/rss/speeches',
+  'Philly Fed':     'https://www.philadelphiafed.org/rss/speeches',
+  'Minneapolis Fed':'https://www.minneapolisfed.org/rss/speeches',
+  'KC Fed':         'https://www.kansascityfed.org/rss/speeches',
+};
+
+// ============================================================
+// FED RETRIEVER v2.3
+// ============================================================
+
+// Scrape FOMC statements from the calendar page
+async function fetchFomcStatements(cutoffStr: string, limit = 3): Promise<SentimentItem[]> {
   const items: SentimentItem[] = [];
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - daysBack);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
+  try {
+    const resp = await fetch('https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.3)' },
+    });
+    if (!resp.ok) return items;
+    const html = await resp.text();
+    // Find monetary policy statement links
+    const linkRegex = /href="([^"]*newsevents\/pressreleases\/monetary\d{8}[^"]*)"/gi;
+    const links: Array<{ date: string; url: string }> = [];
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) {
+      const href = m[1].startsWith('http') ? m[1] : 'https://www.federalreserve.gov' + m[1];
+      const dm = href.match(/monetary(\d{8})/);
+      if (dm) {
+        const d = dm[1];
+        const dateStr = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
+        links.push({ date: dateStr, url: href });
+      }
+    }
+    links.sort((a, b) => b.date.localeCompare(a.date));
+    for (const { date, url } of links.slice(0, limit)) {
+      if (date < cutoffStr) break;
+      const text = await fetchPageText(url);
+      const score = scoreSentiment(text, `FOMC Statement – ${date}`);
+      items.push({
+        bank: 'FED', source: 'FOMC Statement', item_date: date,
+        title: `FOMC Statement – ${date}`, url,
+        is_statistical: false, ...score,
+        stat_metric: null, stat_value: null, stat_weight: 0,
+      });
+    }
+  } catch (e) { console.error('FOMC statements error:', e); }
+  return items;
+}
 
-  // Fed RSS feeds
-  const feeds: Array<{ url: string; label: string; key: string }> = [
-    { url: 'https://www.federalreserve.gov/feeds/speeches.xml', label: 'Fed Speech', key: 'speeches' },
-    { url: 'https://www.federalreserve.gov/feeds/press_all.xml', label: 'Fed Press', key: 'press' },
-  ];
+// Scrape FOMC minutes
+async function fetchFomcMinutes(cutoffStr: string, limit = 2): Promise<SentimentItem[]> {
+  const items: SentimentItem[] = [];
+  try {
+    const resp = await fetch('https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.3)' },
+    });
+    if (!resp.ok) return items;
+    const html = await resp.text();
+    const linkRegex = /href="([^"]*fomcminutes\d{8}[^"]*)"/gi;
+    const links: Array<{ date: string; url: string }> = [];
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) {
+      const href = m[1].startsWith('http') ? m[1] : 'https://www.federalreserve.gov' + m[1];
+      const dm = href.match(/fomcminutes(\d{8})/);
+      if (dm) {
+        const d = dm[1];
+        const dateStr = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
+        links.push({ date: dateStr, url: href });
+      }
+    }
+    links.sort((a, b) => b.date.localeCompare(a.date));
+    for (const { date, url } of links.slice(0, limit)) {
+      if (date < cutoffStr) break;
+      const sa = await analyzeStatRelease(`FOMC Minutes – ${date}`, url, '', FED_STAT_RULES);
+      items.push({
+        bank: 'FED', source: 'FOMC Minutes', item_date: date,
+        title: `FOMC Minutes – ${date}`, url,
+        is_statistical: true, hawk_pts: 0, dove_pts: 0,
+        net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method],
+        stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight,
+      });
+    }
+  } catch (e) { console.error('FOMC minutes error:', e); }
+  return items;
+}
 
-  for (const feed of feeds) {
+// Scrape FOMC press conferences (Powell Q&A)
+async function fetchFomcPressConferences(cutoffStr: string, limit = 2): Promise<SentimentItem[]> {
+  const items: SentimentItem[] = [];
+  try {
+    const resp = await fetch('https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.3)' },
+    });
+    if (!resp.ok) return items;
+    const html = await resp.text();
+    const linkRegex = /href="([^"]*fomcpresconf\d{8}[^"]*)"/gi;
+    const links: Array<{ date: string; url: string }> = [];
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) {
+      const href = m[1].startsWith('http') ? m[1] : 'https://www.federalreserve.gov' + m[1];
+      const dm = href.match(/fomcpresconf(\d{8})/);
+      if (dm) {
+        const d = dm[1];
+        const dateStr = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
+        links.push({ date: dateStr, url: href });
+      }
+    }
+    links.sort((a, b) => b.date.localeCompare(a.date));
+    for (const { date, url } of links.slice(0, limit)) {
+      if (date < cutoffStr) break;
+      const text = await fetchPageText(url);
+      if (!text || text.length < 200) continue;
+      const score = scoreSentiment(text, `FOMC Press Conference – ${date} (Powell)`);
+      items.push({
+        bank: 'FED', source: 'FOMC Press Conference', item_date: date,
+        title: `FOMC Press Conference – ${date} (Powell)`, url,
+        is_statistical: false, ...score,
+        stat_metric: null, stat_value: null, stat_weight: 0,
+      });
+    }
+  } catch (e) { console.error('FOMC press conferences error:', e); }
+  return items;
+}
+
+// Parse Board of Governors RSS (speeches, testimony, press)
+async function parseBoardRss(
+  feedUrl: string, sourceLabel: string, key: string,
+  cutoffStr: string, limit: number, fetchText: boolean,
+): Promise<SentimentItem[]> {
+  const items: SentimentItem[] = [];
+  try {
+    const resp = await fetch(feedUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.3)' },
+    });
+    if (!resp.ok) return items;
+    let xml = await resp.text();
+    xml = xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
+    const rssItems = parseXmlItems(xml);
+
+    for (const ri of rssItems.slice(0, limit)) {
+      const pub = parseRssDate(ri.pubDate);
+      if (!pub || pub < cutoffStr) continue;
+
+      if (key === 'press') {
+        if (FED_SKIP_CATEGORIES.has(ri.category)) continue;
+        const tl = ri.title.toLowerCase();
+        if (tl.includes('minutes of the federal open market') || tl.includes('fomc minutes')) {
+          const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
+          items.push({
+            bank: 'FED', source: 'FOMC Minutes (press)', item_date: pub, title: ri.title, url: ri.link,
+            is_statistical: true, hawk_pts: 0, dove_pts: 0,
+            net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method],
+            stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight,
+          });
+          continue;
+        }
+        if (tl.includes('discount rate') && tl.includes('minutes')) {
+          const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
+          items.push({
+            bank: 'FED', source: 'Fed Discount Rate Minutes', item_date: pub, title: ri.title, url: ri.link,
+            is_statistical: true, hawk_pts: 0, dove_pts: 0,
+            net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method],
+            stat_metric: 'Discount rate minutes sentiment', stat_value: sa.value_found, stat_weight: 1.5,
+          });
+          continue;
+        }
+      }
+
+      let text = '';
+      if (fetchText && ri.link) text = await fetchPageText(ri.link);
+      const score = scoreSentiment(text, ri.title);
+      items.push({
+        bank: 'FED', source: sourceLabel, item_date: pub, title: ri.title, url: ri.link,
+        is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0,
+      });
+    }
+  } catch (e) { console.error(`Board RSS error [${sourceLabel}]:`, e); }
+  return items;
+}
+
+// Parse regional Fed president speeches
+async function parseRegionalFed(cutoffStr: string, fetchText: boolean): Promise<SentimentItem[]> {
+  const items: SentimentItem[] = [];
+  for (const [fedName, feedUrl] of Object.entries(REGIONAL_FED_FEEDS)) {
     try {
-      const resp = await fetch(feed.url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.2)' },
+      const resp = await fetch(feedUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CentralBankSentiment/2.3)' },
       });
       if (!resp.ok) continue;
       let xml = await resp.text();
-      // Fix invalid XML
       xml = xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
       const rssItems = parseXmlItems(xml);
 
-      for (const ri of rssItems.slice(0, 20)) {
+      for (const ri of rssItems.slice(0, 8)) {
         const pub = parseRssDate(ri.pubDate);
         if (!pub || pub < cutoffStr) continue;
-
-        if (feed.key === 'press') {
-          if (FED_SKIP_CATEGORIES.has(ri.category)) continue;
-
-          const tl = ri.title.toLowerCase();
-          if (tl.includes('minutes of the federal open market') || tl.includes('fomc minutes')) {
-            const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
-            items.push({
-              bank: 'FED', source: 'FOMC Minutes (press)', item_date: pub, title: ri.title, url: ri.link,
-              is_statistical: true, hawk_pts: 0, dove_pts: 0,
-              net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method],
-              stat_metric: sa.metric, stat_value: sa.value_found, stat_weight: sa.weight,
-            });
-            continue;
-          }
-          if (tl.includes('discount rate') && tl.includes('minutes')) {
-            const sa = await analyzeStatRelease(ri.title, ri.link, '', FED_STAT_RULES);
-            items.push({
-              bank: 'FED', source: 'Fed Discount Rate Minutes', item_date: pub, title: ri.title, url: ri.link,
-              is_statistical: true, hawk_pts: 0, dove_pts: 0,
-              net_score: sa.net_score, label: sa.label, word_count: 0, reasons: [sa.method],
-              stat_metric: 'Discount rate minutes sentiment', stat_value: sa.value_found, stat_weight: 1.5,
-            });
-            continue;
-          }
-        }
 
         let text = '';
         if (fetchText && ri.link) text = await fetchPageText(ri.link);
         const score = scoreSentiment(text, ri.title);
         items.push({
-          bank: 'FED', source: feed.label, item_date: pub, title: ri.title, url: ri.link,
-          is_statistical: false, ...score, stat_metric: null, stat_value: null, stat_weight: 0,
+          bank: 'FED', source: `${fedName} Speech`, item_date: pub,
+          title: `[${fedName}] ${ri.title}`, url: ri.link,
+          is_statistical: false, ...score,
+          stat_metric: null, stat_value: null, stat_weight: 0,
         });
       }
-    } catch (e) {
-      console.error(`Fed feed error [${feed.label}]:`, e);
+    } catch (_e) {
+      // silently skip unavailable feeds
     }
   }
-
   return items;
+}
+
+// Main Fed data orchestrator
+async function fetchFedData(daysBack: number = 60, fetchText: boolean = true): Promise<SentimentItem[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - daysBack);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+
+  console.log('  📡 FOMC statements…');
+  const stmts = await fetchFomcStatements(cutoffStr, 3);
+  console.log(`     → ${stmts.length} statements`);
+
+  console.log('  📡 FOMC minutes…');
+  const mins = await fetchFomcMinutes(cutoffStr, 2);
+  console.log(`     → ${mins.length} minutes`);
+
+  console.log('  📡 FOMC press conferences…');
+  const pressConf = await fetchFomcPressConferences(cutoffStr, 2);
+  console.log(`     → ${pressConf.length} press conferences`);
+
+  console.log('  📡 Board speeches…');
+  const speeches = await parseBoardRss(
+    'https://www.federalreserve.gov/feeds/speeches.xml', 'Fed Speech', 'speeches',
+    cutoffStr, 20, fetchText,
+  );
+  console.log(`     → ${speeches.length} speeches`);
+
+  console.log('  📡 Board testimony…');
+  const testimony = await parseBoardRss(
+    'https://www.federalreserve.gov/feeds/testimony.xml', 'Fed Testimony', 'testimony',
+    cutoffStr, 15, fetchText,
+  );
+  console.log(`     → ${testimony.length} testimony`);
+
+  console.log('  📡 Press releases…');
+  const press = await parseBoardRss(
+    'https://www.federalreserve.gov/feeds/press_all.xml', 'Fed Press', 'press',
+    cutoffStr, 20, fetchText,
+  );
+  console.log(`     → ${press.length} press releases`);
+
+  console.log('  📡 Regional Fed speeches…');
+  const regional = await parseRegionalFed(cutoffStr, fetchText);
+  console.log(`     → ${regional.length} regional speeches`);
+
+  return [...stmts, ...mins, ...pressConf, ...speeches, ...testimony, ...press, ...regional];
 }
 
 // ============================================================
