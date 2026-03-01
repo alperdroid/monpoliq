@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
+import { ExpandableTitle } from '@/components/analytics/ExpandableTitle';
 import {
   getCachedSentimentScores,
   getStatisticalItems,
@@ -130,7 +131,7 @@ const StatisticalData = () => {
                     </span>
                   </td>
                   <td className="p-2.5 text-muted-foreground max-w-[100px] truncate">{item.source}</td>
-                  <td className="p-2.5 max-w-[250px] truncate font-medium" title={item.title}>{item.title}</td>
+                  <td className="p-2.5"><ExpandableTitle title={item.title} maxWidth="max-w-[250px]" /></td>
                   <td className="p-2.5 text-muted-foreground max-w-[120px] truncate">{item.stat_metric || '—'}</td>
                   <td className="p-2.5 text-right font-mono">
                     {item.stat_value !== null ? item.stat_value.toFixed(2) : '—'}
