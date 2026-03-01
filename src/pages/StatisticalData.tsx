@@ -24,11 +24,6 @@ const StatisticalData = () => {
     queryFn: () => getStatisticalItems(bankFilter),
   });
 
-  const { data: commItems = [] } = useQuery({
-    queryKey: ['comm-items', bankFilter],
-    queryFn: () => getCachedSentimentItems(bankFilter),
-  });
-
   const { data: scores = [] } = useQuery({
     queryKey: ['sentiment-scores'],
     queryFn: getCachedSentimentScores,
@@ -50,12 +45,9 @@ const StatisticalData = () => {
   const fedScore = scores.find(s => s.bank === 'FED');
   const ecbScore = scores.find(s => s.bank === 'ECB');
 
-  const allItems = [...statItems, ...commItems.filter(c => !c.is_statistical)]
-    .sort((a, b) => b.item_date.localeCompare(a.item_date));
-
   const filteredItems = bankFilter
-    ? allItems.filter(i => i.bank === bankFilter)
-    : allItems;
+    ? statItems.filter(i => i.bank === bankFilter)
+    : statItems;
 
   return (
     <div className="space-y-6 animate-slide-in">
