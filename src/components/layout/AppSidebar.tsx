@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, Activity, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, Activity, BarChart3, MessageSquare } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import {
@@ -21,6 +21,7 @@ const mainNav = [
   { title: 'Speakers', url: '/speakers', icon: Users },
   { title: 'Meeting Cycles', url: '/meetings', icon: Calendar },
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
+  { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
 ];
 
