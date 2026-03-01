@@ -2,3 +2,6 @@ project_id = "xkmthvuvfscqqkiqkayy"
 
 [functions.sentiment-analysis]
 verify_jwt = false
+
+[functions.test-ping]
+verify_jwt = false
