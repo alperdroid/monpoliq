@@ -133,14 +133,19 @@ function xn(title: string): number | null {
 
 const AI_SCORING_PROMPT = `You are a senior monetary policy analyst. Score this central bank communication on the hawkish-dovish spectrum.
 
+CRITICAL — READ THE CONCLUSIONS, NOT JUST THE TOPIC:
+- A blog titled "Lower inflation, weaker activity" is DOVISH because the CONCLUSION is weaker economy and falling prices — even if it discusses tariffs.
+- A blog about tariffs is NOT automatically hawkish. Read what the authors CONCLUDE about the impact on the economy.
+- Focus on the POLICY IMPLICATIONS the authors draw, not just the subject matter.
+
 SCORING RULES:
 - Score from -1.0 (extremely dovish) to +1.0 (extremely hawkish), with 0.0 being neutral
-- DOVISH signals: rate cuts, easing, weak growth concerns, disinflation progress, labor market softening, dissent favoring cuts, downside risks
-- HAWKISH signals: rate hikes, tightening, inflation persistence, strong economy, labor market tightness, upside risks to inflation
-- NEUTRAL: administrative matters, non-monetary topics (digital euro, climate, banking supervision, counterfeit notes, appointments)
-- If the speech is NOT about monetary policy (structural reforms, digital currency, climate), score near 0.0
-- Pay attention to CONTEXT: "inflation is falling" is dovish, "inflation is persistent" is hawkish
-- Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish even if they're traditionally hawkish
+- DOVISH signals (-0.2 to -1.0): rate cuts, easing, weak growth concerns, disinflation, labor softening, dissent favoring cuts, downside risks, weaker activity, falling inflation forecasts
+- HAWKISH signals (+0.2 to +1.0): rate hikes, tightening, inflation persistence, strong economy, labor tightness, upside risks to inflation
+- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate, banking supervision, counterfeit notes, appointments, structural reforms)
+- Government deficit/fiscal policy discussions: score near 0.0 unless they explicitly discuss monetary policy responses
+- If the speech is NOT about monetary policy, score 0.0
+- Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
 - Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
 
 Respond with ONLY a JSON object (no markdown):
@@ -382,6 +387,8 @@ const EU: SR[] = [
   { pattern: 'production in construction', met: 'Construction', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
   { pattern: 'producer prices', met: 'PPI', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
   { pattern: 'retail trade', met: 'Retail', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
+  { pattern: 'government deficit', met: 'Gov Deficit', ht: -2.5, dt: -4.0, dir: 'hh', w: 0.5 },
+  { pattern: 'government debt', met: 'Gov Debt', ht: null, dt: null, dir: 'hh', w: 0 },
 ];
 
 function ss(title: string): { ns: number; lb: string; met: string; val: number | null; w: number } | null {
