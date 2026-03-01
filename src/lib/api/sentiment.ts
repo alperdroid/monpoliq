@@ -57,18 +57,20 @@ export interface CachedSentimentScore {
 export async function runSentimentAnalysis(
   bank: 'FED' | 'ECB' | 'both' = 'both',
   days: number = 60,
-  fetchText: boolean = false,
+  _fetchText: boolean = false,
 ): Promise<SentimentResponse> {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  const url = `https://${projectId}.supabase.co/functions/v1/sentiment-analysis?bank=${bank}&days=${days}&fetch_text=${fetchText}`;
+  const url = `https://${projectId}.supabase.co/functions/v1/sentiment-analysis`;
   
   const resp = await fetch(url, {
-    method: 'GET',
+    method: 'POST',
     headers: {
       'Authorization': `Bearer ${anonKey}`,
       'apikey': anonKey,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ bank, days }),
   });
 
   if (!resp.ok) {
