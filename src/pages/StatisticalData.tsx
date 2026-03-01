@@ -12,10 +12,10 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute 30-day average from items (stats only) */
+/** Compute score from latest statistical items (60-day window to cover monthly FRED releases) */
 function compute30dStatScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
+  cutoff.setDate(cutoff.getDate() - 60);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
@@ -71,7 +71,7 @@ const StatisticalData = () => {
         <div>
           <h1 className="text-lg font-semibold">Statistical Releases</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on statistical data only (FRED, Eurostat, FOMC minutes) — 30-day window
+            Score based on statistical data only (FRED, Eurostat) — latest releases
           </p>
         </div>
         <Button
@@ -195,12 +195,12 @@ function StatScoreCard({ bank, label, score }: {
         <h3 className="text-sm font-semibold">{label}</h3>
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data in the last 30 days. Older items appear in the table below.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data in the last 60 days. Click "Refresh Data" to fetch latest releases.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data Only (30-Day)</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data Only (Latest)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
@@ -209,7 +209,7 @@ function StatScoreCard({ bank, label, score }: {
             {score.avg > 0 ? '+' : ''}{score.avg.toFixed(3)}
           </p>
           <p className="text-[10px] text-muted-foreground">{score.label}</p>
-          <p className="text-[10px] text-muted-foreground">{score.count} items (30d)</p>
+          <p className="text-[10px] text-muted-foreground">{score.count} items</p>
         </div>
       )}
     </div>
