@@ -82,24 +82,57 @@ async function sf(url: string, ms = 15000): Promise<Response | null> {
 }
 
 // ── Extract readable text from HTML ──
+// Uses index-based extraction to handle nested divs properly
 function extractText(html: string): string {
   // Remove script/style tags
   let t = html.replace(/<script[\s\S]*?<\/script>/gi, '');
   t = t.replace(/<style[\s\S]*?<\/style>/gi, '');
-  // Try to find main content containers
-  const containers = ['div#article', 'div.col-xs-12', 'article', 'main', 'div.content', 'div.entry-content'];
-  for (const sel of containers) {
-    const tag = sel.includes('#') ? sel.split('#')[0] : sel.includes('.') ? sel.split('.')[0] : sel;
-    const attr = sel.includes('#') ? `id="${sel.split('#')[1]}"` : sel.includes('.') ? `class="[^"]*${sel.split('.')[1]}` : '';
-    if (attr) {
-      const re = new RegExp(`<${tag}[^>]*${attr}[^>]*>([\\s\\S]*?)</${tag}>`, 'i');
-      const m = t.match(re);
-      if (m && m[1].length > 200) {
-        t = m[1];
-        break;
+
+  // Try to find main content by locating the start tag and tracking nesting
+  const contentMarkers = [
+    { pattern: /<div[^>]*id="article"[^>]*>/i, tag: 'div' },
+    { pattern: /<div[^>]*id="content"[^>]*>/i, tag: 'div' },
+    { pattern: /<article[^>]*>/i, tag: 'article' },
+    { pattern: /<main[^>]*>/i, tag: 'main' },
+  ];
+
+  for (const marker of contentMarkers) {
+    const startMatch = t.match(marker.pattern);
+    if (!startMatch || startMatch.index === undefined) continue;
+
+    // Find the matching closing tag by tracking nesting depth
+    const startIdx = startMatch.index + startMatch[0].length;
+    const openRe = new RegExp(`<${marker.tag}[\\s>]`, 'gi');
+    const closeRe = new RegExp(`</${marker.tag}>`, 'gi');
+    let depth = 1;
+    let pos = startIdx;
+    const sub = t.slice(startIdx);
+    
+    // Walk through all open/close tags to find the matching close
+    const allTags: { idx: number; isOpen: boolean }[] = [];
+    let m2;
+    openRe.lastIndex = 0;
+    closeRe.lastIndex = 0;
+    while ((m2 = openRe.exec(sub)) !== null) allTags.push({ idx: m2.index, isOpen: true });
+    while ((m2 = closeRe.exec(sub)) !== null) allTags.push({ idx: m2.index, isOpen: false });
+    allTags.sort((a, b) => a.idx - b.idx);
+    
+    for (const tag of allTags) {
+      if (tag.isOpen) depth++;
+      else {
+        depth--;
+        if (depth === 0) {
+          const content = sub.slice(0, tag.idx);
+          if (content.length > 200) {
+            t = content;
+            break;
+          }
+        }
       }
     }
+    if (depth === 0 || t.length < html.length / 2) break;
   }
+
   // Strip remaining HTML tags
   t = t.replace(/<[^>]+>/g, ' ');
   // Decode entities
@@ -377,7 +410,7 @@ function ag(sub: It[]) {
 async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2: ReturnType<typeof ag>) {
   const sbUrl = Deno.env.get('SUPABASE_URL')!;
   const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' };
+  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
   if (items.length) {
     await fetch(sbUrl + '/rest/v1/sentiment_items', {
       method: 'POST', headers: hd,
