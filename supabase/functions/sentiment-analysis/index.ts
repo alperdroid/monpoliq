@@ -121,7 +121,9 @@ function xn(title: string): number | null {
   if (!m) return null;
   let v = parseFloat(m[1]);
   if (isNaN(v)) return null;
-  if (v > 0 && /\b(down|fell|drop|decrease|decline|contract)\b/.test(tl)) v = -v;
+  // Use includes() instead of \b regex — word boundaries can fail with special whitespace from Eurostat feeds
+  const negWords = ['down', 'fell', 'drop', 'decrease', 'decline', 'contract', 'shrink', 'lower'];
+  if (v > 0 && negWords.some(w => tl.includes(w))) v = -v;
   return v;
 }
 
@@ -444,18 +446,26 @@ async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2:
   const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
   if (items.length) {
-    await fetch(sbUrl + '/rest/v1/sentiment_items', {
-      method: 'POST', headers: hd,
-      body: JSON.stringify(items.map(i => ({
-        bank: i.bank, source: i.source, item_date: i.item_date, title: i.title,
-        url: i.url || '', is_statistical: i.is_statistical,
-        hawk_pts: i.hawk_pts, dove_pts: i.dove_pts, net_score: i.net_score,
-        label: i.label, word_count: i.word_count, reasons: i.reasons,
-        stat_metric: i.stat_metric, stat_value: i.stat_value, stat_weight: i.stat_weight,
-      }))),
-    }).then(r => r.text()).catch(e => console.error('DB:', e));
+    // Split into batches of 50 to avoid payload size issues
+    for (let i = 0; i < items.length; i += 50) {
+      const batch = items.slice(i, i + 50);
+      const resp = await fetch(sbUrl + '/rest/v1/sentiment_items', {
+        method: 'POST', headers: hd,
+        body: JSON.stringify(batch.map(it => ({
+          bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+          url: it.url || '', is_statistical: it.is_statistical,
+          hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+          label: it.label, word_count: it.word_count, reasons: it.reasons,
+          stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+        }))),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error('DB persist error (batch ' + (i/50+1) + '):', resp.status, errText);
+      }
+    }
   }
-  await fetch(sbUrl + '/rest/v1/sentiment_scores', {
+  const scoreResp = await fetch(sbUrl + '/rest/v1/sentiment_scores', {
     method: 'POST', headers: { ...hd, 'Prefer': 'resolution=merge-duplicates' },
     body: JSON.stringify([{
       bank,
@@ -463,7 +473,11 @@ async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2:
       score_2_avg: s2.avg, score_2_count: s2.n, score_2_label: s2.sentiment, score_2_dist: s2.dist,
       fetched_at: new Date().toISOString(),
     }]),
-  }).then(r => r.text()).catch(e => console.error('DB:', e));
+  });
+  if (!scoreResp.ok) {
+    const errText = await scoreResp.text();
+    console.error('DB scores error:', scoreResp.status, errText);
+  }
 }
 
 // ── Handler ──
