@@ -3,8 +3,6 @@
 import type {
   BankSummary,
   CommunicationEvent,
-  PredictionOutput,
-  CurrencyPrediction,
   SpeakerProfile,
   MeetingCycle,
   ChartDataPoint,
@@ -43,32 +41,8 @@ export const ecbSummary: BankSummary = {
   communication_pressure_30d: 0.51,
 };
 
-export const fedPrediction: PredictionOutput = {
-  bank: 'FED',
-  next_decision: 'hold',
-  hike_probability: 0.12,
-  hold_probability: 0.78,
-  cut_probability: 0.10,
-  confidence: 0.82,
-  model_label: 'Communication-Implied Outlook',
-};
-
-export const ecbPrediction: PredictionOutput = {
-  bank: 'ECB',
-  next_decision: 'cut',
-  hike_probability: 0.05,
-  hold_probability: 0.38,
-  cut_probability: 0.57,
-  confidence: 0.71,
-  model_label: 'Communication-Implied Outlook',
-};
-
-export const eurusdPrediction: CurrencyPrediction = {
-  pair: 'EUR/USD',
-  direction: 'bearish',
-  signal_strength: 0.64,
-  confidence: 0.68,
-};
+// Predictions are now generated live by the AI Monetary Intelligence engine
+// See src/lib/api/predictions.ts
 
 export const mockEvents: CommunicationEvent[] = [
   {
