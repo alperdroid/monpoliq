@@ -27,9 +27,21 @@ interface It {
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
 }
 
+// ── Non-monetary-policy topic keywords — speeches about these are structural, not policy signals ──
+const NON_MONETARY_TOPICS = /\b(digital euro|cbdc|cyber|climate change|sustainability|green bond|financial stability|banking supervision|prudential|payment system|market infrastructure|competition|competitiveness|turning size into scale|single market|capital markets union|european model|geopolit|defence|sovereignty|enlargement|education|innovation ecosystem)\b/i;
+
 // ── Sentiment scoring function — works on full text ──
 function sc(text: string, title = '') {
   const c = (title + ' ' + text).toLowerCase();
+
+  // If the speech is primarily about non-monetary structural topics, apply a large dampening factor
+  const isStructural = NON_MONETARY_TOPICS.test(title.toLowerCase());
+  // Check how much monetary-policy content is actually present
+  const monetarySignals = ['interest rate','monetary policy','inflation target','price stability','rate decision','policy stance','rate path','quantitative','balance sheet','forward guidance'];
+  const monetaryHits = monetarySignals.filter(s => c.includes(s)).length;
+  // Structural speech with few monetary references → dampen heavily
+  const dampening = isStructural && monetaryHits < 3 ? 0.15 : 1.0;
+
   let hp = 0, dp = 0;
   const rs: string[] = [];
   for (const w of HW) if (c.includes(w)) { hp++; rs.push('h:' + w); }
@@ -45,7 +57,9 @@ function sc(text: string, title = '') {
     }
   }
   const wc = Math.max(c.split(/\s+/).length, 1);
-  const net = ((hp - dp) / wc) * 100;
+  const rawNet = ((hp - dp) / wc) * 100;
+  const net = rawNet * dampening;
+  if (isStructural && dampening < 1) rs.push('dampened:structural-topic');
   return {
     hawk_pts: hp, dove_pts: dp,
     net_score: Math.round(net * 1000) / 1000,
@@ -307,6 +321,7 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
+        { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
@@ -314,7 +329,12 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
     if (!r || !r.ok) return [];
     let xml = await r.text();
     xml = xml.replace(new RegExp('&(?!amp;|lt;|gt;|quot;|apos;|#)', 'g'), '&amp;');
-    const rssItems = pi(xml).filter(ri => {
+    // Parse as RSS first, fallback to Atom (ECB speeches use Atom format)
+    let rssItems = pi(xml).map(ri => ({ title: ri.title, link: ri.link, pubDate: ri.pubDate, cat: ri.cat }));
+    if (!rssItems.length) {
+      rssItems = ae(xml).map(e => ({ title: e.title, link: e.link, pubDate: e.updated, cat: '' }));
+    }
+    const filtered = rssItems.filter(ri => {
       const p = td(ri.pubDate);
       if (!p || p < cs) return false;
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
@@ -325,8 +345,8 @@ async function fetchRss(cs: string, bank: string): Promise<It[]> {
 
     // Fetch full text for each item (in batches of 5 to avoid overwhelming)
     const scored: It[] = [];
-    for (let i = 0; i < rssItems.length; i += 5) {
-      const batch = rssItems.slice(i, i + 5);
+    for (let i = 0; i < filtered.length; i += 5) {
+      const batch = filtered.slice(i, i + 5);
       const textResults = await Promise.allSettled(
         batch.map(ri => ri.link ? fetchPageText(ri.link) : Promise.resolve(''))
       );
