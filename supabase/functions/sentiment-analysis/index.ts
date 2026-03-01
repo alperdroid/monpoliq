@@ -242,9 +242,27 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     );
     if (!resp.ok) return new Set();
     const data = await resp.json();
-    // Create a set of "title|date" keys for deduplication
     return new Set((data || []).map((d: any) => `${d.title}|${d.item_date}`));
   } catch { return new Set(); }
+}
+
+// ── Load ALL existing items from DB for aggregation ──
+async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
+  try {
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}&limit=1000`,
+      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
+    );
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data || []).map((d: any) => ({
+      bank: d.bank, source: d.source, item_date: d.item_date, title: d.title,
+      url: d.url || '', is_statistical: d.is_statistical,
+      hawk_pts: d.hawk_pts || 0, dove_pts: d.dove_pts || 0, net_score: Number(d.net_score) || 0,
+      label: d.label || 'neutral', word_count: d.word_count || 0, reasons: d.reasons || [],
+      stat_metric: d.stat_metric, stat_value: d.stat_value != null ? Number(d.stat_value) : null, stat_weight: Number(d.stat_weight) || 0,
+    } as It));
+  } catch { return []; }
 }
 
 // ── FRED ──
@@ -380,15 +398,16 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
 // ── ECB Stats + Eurostat (unchanged — formula scoring) ──
 interface SR { pattern: string; met: string; ht: number | null; dt: number | null; dir: string; w: number }
 const EU: SR[] = [
+  // More specific patterns FIRST to prevent false matches (e.g. "deficit at 3.2% of GDP" matching GDP)
+  { pattern: 'government deficit', met: 'Gov Deficit', ht: -2.5, dt: -4.0, dir: 'hh', w: 0.5 },
+  { pattern: 'government debt', met: 'Gov Debt', ht: null, dt: null, dir: 'hh', w: 0 },
+  { pattern: 'industrial production', met: 'Ind Prod', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
+  { pattern: 'production in construction', met: 'Construction', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
   { pattern: 'inflation', met: 'HICP', ht: 2.5, dt: 1.8, dir: 'hh', w: 3 },
   { pattern: 'gdp', met: 'GDP', ht: 0.4, dt: 0.1, dir: 'hh', w: 3 },
   { pattern: 'unemployment', met: 'Unemployment', ht: 6, dt: 7.5, dir: 'lh', w: 3 },
-  { pattern: 'industrial production', met: 'Ind Prod', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
-  { pattern: 'production in construction', met: 'Construction', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
   { pattern: 'producer prices', met: 'PPI', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
   { pattern: 'retail trade', met: 'Retail', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
-  { pattern: 'government deficit', met: 'Gov Deficit', ht: -2.5, dt: -4.0, dir: 'hh', w: 0.5 },
-  { pattern: 'government debt', met: 'Gov Debt', ht: null, dt: null, dir: 'hh', w: 0 },
 ];
 
 function ss(title: string): { ns: number; lb: string; met: string; val: number | null; w: number } | null {
@@ -552,10 +571,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      const s1 = ag(fi.filter(i => !i.is_statistical)), s2 = ag(fi);
-      await persist('FED', fi, s1, s2);
-      result.fed = { items: fi, score_1: s1, score_2: s2 };
-      console.log('Fed: ' + fi.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
+      // Persist new items first, then aggregate from FULL DB
+      await persist('FED', fi, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' }, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' });
+      const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
+      const s1 = ag(allFedItems.filter(i => !i.is_statistical)), s2 = ag(allFedItems);
+      // Update scores with correct aggregation
+      await persist('FED', [], s1, s2);
+      result.fed = { items: allFedItems, score_1: s1, score_2: s2 };
+      console.log('Fed: ' + allFedItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
 
     if (bank === 'both' || bank === 'ECB') {
@@ -593,10 +616,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      const s1 = ag(ei.filter(i => !i.is_statistical)), s2 = ag(ei);
-      await persist('ECB', ei, s1, s2);
-      result.ecb = { items: ei, score_1: s1, score_2: s2 };
-      console.log('ECB: ' + ei.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
+      // Persist new items first, then aggregate from FULL DB
+      await persist('ECB', ei, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' }, { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL' });
+      const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
+      const s1 = ag(allEcbItems.filter(i => !i.is_statistical)), s2 = ag(allEcbItems);
+      await persist('ECB', [], s1, s2);
+      result.ecb = { items: allEcbItems, score_1: s1, score_2: s2 };
+      console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
 
     return new Response(JSON.stringify(result), { headers: { ...CH, 'Content-Type': 'application/json' } });
