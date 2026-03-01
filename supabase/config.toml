@@ -3,5 +3,8 @@ project_id = "xkmthvuvfscqqkiqkayy"
 [functions.sentiment-analysis]
 verify_jwt = false
 
-[functions.test-ping]
+[functions.fed-sentiment]
+verify_jwt = false
+
+[functions.ecb-sentiment]
 verify_jwt = false
