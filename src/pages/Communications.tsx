@@ -3,23 +3,23 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import {
+  getCommunicationItems,
   getCachedSentimentScores,
-  getStatisticalItems,
   runSentimentAnalysis,
   type SentimentItem,
   type CachedSentimentScore,
 } from '@/lib/api/sentiment';
-import { RefreshCw, ExternalLink, Database, BarChart3 } from 'lucide-react';
+import { RefreshCw, ExternalLink, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-const StatisticalData = () => {
+const Communications = () => {
   const [bankFilter, setBankFilter] = useState<'FED' | 'ECB' | undefined>(undefined);
   const queryClient = useQueryClient();
 
-  const { data: statItems = [], isLoading: loadingItems } = useQuery({
-    queryKey: ['stat-items', bankFilter],
-    queryFn: () => getStatisticalItems(bankFilter),
+  const { data: commItems = [], isLoading } = useQuery({
+    queryKey: ['comm-items', bankFilter],
+    queryFn: () => getCommunicationItems(bankFilter),
   });
 
   const { data: scores = [] } = useQuery({
@@ -30,8 +30,8 @@ const StatisticalData = () => {
   const refreshMutation = useMutation({
     mutationFn: () => runSentimentAnalysis('both', 60, false),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stat-items'] });
       queryClient.invalidateQueries({ queryKey: ['comm-items'] });
+      queryClient.invalidateQueries({ queryKey: ['stat-items'] });
       queryClient.invalidateQueries({ queryKey: ['sentiment-scores'] });
       toast.success('Sentiment analysis complete');
     },
@@ -44,16 +44,16 @@ const StatisticalData = () => {
   const ecbScore = scores.find(s => s.bank === 'ECB');
 
   const filteredItems = bankFilter
-    ? statItems.filter(i => i.bank === bankFilter)
-    : statItems;
+    ? commItems.filter(i => i.bank === bankFilter)
+    : commItems;
 
   return (
     <div className="space-y-6 animate-slide-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">Statistical Releases</h1>
+          <h1 className="text-lg font-semibold">Communications & Speeches</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score 2 — economic data from FRED, Eurostat, FOMC minutes & statistical publications
+            Score 1 — sentiment from central bank speeches, testimony, press conferences & blog posts
           </p>
         </div>
         <Button
@@ -68,10 +68,10 @@ const StatisticalData = () => {
         </Button>
       </div>
 
-      {/* Score 2 Summary Cards */}
+      {/* Score 1 Summary Cards */}
       <div className="grid lg:grid-cols-2 gap-4">
-        <StatScoreCard bank="FED" label="Federal Reserve" score={fedScore} />
-        <StatScoreCard bank="ECB" label="European Central Bank" score={ecbScore} />
+        <CommScoreCard bank="FED" label="Federal Reserve" score={fedScore} />
+        <CommScoreCard bank="ECB" label="European Central Bank" score={ecbScore} />
       </div>
 
       {/* Filter */}
@@ -101,20 +101,20 @@ const StatisticalData = () => {
                 <th className="text-left p-2.5 font-medium text-muted-foreground">Bank</th>
                 <th className="text-left p-2.5 font-medium text-muted-foreground">Source</th>
                 <th className="text-left p-2.5 font-medium text-muted-foreground">Title</th>
-                <th className="text-left p-2.5 font-medium text-muted-foreground">Metric</th>
-                <th className="text-right p-2.5 font-medium text-muted-foreground">Value</th>
+                <th className="text-right p-2.5 font-medium text-muted-foreground">Hawks</th>
+                <th className="text-right p-2.5 font-medium text-muted-foreground">Doves</th>
                 <th className="text-right p-2.5 font-medium text-muted-foreground">Score</th>
                 <th className="text-center p-2.5 font-medium text-muted-foreground">Signal</th>
                 <th className="text-center p-2.5 font-medium text-muted-foreground">Link</th>
               </tr>
             </thead>
             <tbody>
-              {loadingItems && (
-                <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">Loading data…</td></tr>
+              {isLoading && (
+                <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">Loading…</td></tr>
               )}
-              {!loadingItems && filteredItems.length === 0 && (
+              {!isLoading && filteredItems.length === 0 && (
                 <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">
-                  No data yet. Click "Refresh Data" to run the sentiment analysis algorithm.
+                  No communication items yet. Click "Refresh Data" to run the analysis.
                 </td></tr>
               )}
               {filteredItems.map((item, idx) => (
@@ -129,12 +129,10 @@ const StatisticalData = () => {
                       {item.bank}
                     </span>
                   </td>
-                  <td className="p-2.5 text-muted-foreground max-w-[100px] truncate">{item.source}</td>
-                  <td className="p-2.5 max-w-[250px] truncate font-medium" title={item.title}>{item.title}</td>
-                  <td className="p-2.5 text-muted-foreground max-w-[120px] truncate">{item.stat_metric || '—'}</td>
-                  <td className="p-2.5 text-right font-mono">
-                    {item.stat_value !== null ? item.stat_value.toFixed(2) : '—'}
-                  </td>
+                  <td className="p-2.5 text-muted-foreground max-w-[120px] truncate">{item.source}</td>
+                  <td className="p-2.5 max-w-[300px] truncate font-medium" title={item.title}>{item.title}</td>
+                  <td className="p-2.5 text-right font-mono text-signal-hawkish">{item.hawk_pts}</td>
+                  <td className="p-2.5 text-right font-mono text-signal-dovish">{item.dove_pts}</td>
                   <td className={cn(
                     'p-2.5 text-right font-mono font-semibold',
                     item.net_score > 0.05 ? 'text-signal-hawkish' : item.net_score < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
@@ -165,7 +163,7 @@ const StatisticalData = () => {
   );
 };
 
-function StatScoreCard({ bank, label, score }: {
+function CommScoreCard({ bank, label, score }: {
   bank: string;
   label: string;
   score?: CachedSentimentScore;
@@ -186,21 +184,21 @@ function StatScoreCard({ bank, label, score }: {
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Score 2 — Comms + Statistical Data</p>
+            <MessageSquare className="w-3 h-3 text-chart-2" />
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Score 1 — Communications Only</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
-            score.score_2_avg > 0.05 ? 'text-signal-hawkish' : score.score_2_avg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+            score.score_1_avg > 0.05 ? 'text-signal-hawkish' : score.score_1_avg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
           )}>
-            {score.score_2_avg > 0 ? '+' : ''}{Number(score.score_2_avg).toFixed(3)}
+            {score.score_1_avg > 0 ? '+' : ''}{Number(score.score_1_avg).toFixed(3)}
           </p>
-          <p className="text-[10px] text-muted-foreground">{score.score_2_label}</p>
-          <p className="text-[10px] text-muted-foreground">{score.score_2_count} items</p>
+          <p className="text-[10px] text-muted-foreground">{score.score_1_label}</p>
+          <p className="text-[10px] text-muted-foreground">{score.score_1_count} items</p>
         </div>
       )}
     </div>
   );
 }
 
-export default StatisticalData;
+export default Communications;
