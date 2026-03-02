@@ -142,7 +142,7 @@ const Dashboard = () => {
   return (
     <div className="space-y-6 animate-slide-in">
       {/* Executive Summary Bar */}
-      <div className="rounded-lg border border-primary/20 bg-card p-4 glow-primary">
+      <div className="rounded-xl border border-primary/15 bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-glow" />
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Executive Summary</span>
@@ -186,7 +186,7 @@ const Dashboard = () => {
       </div>
 
       {/* HIGHLIGHTED: 30-Day Aggregate Scores (Comms + Stats) */}
-      <div className="rounded-lg border-2 border-primary/40 bg-card p-4 space-y-3 glow-primary">
+      <div className="rounded-xl border border-primary/20 bg-card p-4 space-y-3 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-primary animate-pulse-glow" />
@@ -237,7 +237,7 @@ const Dashboard = () => {
 
       {/* 1-Year Sentiment Fluctuation Chart */}
       {fluctuationData.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-semibold">1-Year Sentiment Fluctuation (Monthly Avg)</h3>
@@ -282,7 +282,7 @@ const Dashboard = () => {
 
       {/* AI Prediction Section */}
       {isPredictionLoading ? (
-        <div className="rounded-lg border border-prediction/30 bg-card p-4 space-y-3">
+        <div className="rounded-xl border border-prediction/20 bg-card p-4 space-y-3 shadow-sm">
           <div className="flex items-center gap-2">
             <Brain className="w-4 h-4 text-prediction animate-pulse" />
             <span className="text-sm font-semibold">AI Monetary Intelligence</span>
@@ -306,14 +306,14 @@ const Dashboard = () => {
           dataSummary={aiPrediction?.data_summary}
         />
       ) : (
-        <div className="rounded-lg border border-destructive/30 bg-card p-4 text-center">
+        <div className="rounded-xl border border-destructive/20 bg-card p-4 text-center shadow-sm">
           <p className="text-xs text-muted-foreground">AI predictions unavailable — refresh to retry</p>
         </div>
       )}
 
       {/* Communication Volume Chart */}
       {volumeData.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-semibold">Communication Volume</h3>
