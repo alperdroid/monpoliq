@@ -23,7 +23,7 @@ export function BankPanel({
   const stanceVariant = score30d > 0.1 ? 'hawkish' : score30d < -0.1 ? 'dovish' : 'neutral';
 
   return (
-    <div className={cn('rounded-lg border border-border bg-card p-4 space-y-4', className)}>
+    <div className={cn('rounded-xl border border-border bg-card p-4 space-y-4 shadow-sm', className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={cn('w-2 h-2 rounded-full', bank === 'FED' ? 'bg-primary' : 'bg-prediction')} />

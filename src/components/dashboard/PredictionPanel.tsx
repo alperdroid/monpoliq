@@ -25,7 +25,7 @@ export function PredictionPanel({
   className,
 }: PredictionPanelProps) {
   return (
-    <div className={cn('rounded-lg border border-prediction/30 bg-card p-4 space-y-5', className)}>
+    <div className={cn('rounded-xl border border-prediction/20 bg-card p-4 space-y-5 shadow-sm', className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-prediction animate-pulse-glow" />

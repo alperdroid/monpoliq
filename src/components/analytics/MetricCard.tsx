@@ -13,11 +13,11 @@ interface MetricCardProps {
 export function MetricCard({ label, value, sublabel, trend, trendValue, variant = 'default', className }: MetricCardProps) {
   return (
     <div className={cn(
-      'rounded-lg border p-3 transition-colors',
-      variant === 'default' && 'bg-card border-border',
-      variant === 'primary' && 'bg-card border-primary/30 glow-primary',
-      variant === 'signal' && 'bg-card border-border',
-      variant === 'prediction' && 'bg-card border-prediction/30',
+      'rounded-xl border p-3 transition-all',
+      variant === 'default' && 'bg-card border-border shadow-sm',
+      variant === 'primary' && 'bg-card border-primary/20 shadow-sm shadow-primary/5',
+      variant === 'signal' && 'bg-card border-border shadow-sm',
+      variant === 'prediction' && 'bg-card border-prediction/20 shadow-sm shadow-prediction/5',
       className,
     )}>
       <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{label}</p>
