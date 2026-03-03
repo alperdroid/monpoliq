@@ -12,10 +12,10 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute score from latest statistical items (60-day window to cover monthly FRED releases) */
+/** Compute score from latest statistical items (90-day window to cover monthly FRED releases with lag) */
 function compute30dStatScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 60);
+  cutoff.setDate(cutoff.getDate() - 90);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
