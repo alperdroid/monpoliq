@@ -177,17 +177,20 @@ async function scoreWithAI(
   apiKey: string,
 ): Promise<AIScore> {
   let truncated: string;
-  if (text.length <= 4000) {
+  if (text.length <= 6000) {
     truncated = text;
   } else {
-    // For long documents (e.g. FOMC Minutes), sample beginning + middle + end
-    // The middle often contains the most important policy discussion
+    // For long documents (press conferences, minutes), sample beginning + middle + end
+    // Beginning needs to be large enough to capture rate decisions (typically 1500-2500 chars in)
+    const beginLen = 3000;
+    const midLen = 1500;
+    const endLen = 1500;
     const mid = Math.floor(text.length / 2);
-    truncated = text.slice(0, 1000) +
+    truncated = text.slice(0, beginLen) +
       '\n...[early section truncated]...\n' +
-      text.slice(mid - 1000, mid + 1000) +
+      text.slice(mid - Math.floor(midLen / 2), mid + Math.floor(midLen / 2)) +
       '\n...[late section truncated]...\n' +
-      text.slice(-1000);
+      text.slice(-endLen);
   }
 
   const userMsg = `Bank: ${bank}
@@ -437,7 +440,7 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
 // Known ECB Governing Council meeting dates for press conferences
 const KNOWN_ECB_DATES = [
   '250130', '250306', '250417', '250605', '250724', '250911', '251030', '251218',
-  '260122', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
+  '260205', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
 ];
 
 async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
