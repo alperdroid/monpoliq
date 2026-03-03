@@ -176,7 +176,19 @@ async function scoreWithAI(
   bank: string,
   apiKey: string,
 ): Promise<AIScore> {
-  const truncated = text.length > 3000 ? text.slice(0, 1500) + '\n...[middle truncated]...\n' + text.slice(-1500) : text;
+  let truncated: string;
+  if (text.length <= 4000) {
+    truncated = text;
+  } else {
+    // For long documents (e.g. FOMC Minutes), sample beginning + middle + end
+    // The middle often contains the most important policy discussion
+    const mid = Math.floor(text.length / 2);
+    truncated = text.slice(0, 1000) +
+      '\n...[early section truncated]...\n' +
+      text.slice(mid - 1000, mid + 1000) +
+      '\n...[late section truncated]...\n' +
+      text.slice(-1000);
+  }
 
   const userMsg = `Bank: ${bank}
 Title: ${title}
@@ -428,31 +440,28 @@ const KNOWN_ECB_DATES = [
   '260122', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
 ];
 
-async function fetchEcbPressConferences(cutoffDate: string, _aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
 
   // ECB monetary policy statement URLs contain a hash we can't guess.
-  // Solution: Fetch the year-specific include files which list all statements with full URLs.
-  // Pattern: /press/press_conference/monetary-policy-statement/YYYY/html/index_include.en.html
+  // Strategy 1: Fetch year-specific include files which list all statements with full URLs.
   const currentYear = now.getFullYear();
-  const years = [currentYear, currentYear - 1]; // Check current and previous year
+  const years = [currentYear, currentYear - 1];
 
   try {
     const includeResults = await Promise.allSettled(years.map(async (yr) => {
       const includeUrl = `https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/${yr}/html/index_include.en.html`;
       const r = await sf(includeUrl, 15000);
-      if (!r || !r.ok) return [];
+      if (!r || !r.ok) { console.log('ECB include file not found for ' + yr); return []; }
       const html = await r.text();
       
-      // Extract statement page links: href="...ecb.isYYMMDD~HASH.en.html"
       const linkRe = /href="([^"]*ecb\.is\d{6}~[^"]*\.en\.html)"/gi;
       let m;
       const links: { url: string; dateStr: string }[] = [];
       while ((m = linkRe.exec(html)) !== null) {
         let link = m[1];
         if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
-        // Extract date from ecb.isYYMMDD
         const dateMatch = link.match(/ecb\.is(\d{2})(\d{2})(\d{2})/);
         if (dateMatch) {
           const fullDate = '20' + dateMatch[1] + '-' + dateMatch[2] + '-' + dateMatch[3];
@@ -488,7 +497,65 @@ async function fetchEcbPressConferences(cutoffDate: string, _aiKey: string): Pro
     for (const r of fetchResults) {
       if (r.status === 'fulfilled' && r.value) items.push(r.value);
     }
-  } catch (e) { console.error('ECB press conf scraping:', e); }
+  } catch (e) { console.error('ECB press conf include files:', e); }
+
+  // Strategy 2: If include files yielded nothing, use AI to search for ECB press conference URLs
+  if (items.length === 0 && aiKey) {
+    console.log('ECB Press Conf: include files empty, trying AI search for URLs');
+    try {
+      const relevantDates = KNOWN_ECB_DATES.filter(ds => {
+        const yr = '20' + ds.slice(0, 2), mn = ds.slice(2, 4), dy = ds.slice(4, 6);
+        const fullDate = yr + '-' + mn + '-' + dy;
+        return fullDate >= cutoffDate && new Date(fullDate) <= now;
+      });
+
+      // Ask AI to find the URLs for each known meeting date
+      const searchPrompt = `Find the exact URLs for ECB monetary policy press conference transcripts (the full Q&A text, not video) for these meeting dates: ${relevantDates.map(d => '20' + d.slice(0,2) + '-' + d.slice(2,4) + '-' + d.slice(4,6)).join(', ')}.
+
+The URLs typically follow patterns like:
+- https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/YYYY/html/ecb.isYYMMDD~HASH.en.html
+- https://www.ecb.europa.eu/press/pressconf/YYYY/html/ecb.isYYMMDD~HASH.en.html
+
+Respond with ONLY a JSON array of objects: [{"date": "YYYY-MM-DD", "url": "full_url"}]`;
+
+      const aiResp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: searchPrompt }],
+        }),
+      });
+
+      if (aiResp.ok) {
+        const aiData = await aiResp.json();
+        let content = aiData.choices?.[0]?.message?.content || '';
+        content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        try {
+          const urls: { date: string; url: string }[] = JSON.parse(content);
+          console.log('ECB AI search returned ' + urls.length + ' URLs');
+          
+          const fetchResults = await Promise.allSettled(urls.slice(0, 8).map(async ({ date, url }) => {
+            const r = await sf(url, 12000);
+            if (!r || !r.ok) { console.log('ECB AI URL failed: ' + url); return null; }
+            const pageHtml = await r.text();
+            if (pageHtml.toLowerCase().includes('page not found')) return null;
+            const text = extractText(pageHtml);
+            if (text.length < 500) return null;
+            const parts = date.split('-');
+            console.log('ECB Press Conf (AI search): ' + date + ' (' + text.length + ' chars)');
+            return {
+              title: 'ECB Monetary Policy Press Conference — ' + parts[1] + '/' + parts[2] + '/' + parts[0],
+              text, date, url,
+            };
+          }));
+          for (const r of fetchResults) {
+            if (r.status === 'fulfilled' && r.value) items.push(r.value);
+          }
+        } catch (e) { console.error('ECB AI URL parse error:', e); }
+      }
+    } catch (e) { console.error('ECB AI search error:', e); }
+  }
 
   return items;
 }
