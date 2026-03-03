@@ -9,45 +9,45 @@ import { CheckCircle, Clock } from 'lucide-react';
 /** Real central bank meeting dates with verified decisions */
 const REAL_MEETINGS = [
   {
-    meeting_id: 'ecb-2025-10-17',
+    meeting_id: 'ecb-2025-10-30',
     bank: 'ECB' as const,
-    meeting_date: '2025-10-17',
-    decision: 'Cut 25bps — Deposit Facility Rate to 3.25%',
+    meeting_date: '2025-10-30',
+    decision: 'Hold — Deposit Facility Rate at 2.00%',
   },
   {
-    meeting_id: 'fed-2025-11-07',
+    meeting_id: 'fed-2025-10-29',
     bank: 'FED' as const,
-    meeting_date: '2025-11-07',
-    decision: 'Cut 25bps — Fed Funds Rate to 4.50–4.75%',
+    meeting_date: '2025-10-29',
+    decision: 'Cut 25bps — Fed Funds Rate to 3.75–4.00%',
   },
   {
     meeting_id: 'ecb-2025-12-18',
     bank: 'ECB' as const,
     meeting_date: '2025-12-18',
-    decision: 'Hold — Deposit Facility Rate at 3.00%',
+    decision: 'Hold — Deposit Facility Rate at 2.00%',
   },
   {
-    meeting_id: 'fed-2025-12-18',
+    meeting_id: 'fed-2025-12-10',
     bank: 'FED' as const,
-    meeting_date: '2025-12-18',
-    decision: 'Cut 25bps — Fed Funds Rate to 4.25–4.50%',
+    meeting_date: '2025-12-10',
+    decision: 'Cut 25bps — Fed Funds Rate to 3.50–3.75%',
   },
   {
-    meeting_id: 'ecb-2026-01-30',
+    meeting_id: 'ecb-2026-02-05',
     bank: 'ECB' as const,
-    meeting_date: '2026-01-30',
-    decision: 'Hold — Deposit Facility Rate at 3.00%',
+    meeting_date: '2026-02-05',
+    decision: 'Hold — Deposit Facility Rate at 2.00%',
   },
   {
-    meeting_id: 'fed-2026-01-29',
+    meeting_id: 'fed-2026-01-28',
     bank: 'FED' as const,
-    meeting_date: '2026-01-29',
-    decision: 'Hold — Fed Funds Rate at 4.25–4.50%',
+    meeting_date: '2026-01-28',
+    decision: 'Hold — Fed Funds Rate at 3.50–3.75%',
   },
   {
-    meeting_id: 'ecb-2026-03-06',
+    meeting_id: 'ecb-2026-03-05',
     bank: 'ECB' as const,
-    meeting_date: '2026-03-06',
+    meeting_date: '2026-03-05',
     decision: null, // upcoming
   },
   {
