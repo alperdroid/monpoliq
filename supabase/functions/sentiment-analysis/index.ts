@@ -368,7 +368,7 @@ async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; te
   return items;
 }
 
-// ── FOMC Press Conferences ──
+// ── FOMC Press Conferences + Statements ──
 async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
@@ -378,35 +378,42 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
     const meetDate = new Date(y, m, day);
     return meetDate >= cutoff && meetDate <= now;
   });
-  console.log('FOMC Press Conf: checking ' + relevantDates.length + ' dates');
+  console.log('FOMC Press Conf+Statement: checking ' + relevantDates.length + ' dates');
   const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
-    // Try HTML transcript first
-    const htmlUrl = 'https://www.federalreserve.gov/mediacenter/files/FOMCpresconf' + dateStr + '.htm';
-    let r = await sf(htmlUrl, 12000);
+    const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
     let text = '';
-    let url = htmlUrl;
-    if (r && r.ok) {
-      const html = await r.text();
-      if (!html.toLowerCase().includes('page not found') && html.length > 2000) {
+    let url = '';
+
+    // 1. Try the FOMC monetary policy statement (always available day-of)
+    const stmtUrl = 'https://www.federalreserve.gov/newsevents/pressreleases/monetary' + dateStr + 'a.htm';
+    const stmtResp = await sf(stmtUrl, 12000);
+    if (stmtResp && stmtResp.ok) {
+      const html = await stmtResp.text();
+      if (!html.toLowerCase().includes('page not found') && html.length > 1000) {
         text = extractText(html);
+        url = stmtUrl;
+        console.log('FOMC Statement found: ' + dateStr + ' (' + text.length + ' chars)');
       }
     }
-    // If HTML didn't work, the PDF exists but we can't parse it easily — try the press conference page
-    if (text.length < 500) {
-      const altUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpresconf' + dateStr + '.htm';
-      r = await sf(altUrl, 12000);
-      url = altUrl;
-      if (r && r.ok) {
-        const html = await r.text();
-        if (!html.toLowerCase().includes('page not found') && html.length > 2000) {
-          text = extractText(html);
+
+    // 2. Try the press conference landing page (fomcpressconf, double 's')
+    const pcUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpressconf' + dateStr + '.htm';
+    const pcResp = await sf(pcUrl, 12000);
+    if (pcResp && pcResp.ok) {
+      const pcHtml = await pcResp.text();
+      if (!pcHtml.toLowerCase().includes('page not found') && pcHtml.length > 2000) {
+        const pcText = extractText(pcHtml);
+        // If the press conference page has more substantive text, use it
+        if (pcText.length > text.length) {
+          text = pcText;
+          url = pcUrl;
+          console.log('FOMC Press Conf page found: ' + dateStr + ' (' + text.length + ' chars)');
         }
       }
     }
-    if (text.length < 300) return null;
-    console.log('FOMC Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
-    const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
-    return { title: 'FOMC Press Conference — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url };
+
+    if (text.length < 200) return null;
+    return { title: 'FOMC Press Conference & Statement — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url };
   }));
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value) items.push(r.value);
@@ -421,79 +428,67 @@ const KNOWN_ECB_DATES = [
   '260122', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
 ];
 
-async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+async function fetchEcbPressConferences(cutoffDate: string, _aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
-  const cutoff = new Date(cutoffDate);
 
-  // ECB press conference pages follow patterns like:
-  // https://www.ecb.europa.eu/press/pressconf/2025/html/ecb.is250130~HASH.en.html
-  // Since we don't know the hash, we'll try to find them via the ECB press conference listing
-  
-  // First, try fetching the ECB press conference index page
+  // ECB monetary policy statement URLs contain a hash we can't guess.
+  // Solution: Fetch the year-specific include files which list all statements with full URLs.
+  // Pattern: /press/press_conference/monetary-policy-statement/YYYY/html/index_include.en.html
+  const currentYear = now.getFullYear();
+  const years = [currentYear, currentYear - 1]; // Check current and previous year
+
   try {
-    const listUrl = 'https://www.ecb.europa.eu/press/pressconf/html/index.en.html';
-    const r = await sf(listUrl, 15000);
-    if (r && r.ok) {
+    const includeResults = await Promise.allSettled(years.map(async (yr) => {
+      const includeUrl = `https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/${yr}/html/index_include.en.html`;
+      const r = await sf(includeUrl, 15000);
+      if (!r || !r.ok) return [];
       const html = await r.text();
-      // Extract press conference links
-      const linkRe = /href="([^"]*pressconf[^"]*\.en\.html)"/gi;
+      
+      // Extract statement page links: href="...ecb.isYYMMDD~HASH.en.html"
+      const linkRe = /href="([^"]*ecb\.is\d{6}~[^"]*\.en\.html)"/gi;
       let m;
-      const links: string[] = [];
+      const links: { url: string; dateStr: string }[] = [];
       while ((m = linkRe.exec(html)) !== null) {
         let link = m[1];
         if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
-        links.push(link);
+        // Extract date from ecb.isYYMMDD
+        const dateMatch = link.match(/ecb\.is(\d{2})(\d{2})(\d{2})/);
+        if (dateMatch) {
+          const fullDate = '20' + dateMatch[1] + '-' + dateMatch[2] + '-' + dateMatch[3];
+          if (fullDate >= cutoffDate && new Date(fullDate) <= now) {
+            links.push({ url: link, dateStr: fullDate });
+          }
+        }
       }
-      console.log('ECB Press Conf: found ' + links.length + ' links on index page');
+      return links;
+    }));
+
+    const allLinks: { url: string; dateStr: string }[] = [];
+    for (const r of includeResults) {
+      if (r.status === 'fulfilled') allLinks.push(...r.value);
+    }
+    console.log('ECB Press Conf: found ' + allLinks.length + ' statement links from include files');
+
+    // Fetch each statement page
+    const fetchResults = await Promise.allSettled(allLinks.slice(0, 10).map(async ({ url, dateStr }) => {
+      const r = await sf(url, 12000);
+      if (!r || !r.ok) return null;
+      const pageHtml = await r.text();
+      const text = extractText(pageHtml);
+      if (text.length < 500) return null;
       
-      // Filter to relevant dates and fetch
-      const recent = links.slice(0, 8); // Last 8 press conferences
-      const results = await Promise.allSettled(recent.map(async (link) => {
-        const r2 = await sf(link, 12000);
-        if (!r2 || !r2.ok) return null;
-        const pageHtml = await r2.text();
-        const text = extractText(pageHtml);
-        if (text.length < 500) return null;
-        
-        // Extract date from URL or page content
-        const dateMatch = link.match(/(\d{2})(\d{2})(\d{2})/);
-        if (!dateMatch) return null;
-        const yr = '20' + dateMatch[1];
-        const mn = dateMatch[2];
-        const dy = dateMatch[3];
-        const dateStr = yr + '-' + mn + '-' + dy;
-        if (dateStr < cutoffDate) return null;
-        
-        console.log('ECB Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
-        return {
-          title: 'ECB Monetary Policy Press Conference — ' + mn + '/' + dy + '/' + yr,
-          text, date: dateStr, url: link,
-        };
-      }));
-      for (const r2 of results) {
-        if (r2.status === 'fulfilled' && r2.value) items.push(r2.value);
-      }
+      const parts = dateStr.split('-');
+      console.log('ECB Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
+      return {
+        title: 'ECB Monetary Policy Press Conference — ' + parts[1] + '/' + parts[2] + '/' + parts[0],
+        text, date: dateStr, url,
+      };
+    }));
+    for (const r of fetchResults) {
+      if (r.status === 'fulfilled' && r.value) items.push(r.value);
     }
   } catch (e) { console.error('ECB press conf scraping:', e); }
-
-  // Fallback: Try direct URL patterns for known dates
-  if (items.length === 0) {
-    console.log('ECB Press Conf: trying direct URL patterns');
-    for (const dateStr of KNOWN_ECB_DATES) {
-      const yr = '20' + dateStr.slice(0, 2);
-      const mn = dateStr.slice(2, 4);
-      const dy = dateStr.slice(4, 6);
-      const fullDate = yr + '-' + mn + '-' + dy;
-      if (fullDate < cutoffDate || new Date(fullDate) > now) continue;
-      
-      // Try the monetary policy decisions page which is more reliably accessible
-      const decUrl = `https://www.ecb.europa.eu/press/pr/date/${yr}/html/ecb.mp${dateStr}~*.en.html`;
-      // This won't work with wildcard, so try the known format
-      const baseUrl = `https://www.ecb.europa.eu/press/pressconf/${yr}/html/ecb.is${dateStr}`;
-      // We can't guess the hash, so skip if index page didn't work
-    }
-  }
 
   return items;
 }
