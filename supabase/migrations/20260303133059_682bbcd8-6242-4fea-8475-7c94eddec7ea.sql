@@ -1,0 +1,1 @@
+DELETE FROM public.sentiment_items WHERE source = 'ECB Press Conf' AND net_score = 0 AND word_count > 1000;
