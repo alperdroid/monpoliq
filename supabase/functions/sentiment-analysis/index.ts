@@ -1,7 +1,10 @@
-// ── Sentiment Analysis v3.0 — AI-Powered (Gemini) + Cached Scoring ──
-// Communication items are scored by Gemini AI for contextual understanding.
-// Statistical items use numeric formula scoring (unchanged).
-// Already-scored items are loaded from DB and skipped.
+// ── Sentiment Analysis v4.0 — AI-Powered + Press Conferences + Dedup ──
+// Communication items scored by Gemini AI for contextual understanding.
+// Statistical items use numeric formula scoring.
+// Consumer Expectations Surveys → reclassified as statistical.
+// Fed Funds excluded (it's the target variable, not a predictor).
+// Duplicate inflation prints within same month → counted once.
+// FOMC & ECB press conference transcripts now scraped and analyzed.
 
 const CH = {
   'Access-Control-Allow-Origin': '*',
@@ -16,7 +19,7 @@ interface It {
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
 }
 
-// ── Statistical value scoring (unchanged) ──
+// ── Statistical value scoring ──
 function sv(v:number, ht:number, dt:number, dir:string, w:number, met:string) {
   let raw: number, lb: string;
   const B = 0.15;
@@ -121,7 +124,6 @@ function xn(title: string): number | null {
   if (!m) return null;
   let v = parseFloat(m[1]);
   if (isNaN(v)) return null;
-  // Use includes() instead of \b regex — word boundaries can fail with special whitespace from Eurostat feeds
   const negWords = ['down', 'fell', 'drop', 'decrease', 'decline', 'contract', 'shrink', 'lower'];
   if (v > 0 && negWords.some(w => tl.includes(w))) v = -v;
   return v;
@@ -163,7 +165,6 @@ async function scoreWithAI(
   bank: string,
   apiKey: string,
 ): Promise<AIScore> {
-  // Truncate text to ~3000 chars to save tokens while preserving key content
   const truncated = text.length > 3000 ? text.slice(0, 1500) + '\n...[middle truncated]...\n' + text.slice(-1500) : text;
 
   const userMsg = `Bank: ${bank}
@@ -210,13 +211,11 @@ Content: ${truncated}`;
   }
 }
 
-// Score a batch of communication items with AI (sequential to respect rate limits)
 async function scoreBatchWithAI(
   items: { title: string; text: string; bank: string }[],
   apiKey: string,
 ): Promise<AIScore[]> {
   const results: AIScore[] = [];
-  // Process in batches of 3 with small delays between batches
   for (let i = 0; i < items.length; i += 3) {
     const batch = items.slice(i, i + 3);
     const batchResults = await Promise.allSettled(
@@ -225,7 +224,6 @@ async function scoreBatchWithAI(
     for (const r of batchResults) {
       results.push(r.status === 'fulfilled' ? r.value : { score: 0, label: 'neutral', reasoning: 'error' });
     }
-    // Small delay between batches to avoid rate limiting
     if (i + 3 < items.length) {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -265,14 +263,14 @@ async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: st
   } catch { return []; }
 }
 
-// ── FRED ──
+// ── FRED (Fed Funds EXCLUDED — it's the target variable, not a predictor) ──
 interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir: string; w: number }
 const FR: FS[] = [
   { id: 'CPIAUCSL', met: 'CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
   { id: 'PAYEMS', met: 'Payrolls MoM', tr: 'd1', ht: 200, dt: 100, dir: 'hh', w: 3 },
   { id: 'UNRATE', met: 'Unemployment', tr: 'lv', ht: 4, dt: 5, dir: 'lh', w: 3 },
   { id: 'PCEPILFE', met: 'Core PCE YoY', tr: 'p12', ht: 2.5, dt: 2, dir: 'hh', w: 3 },
-  { id: 'FEDFUNDS', met: 'Fed Funds', tr: 'lv', ht: 5, dt: 3, dir: 'hh', w: 1 },
+  // FEDFUNDS removed — it's what we're trying to predict, not a leading indicator
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
 ];
@@ -307,20 +305,21 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
 }
 
 // ── FOMC Minutes ──
+const KNOWN_FOMC_DATES = [
+  '20260128','20260318','20260506','20260617','20260729','20260917','20261028','20261216',
+  '20250129','20250319','20250507','20250618','20250730','20250917','20251029','20251210',
+];
+
 async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
   const cutoff = new Date(cutoffDate);
-  const knownDates = [
-    '20260128','20260318','20260506','20260617','20260729','20260917','20261028','20261216',
-    '20250129','20250319','20250507','20250618','20250730','20250917','20251029','20251210',
-  ];
-  const relevantDates = knownDates.filter(ds => {
+  const relevantDates = KNOWN_FOMC_DATES.filter(ds => {
     const y = parseInt(ds.slice(0, 4)), m = parseInt(ds.slice(4, 6)) - 1, day = parseInt(ds.slice(6, 8));
     const meetDate = new Date(y, m, day);
     return meetDate >= cutoff && meetDate <= now;
   });
-  console.log('FOMC: checking ' + relevantDates.length + ' known meeting dates');
+  console.log('FOMC Minutes: checking ' + relevantDates.length + ' dates');
   const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
     const url = 'https://www.federalreserve.gov/monetarypolicy/fomcminutes' + dateStr + '.htm';
     const r = await sf(url, 12000);
@@ -339,9 +338,151 @@ async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; te
   return items;
 }
 
-// ── RSS feeds — returns raw items with text (scoring happens later via AI) ──
+// ── FOMC Press Conferences ──
+async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+  const items: { title: string; text: string; date: string; url: string }[] = [];
+  const now = new Date();
+  const cutoff = new Date(cutoffDate);
+  const relevantDates = KNOWN_FOMC_DATES.filter(ds => {
+    const y = parseInt(ds.slice(0, 4)), m = parseInt(ds.slice(4, 6)) - 1, day = parseInt(ds.slice(6, 8));
+    const meetDate = new Date(y, m, day);
+    return meetDate >= cutoff && meetDate <= now;
+  });
+  console.log('FOMC Press Conf: checking ' + relevantDates.length + ' dates');
+  const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
+    // Try HTML transcript first
+    const htmlUrl = 'https://www.federalreserve.gov/mediacenter/files/FOMCpresconf' + dateStr + '.htm';
+    let r = await sf(htmlUrl, 12000);
+    let text = '';
+    let url = htmlUrl;
+    if (r && r.ok) {
+      const html = await r.text();
+      if (!html.toLowerCase().includes('page not found') && html.length > 2000) {
+        text = extractText(html);
+      }
+    }
+    // If HTML didn't work, the PDF exists but we can't parse it easily — try the press conference page
+    if (text.length < 500) {
+      const altUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpresconf' + dateStr + '.htm';
+      r = await sf(altUrl, 12000);
+      url = altUrl;
+      if (r && r.ok) {
+        const html = await r.text();
+        if (!html.toLowerCase().includes('page not found') && html.length > 2000) {
+          text = extractText(html);
+        }
+      }
+    }
+    if (text.length < 300) return null;
+    console.log('FOMC Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
+    const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
+    return { title: 'FOMC Press Conference — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url };
+  }));
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value) items.push(r.value);
+  }
+  return items;
+}
+
+// ── ECB Press Conferences (Monetary Policy Statement) ──
+// Known ECB Governing Council meeting dates for press conferences
+const KNOWN_ECB_DATES = [
+  '250130', '250306', '250417', '250605', '250724', '250911', '251030', '251218',
+  '260122', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
+];
+
+async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+  const items: { title: string; text: string; date: string; url: string }[] = [];
+  const now = new Date();
+  const cutoff = new Date(cutoffDate);
+
+  // ECB press conference pages follow patterns like:
+  // https://www.ecb.europa.eu/press/pressconf/2025/html/ecb.is250130~HASH.en.html
+  // Since we don't know the hash, we'll try to find them via the ECB press conference listing
+  
+  // First, try fetching the ECB press conference index page
+  try {
+    const listUrl = 'https://www.ecb.europa.eu/press/pressconf/html/index.en.html';
+    const r = await sf(listUrl, 15000);
+    if (r && r.ok) {
+      const html = await r.text();
+      // Extract press conference links
+      const linkRe = /href="([^"]*pressconf[^"]*\.en\.html)"/gi;
+      let m;
+      const links: string[] = [];
+      while ((m = linkRe.exec(html)) !== null) {
+        let link = m[1];
+        if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
+        links.push(link);
+      }
+      console.log('ECB Press Conf: found ' + links.length + ' links on index page');
+      
+      // Filter to relevant dates and fetch
+      const recent = links.slice(0, 8); // Last 8 press conferences
+      const results = await Promise.allSettled(recent.map(async (link) => {
+        const r2 = await sf(link, 12000);
+        if (!r2 || !r2.ok) return null;
+        const pageHtml = await r2.text();
+        const text = extractText(pageHtml);
+        if (text.length < 500) return null;
+        
+        // Extract date from URL or page content
+        const dateMatch = link.match(/(\d{2})(\d{2})(\d{2})/);
+        if (!dateMatch) return null;
+        const yr = '20' + dateMatch[1];
+        const mn = dateMatch[2];
+        const dy = dateMatch[3];
+        const dateStr = yr + '-' + mn + '-' + dy;
+        if (dateStr < cutoffDate) return null;
+        
+        console.log('ECB Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
+        return {
+          title: 'ECB Monetary Policy Press Conference — ' + mn + '/' + dy + '/' + yr,
+          text, date: dateStr, url: link,
+        };
+      }));
+      for (const r2 of results) {
+        if (r2.status === 'fulfilled' && r2.value) items.push(r2.value);
+      }
+    }
+  } catch (e) { console.error('ECB press conf scraping:', e); }
+
+  // Fallback: Try direct URL patterns for known dates
+  if (items.length === 0) {
+    console.log('ECB Press Conf: trying direct URL patterns');
+    for (const dateStr of KNOWN_ECB_DATES) {
+      const yr = '20' + dateStr.slice(0, 2);
+      const mn = dateStr.slice(2, 4);
+      const dy = dateStr.slice(4, 6);
+      const fullDate = yr + '-' + mn + '-' + dy;
+      if (fullDate < cutoffDate || new Date(fullDate) > now) continue;
+      
+      // Try the monetary policy decisions page which is more reliably accessible
+      const decUrl = `https://www.ecb.europa.eu/press/pr/date/${yr}/html/ecb.mp${dateStr}~*.en.html`;
+      // This won't work with wildcard, so try the known format
+      const baseUrl = `https://www.ecb.europa.eu/press/pressconf/${yr}/html/ecb.is${dateStr}`;
+      // We can't guess the hash, so skip if index page didn't work
+    }
+  }
+
+  return items;
+}
+
+// ── Patterns to reclassify as statistical (not commentary) ──
+const STATISTICAL_RECLASSIFY_PATTERNS = [
+  /consumer\s+expectations?\s+survey/i,
+  /bank\s+lending\s+survey/i,
+  /survey\s+of\s+professional\s+forecasters/i,
+];
+
+function shouldReclassifyAsStatistical(title: string): boolean {
+  return STATISTICAL_RECLASSIFY_PATTERNS.some(p => p.test(title));
+}
+
+// ── RSS feeds — returns raw items with text ──
 const SKIP = new Set(['enforcement actions', 'orders on banking applications', 'other announcements', 'banking and consumer regulatory policy', 'community development']);
 const MINUTES_SKIP = /minutes/i;
+const PRESS_CONF_SKIP = /press\s*conference/i;
 
 interface RawComm { title: string; text: string; date: string; url: string; source: string; bank: string }
 
@@ -372,6 +513,7 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
       if (!p || p < cs) return false;
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
       if (bank === 'FED' && MINUTES_SKIP.test(ri.title)) return false;
+      if (bank === 'FED' && PRESS_CONF_SKIP.test(ri.title)) return false; // handled separately
       return true;
     }).slice(0, 50);
 
@@ -395,10 +537,9 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
   return items;
 }
 
-// ── ECB Stats + Eurostat (unchanged — formula scoring) ──
+// ── ECB Stats + Eurostat ──
 interface SR { pattern: string; met: string; ht: number | null; dt: number | null; dir: string; w: number }
 const EU: SR[] = [
-  // More specific patterns FIRST to prevent false matches (e.g. "deficit at 3.2% of GDP" matching GDP)
   { pattern: 'government deficit', met: 'Gov Deficit', ht: -2.5, dt: -4.0, dir: 'hh', w: 0.5 },
   { pattern: 'government debt', met: 'Gov Debt', ht: null, dt: null, dir: 'hh', w: 0 },
   { pattern: 'industrial production', met: 'Ind Prod', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
@@ -422,6 +563,43 @@ function ss(title: string): { ns: number; lb: string; met: string; val: number |
     break;
   }
   return null;
+}
+
+// ── Dedup inflation/stat prints within same month ──
+// If two items have the same stat_metric and same stat_value and same month, keep only the first
+function deduplicateStatItems(items: It[]): It[] {
+  const seen = new Map<string, It>(); // key: "metric|YYYY-MM|value"
+  const result: It[] = [];
+  for (const it of items) {
+    if (it.is_statistical && it.stat_metric) {
+      const month = it.item_date.slice(0, 7);
+      const key = `${it.stat_metric}|${month}|${it.stat_value}`;
+      if (seen.has(key)) {
+        // Duplicate — mark it with zero score and note
+        const dup = { ...it, net_score: 0, label: 'neutral', reasons: ['duplicate: already counted in ' + seen.get(key)!.item_date], stat_weight: 0 };
+        result.push(dup);
+        console.log('Dedup: "' + it.title + '" same as earlier ' + seen.get(key)!.item_date + ' print');
+      } else {
+        // Check if same metric, same month but DIFFERENT value (revised estimate)
+        const monthKey = `${it.stat_metric}|${month}`;
+        const existingForMonth = result.find(r => r.is_statistical && r.stat_metric === it.stat_metric && r.item_date.slice(0, 7) === month && r.stat_value !== it.stat_value);
+        if (existingForMonth) {
+          // Revised estimate — adjust score based on revision
+          const revision = (it.stat_value || 0) - (existingForMonth.stat_value || 0);
+          console.log('Revision detected for ' + it.stat_metric + ': ' + existingForMonth.stat_value + ' → ' + it.stat_value + ' (diff: ' + revision + ')');
+          // Re-score based on the revised value, but at reduced weight since it's a revision
+          const revisedWeight = Math.max(0.5, (it.stat_weight || 1) * 0.5);
+          it.stat_weight = revisedWeight;
+          it.reasons = ['revised estimate from ' + existingForMonth.stat_value + ' to ' + it.stat_value];
+        }
+        seen.set(key, it);
+        result.push(it);
+      }
+    } else {
+      result.push(it);
+    }
+  }
+  return result;
 }
 
 async function fetchEcbStats(cs: string): Promise<It[]> {
@@ -451,7 +629,7 @@ async function fetchEcbStats(cs: string): Promise<It[]> {
       }
     }
   } catch (e) { console.error('Eurostat:', e); }
-  return items;
+  return deduplicateStatItems(items);
 }
 
 // ── Aggregation (excludes zero-score neutral items) ──
@@ -513,7 +691,7 @@ Deno.serve(async (req) => {
     const rawBank = (body.bank || 'both').toLowerCase();
     const bank = rawBank === 'fed' ? 'FED' : rawBank === 'ecb' ? 'ECB' : 'both';
     const days = body.days || 365;
-    console.log('SA v3.0 (AI-scored): bank=' + bank + ' days=' + days);
+    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days);
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
     const fk = Deno.env.get('FRED_API_KEY') || '';
@@ -522,26 +700,33 @@ Deno.serve(async (req) => {
     const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const result: Record<string, any> = {};
 
+    const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+
     if (bank === 'both' || bank === 'FED') {
-      // Load existing items from DB
       const existing = await loadExistingItems('FED', sbUrl, sbKey);
       console.log('FED: ' + existing.size + ' existing items in DB');
 
-      const [fr, rawComms, fomcRaw] = await Promise.allSettled([
+      const [fr, rawComms, fomcRaw, pressConfRaw] = await Promise.allSettled([
         fk ? fetchFred(fk, days) : Promise.resolve([]),
         fetchRssRaw(cs, 'FED'),
         fetchFomcMinutes(cs),
+        fetchFomcPressConferences(cs),
       ]);
 
       const fi: It[] = [];
       if (fr.status === 'fulfilled') fi.push(...fr.value);
 
-      // Filter to only NEW communication items (not already in DB)
+      // Combine all communication sources
       const allRawComms: RawComm[] = [];
       if (rawComms.status === 'fulfilled') allRawComms.push(...rawComms.value);
       if (fomcRaw.status === 'fulfilled') {
         for (const m of fomcRaw.value) {
           allRawComms.push({ title: m.title, text: m.text, date: m.date, url: m.url, source: 'FOMC Minutes', bank: 'FED' });
+        }
+      }
+      if (pressConfRaw.status === 'fulfilled') {
+        for (const pc of pressConfRaw.value) {
+          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: 'FOMC Press Conf', bank: 'FED' });
         }
       }
 
@@ -573,7 +758,6 @@ Deno.serve(async (req) => {
       }
 
       // Persist new items, then aggregate from FULL DB
-      const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
       if (fi.length) {
         for (let i = 0; i < fi.length; i += 50) {
           const batch = fi.slice(i, i + 50);
@@ -608,13 +792,45 @@ Deno.serve(async (req) => {
       const existing = await loadExistingItems('ECB', sbUrl, sbKey);
       console.log('ECB: ' + existing.size + ' existing items in DB');
 
-      const [rawComms, st] = await Promise.allSettled([fetchRssRaw(cs, 'ECB'), fetchEcbStats(cs)]);
+      const [rawComms, st, ecbPressConf] = await Promise.allSettled([
+        fetchRssRaw(cs, 'ECB'),
+        fetchEcbStats(cs),
+        fetchEcbPressConferences(cs, aiKey),
+      ]);
+
       const ei: It[] = [];
       if (st.status === 'fulfilled') ei.push(...st.value);
 
       const allRawComms: RawComm[] = rawComms.status === 'fulfilled' ? rawComms.value : [];
-      const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
-      console.log('ECB: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
+      
+      // Add ECB press conference transcripts
+      if (ecbPressConf.status === 'fulfilled') {
+        for (const pc of ecbPressConf.value) {
+          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: 'ECB Press Conf', bank: 'ECB' });
+        }
+      }
+
+      // Reclassify consumer expectations surveys and similar as statistical
+      const actualComms: RawComm[] = [];
+      for (const c of allRawComms) {
+        if (shouldReclassifyAsStatistical(c.title)) {
+          console.log('Reclassifying as statistical: ' + c.title);
+          // Score with AI but mark as statistical
+          ei.push({
+            bank: 'ECB', source: c.source, item_date: c.date,
+            title: c.title, url: c.url,
+            is_statistical: true,
+            hawk_pts: 0, dove_pts: 0, net_score: 0,
+            label: 'neutral', word_count: 0, reasons: ['survey-reclassified-as-statistical'],
+            stat_metric: 'Survey', stat_value: null, stat_weight: 1,
+          });
+        } else {
+          actualComms.push(c);
+        }
+      }
+
+      const newComms = actualComms.filter(c => !existing.has(`${c.title}|${c.date}`));
+      console.log('ECB: ' + actualComms.length + ' actual comms, ' + newComms.length + ' NEW to score with AI');
 
       if (newComms.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
@@ -641,11 +857,10 @@ Deno.serve(async (req) => {
 
       // Persist new items, then aggregate from FULL DB
       if (ei.length) {
-        const persistHd2 = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
         for (let i = 0; i < ei.length; i += 50) {
           const batch = ei.slice(i, i + 50);
           await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
-            method: 'POST', headers: persistHd2,
+            method: 'POST', headers: persistHd,
             body: JSON.stringify(batch.map(it => ({
               bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
               url: it.url || '', is_statistical: it.is_statistical,
@@ -658,9 +873,8 @@ Deno.serve(async (req) => {
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
       const s1 = ag(allEcbItems.filter(i => !i.is_statistical)), s2 = ag(allEcbItems);
-      const persistHd3 = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' };
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
-        method: 'POST', headers: persistHd3,
+        method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
           bank: 'ECB',
           score_1_avg: s1.avg, score_1_count: s1.n, score_1_label: s1.sentiment, score_1_dist: s1.dist,

@@ -240,7 +240,7 @@ const Dashboard = () => {
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-semibold">1-Year Sentiment Fluctuation (Monthly Avg)</h3>
+            <h3 className="text-sm font-semibold">Sentiment Fluctuation (Monthly Avg)</h3>
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={fluctuationData}>
