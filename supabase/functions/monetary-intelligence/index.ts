@@ -20,10 +20,10 @@ serve(async (req) => {
     const sb = createClient(supabaseUrl, supabaseKey);
 
     // ── 1. Gather sentiment data from DB ──
-    const cutoff30 = new Date();
-    cutoff30.setDate(cutoff30.getDate() - 30);
     const cutoff90 = new Date();
     cutoff90.setDate(cutoff90.getDate() - 90);
+    const cutoff30 = new Date();
+    cutoff30.setDate(cutoff30.getDate() - 30);
 
     const [commsRes, statsRes, scoresRes] = await Promise.all([
       sb.from("sentiment_items")
@@ -48,6 +48,30 @@ serve(async (req) => {
     const stats = statsRes.data || [];
     const scores = scoresRes.data || [];
 
+    // ── 2. Compute data hash for caching ──
+    // Hash = count of items + latest item date + scores. If unchanged, return cached prediction.
+    const latestCommDate = comms.length ? comms[0].item_date : "none";
+    const latestStatDate = stats.length ? stats[0].item_date : "none";
+    const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
+    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}`;
+
+    // Check cache: return if same data hash AND less than 24h old
+    const { data: cached } = await sb.from("prediction_cache")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (cached && cached.length > 0) {
+      const cacheAge = Date.now() - new Date(cached[0].created_at).getTime();
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      if (cached[0].data_hash === dataHash && cacheAge < ONE_DAY) {
+        console.log("Returning cached prediction (same data, < 24h old)");
+        return new Response(JSON.stringify(cached[0].predictions), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Separate by bank
     const fedComms = comms.filter((i: any) => i.bank === "FED");
     const ecbComms = comms.filter((i: any) => i.bank === "ECB");
@@ -65,31 +89,6 @@ serve(async (req) => {
     const fedScore = scores.find((s: any) => s.bank === "FED");
     const ecbScore = scores.find((s: any) => s.bank === "ECB");
 
-    // ── 2. Fetch market expectations from external sources ──
-    let marketContext = "";
-    try {
-      // CME FedWatch implied probabilities (scrape summary)
-      const [cmeResp, ecbResp] = await Promise.allSettled([
-        fetch("https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(8000),
-        }),
-        fetch("https://www.ecb.europa.eu/press/pr/date/2026/html/index.en.html", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(8000),
-        }),
-      ]);
-
-      if (cmeResp.status === "fulfilled" && cmeResp.value.ok) {
-        const html = await cmeResp.value.text();
-        // Extract any visible probability text
-        const probMatch = html.match(/(\d+\.?\d*)%\s*(probability|chance|target)/gi);
-        if (probMatch) marketContext += "CME FedWatch signals: " + probMatch.slice(0, 5).join(", ") + ". ";
-      }
-    } catch {
-      // Market data fetch is best-effort
-    }
-
     // ── 3. Build AI prompt ──
     const summarizeItems = (items: any[], limit = 15) =>
       items.slice(0, limit).map((i: any) =>
@@ -97,6 +96,18 @@ serve(async (req) => {
       ).join("\n");
 
     const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, and market expectations to predict the next policy decision. Do not mention any AI model names in your reasoning.
+
+CRITICAL EUR/USD LOGIC — you MUST follow this:
+- EUR/USD = how many USD per 1 EUR
+- If the ECB is expected to CUT rates (dovish) while Fed HOLDS or is less dovish → EUR weakens → EUR/USD is BEARISH
+- If the Fed is expected to CUT rates (dovish) while ECB holds or is less dovish → USD weakens → EUR/USD is BULLISH
+- The direction MUST be consistent with the rate differential logic. If ECB is more dovish than Fed → BEARISH for EUR/USD. Period.
+- "Bullish EUR/USD" means EUR strengthening. "Bearish EUR/USD" means EUR weakening.
+
+GEOPOLITICAL CONTEXT — include in your reasoning:
+- For Fed and ECB decisions: include ONE sentence about relevant geopolitical factors (trade wars, tariffs, sanctions, geopolitical tensions) affecting the policy outlook
+- For EUR/USD: include ONE sentence about geopolitical effects on the currency pair
+- For US 10Y Treasury: include ONE sentence about either geopolitical risk or fiscal policy effects (US deficit, debt ceiling, Treasury issuance)
 
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:
 {
@@ -106,7 +117,7 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
     "hold_probability": 0.0-1.0,
     "cut_probability": 0.0-1.0,
     "confidence": 0.0-1.0,
-    "reasoning": "Brief 2-3 sentence explanation"
+    "reasoning": "2-3 sentences including one on geopolitical factors"
   },
   "ecb": {
     "next_decision": "hike" | "hold" | "cut",
@@ -114,27 +125,27 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
     "hold_probability": 0.0-1.0,
     "cut_probability": 0.0-1.0,
     "confidence": 0.0-1.0,
-    "reasoning": "Brief 2-3 sentence explanation"
+    "reasoning": "2-3 sentences including one on geopolitical factors"
   },
   "eurusd": {
     "direction": "bullish" | "bearish" | "neutral",
     "signal_strength": 0.0-1.0,
     "confidence": 0.0-1.0,
-    "reasoning": "Brief 1-2 sentence explanation"
+    "reasoning": "2-3 sentences. MUST be logically consistent with the rate decisions above. Include one sentence on geopolitical effects."
   },
   "us10y": {
     "direction": "bullish" | "bearish" | "neutral",
     "yield_bias": "higher" | "lower" | "stable",
     "signal_strength": 0.0-1.0,
     "confidence": 0.0-1.0,
-    "reasoning": "Brief 1-2 sentence explanation based on monetary policy outlook and inflation expectations"
+    "reasoning": "2-3 sentences on monetary policy outlook and inflation expectations. Include one sentence on geopolitical risk OR fiscal policy impact."
   }
 }
 
 Probabilities for each bank MUST sum to 1.0. Base your analysis on:
 1. Communication sentiment scores (positive = hawkish, negative = dovish)
 2. Statistical/economic data trends
-3. Market expectations (if available)
+3. Rate differential logic for EUR/USD (the MORE dovish central bank weakens its currency)
 4. Recent policy trajectory and forward guidance`;
 
     const userPrompt = `Analyze the following data and predict the next Fed and ECB decisions:
@@ -157,8 +168,10 @@ ${summarizeItems(ecbStats)}
 
 ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
 
-## MARKET EXPECTATIONS
-${marketContext || "No external market data available — rely on communication and statistical signals."}
+IMPORTANT CONSISTENCY CHECK:
+- If ECB sentiment is more dovish than Fed → ECB more likely to cut → EUR weakens → EUR/USD direction MUST be "bearish"
+- If Fed sentiment is more dovish than ECB → Fed more likely to cut → USD weakens → EUR/USD direction MUST be "bullish"
+- The EUR/USD direction MUST logically follow from the policy predictions above.
 
 Current date: ${new Date().toISOString().split("T")[0]}
 Provide your prediction as the JSON object described.`;
@@ -182,14 +195,16 @@ Provide your prediction as the JSON object described.`;
     if (!aiResp.ok) {
       const errText = await aiResp.text();
       console.error("AI gateway error:", aiResp.status, errText);
+      // On error, return cached prediction if available
+      if (cached && cached.length > 0) {
+        console.log("AI error, returning stale cached prediction");
+        return new Response(JSON.stringify(cached[0].predictions), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (aiResp.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limited, please try again shortly." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiResp.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       throw new Error(`AI error: ${aiResp.status}`);
@@ -197,8 +212,6 @@ Provide your prediction as the JSON object described.`;
 
     const aiData = await aiResp.json();
     let content = aiData.choices?.[0]?.message?.content || "";
-    
-    // Strip markdown code fences if present
     content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
 
     let prediction;
@@ -206,6 +219,12 @@ Provide your prediction as the JSON object described.`;
       prediction = JSON.parse(content);
     } catch {
       console.error("Failed to parse AI response:", content);
+      // Return cached on parse error
+      if (cached && cached.length > 0) {
+        return new Response(JSON.stringify(cached[0].predictions), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       throw new Error("AI returned invalid JSON");
     }
 
@@ -215,10 +234,26 @@ Provide your prediction as the JSON object described.`;
       if (!p) throw new Error(`Missing ${bank} prediction`);
       const sum = (p.hike_probability || 0) + (p.hold_probability || 0) + (p.cut_probability || 0);
       if (sum > 0 && Math.abs(sum - 1) > 0.05) {
-        // Normalize
         p.hike_probability = (p.hike_probability || 0) / sum;
         p.hold_probability = (p.hold_probability || 0) / sum;
         p.cut_probability = (p.cut_probability || 0) / sum;
+      }
+    }
+
+    // ── 5. Post-hoc consistency check for EUR/USD ──
+    const fedDecision = prediction.fed?.next_decision;
+    const ecbDecision = prediction.ecb?.next_decision;
+    if (ecbDecision === "cut" && fedDecision !== "cut") {
+      // ECB cutting while Fed isn't → EUR weakens → must be bearish
+      if (prediction.eurusd?.direction === "bullish") {
+        console.log("Correcting EUR/USD: ECB cutting + Fed not cutting → forcing bearish");
+        prediction.eurusd.direction = "bearish";
+      }
+    } else if (fedDecision === "cut" && ecbDecision !== "cut") {
+      // Fed cutting while ECB isn't → USD weakens → must be bullish
+      if (prediction.eurusd?.direction === "bearish") {
+        console.log("Correcting EUR/USD: Fed cutting + ECB not cutting → forcing bullish");
+        prediction.eurusd.direction = "bullish";
       }
     }
 
@@ -232,6 +267,13 @@ Provide your prediction as the JSON object described.`;
       fed_30d_avg: avg(fedComms),
       ecb_30d_avg: avg(ecbComms),
     };
+
+    // ── 6. Cache the prediction ──
+    await sb.from("prediction_cache").insert({
+      predictions: prediction,
+      data_hash: dataHash,
+    });
+    console.log("Prediction cached with hash:", dataHash);
 
     return new Response(JSON.stringify(prediction), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

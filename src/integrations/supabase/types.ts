@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      prediction_cache: {
+        Row: {
+          created_at: string
+          data_hash: string
+          id: string
+          predictions: Json
+        }
+        Insert: {
+          created_at?: string
+          data_hash: string
+          id?: string
+          predictions: Json
+        }
+        Update: {
+          created_at?: string
+          data_hash?: string
+          id?: string
+          predictions?: Json
+        }
+        Relationships: []
+      }
       sentiment_items: {
         Row: {
           bank: string
