@@ -19,20 +19,27 @@ interface It {
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
 }
 
-// ── Statistical value scoring ──
+// ── Statistical value scoring (continuous, [-1,1] scale) ──
+// Scores are normalized to [-1, 1] to match AI communication scores.
+// Weight is stored separately for aggregation weighting, NOT multiplied into the score.
 function sv(v:number, ht:number, dt:number, dir:string, w:number, met:string) {
-  let raw: number, lb: string;
-  const B = 0.15;
+  const mid = (ht + dt) / 2;
+  const spread = Math.max(Math.abs(ht - dt), 1);
+  let raw: number;
   if (dir === 'lh') {
-    if (v <= ht) { raw = Math.max(Math.min((ht - v) / Math.max(Math.abs(ht), 1) * 2, 2), B); lb = 'hawkish'; }
-    else if (v >= dt) { raw = -Math.max(Math.min((v - dt) / Math.max(Math.abs(dt), 1) * 2, 2), B); lb = 'dovish'; }
-    else { raw = -(v - (ht + dt) / 2) / Math.max(Math.abs(ht - dt), 1); lb = raw > 0.05 ? 'hawkish' : raw < -0.05 ? 'dovish' : 'neutral'; }
+    // Lower = hawkish (e.g. unemployment: low unemployment is hawkish)
+    raw = (mid - v) / spread;
   } else {
-    if (v >= ht) { raw = Math.max(Math.min((v - ht) / Math.max(Math.abs(ht), 1) * 2, 2), B); lb = 'hawkish'; }
-    else if (v <= dt) { raw = -Math.max(Math.min(Math.abs(dt - v) / Math.max(Math.abs(dt), 1) * 2, 2), B); lb = 'dovish'; }
-    else { raw = (v - (ht + dt) / 2) / Math.max(Math.abs(ht - dt), 1); lb = raw > 0.05 ? 'hawkish' : raw < -0.05 ? 'dovish' : 'neutral'; }
+    // Higher = hawkish (e.g. inflation: high inflation is hawkish)
+    raw = (v - mid) / spread;
   }
-  return { net_score: Math.round(raw * w * 1000) / 1000, label: lb, metric: met, value: Math.round(v * 100) / 100 };
+  // Diminishing returns beyond ±1 spread, hard clamp at [-1, 1]
+  if (Math.abs(raw) > 1) {
+    raw = Math.sign(raw) * (1 - 0.05 / Math.abs(raw)); // asymptote toward ±1
+  }
+  raw = Math.max(-1, Math.min(1, raw));
+  const lb = raw > 0.05 ? 'hawkish' : raw < -0.05 ? 'dovish' : 'neutral';
+  return { net_score: Math.round(raw * 1000) / 1000, label: lb, metric: met, value: Math.round(v * 100) / 100 };
 }
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
