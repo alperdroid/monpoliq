@@ -9,7 +9,8 @@ interface StanceGaugeProps {
 }
 
 export function StanceGauge({ value, label, size = 'md', showLabels = true, className }: StanceGaugeProps) {
-  const pct = ((value + 1) / 2) * 100; // 0-100
+  const clamped = Math.max(-1, Math.min(1, value));
+  const pct = ((clamped + 1) / 2) * 100; // 0-100
 
   return (
     <div className={cn('space-y-1.5', className)}>
@@ -27,9 +28,9 @@ export function StanceGauge({ value, label, size = 'md', showLabels = true, clas
           <div
             className={cn(
               'h-full rounded-full transition-all duration-700',
-              value > 0.3 ? 'bg-signal-hawkish' :
-              value > 0 ? 'bg-signal-neutral' :
-              value > -0.3 ? 'bg-signal-neutral' :
+              clamped > 0.3 ? 'bg-signal-hawkish' :
+              clamped > 0 ? 'bg-signal-neutral' :
+              clamped > -0.3 ? 'bg-signal-neutral' :
               'bg-signal-dovish',
             )}
             style={{
@@ -44,8 +45,8 @@ export function StanceGauge({ value, label, size = 'md', showLabels = true, clas
               size === 'sm' && 'w-3 h-3',
               size === 'md' && 'w-4 h-4',
               size === 'lg' && 'w-5 h-5',
-              value > 0.3 ? 'bg-signal-hawkish' :
-              value > -0.3 ? 'bg-signal-neutral' :
+              clamped > 0.3 ? 'bg-signal-hawkish' :
+              clamped > -0.3 ? 'bg-signal-neutral' :
               'bg-signal-dovish',
             )}
             style={{ left: `${pct}%` }}
@@ -61,8 +62,8 @@ export function StanceGauge({ value, label, size = 'md', showLabels = true, clas
       </div>
       <p className={cn(
         'text-sm font-mono font-semibold text-center',
-        value > 0.3 ? 'text-signal-hawkish' :
-        value > -0.3 ? 'text-signal-neutral' :
+        clamped > 0.3 ? 'text-signal-hawkish' :
+        clamped > -0.3 ? 'text-signal-neutral' :
         'text-signal-dovish',
       )}>
         {value > 0 ? '+' : ''}{value.toFixed(2)}

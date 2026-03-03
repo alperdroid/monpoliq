@@ -64,7 +64,7 @@ export function PredictionPanel({
             ]}
           />
           {fedReasoning && (
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed italic">{fedReasoning}</p>
+            <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{fedReasoning}</p>
           )}
         </div>
 
@@ -86,7 +86,7 @@ export function PredictionPanel({
             ]}
           />
           {ecbReasoning && (
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed italic">{ecbReasoning}</p>
+            <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{ecbReasoning}</p>
           )}
         </div>
 
@@ -100,7 +100,7 @@ export function PredictionPanel({
             </div>
           </div>
           {eurusdReasoning && (
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed italic">{eurusdReasoning}</p>
+            <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{eurusdReasoning}</p>
           )}
         </div>
 
@@ -119,7 +119,7 @@ export function PredictionPanel({
               </div>
             </div>
             {us10yReasoning && (
-              <p className="text-xs text-muted-foreground mt-2 leading-relaxed italic">{us10yReasoning}</p>
+              <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{us10yReasoning}</p>
             )}
           </div>
         )}
