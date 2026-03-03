@@ -473,11 +473,20 @@ async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Prom
       return links;
     }));
 
-    const allLinks: { url: string; dateStr: string }[] = [];
+    const allLinksRaw: { url: string; dateStr: string }[] = [];
     for (const r of includeResults) {
-      if (r.status === 'fulfilled') allLinks.push(...r.value);
+      if (r.status === 'fulfilled') allLinksRaw.push(...r.value);
     }
-    console.log('ECB Press Conf: found ' + allLinks.length + ' statement links from include files');
+    // Deduplicate by date (same meeting can appear in multiple year files)
+    const seenDates = new Set<string>();
+    const allLinks: { url: string; dateStr: string }[] = [];
+    for (const l of allLinksRaw) {
+      if (!seenDates.has(l.dateStr)) {
+        seenDates.add(l.dateStr);
+        allLinks.push(l);
+      }
+    }
+    console.log('ECB Press Conf: found ' + allLinks.length + ' unique statement links from include files');
 
     // Fetch each statement page
     const fetchResults = await Promise.allSettled(allLinks.slice(0, 10).map(async ({ url, dateStr }) => {
@@ -860,9 +869,10 @@ Deno.serve(async (req) => {
 
       // Persist new items, then aggregate from FULL DB
       if (fi.length) {
+        console.log('FED: persisting ' + fi.length + ' items to DB');
         for (let i = 0; i < fi.length; i += 50) {
           const batch = fi.slice(i, i + 50);
-          await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+          const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
             method: 'POST', headers: persistHd,
             body: JSON.stringify(batch.map(it => ({
               bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
@@ -872,6 +882,10 @@ Deno.serve(async (req) => {
               stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
             }))),
           });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => 'no body');
+            console.error('FED persist error (batch ' + i + '): ' + resp.status + ' ' + errText);
+          }
         }
       }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
@@ -960,19 +974,39 @@ Deno.serve(async (req) => {
       }
 
       // Persist new items, then aggregate from FULL DB
-      if (ei.length) {
-        for (let i = 0; i < ei.length; i += 50) {
-          const batch = ei.slice(i, i + 50);
-          await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+      // Deduplicate items by (bank, source, title, item_date) before persist
+      const dedupKey = (it: It) => `${it.bank}|${it.source}|${it.title}|${it.item_date}`;
+      const dedupSet = new Set<string>();
+      const dedupEi: It[] = [];
+      for (const it of ei) {
+        const k = dedupKey(it);
+        if (!dedupSet.has(k)) { dedupSet.add(k); dedupEi.push(it); }
+      }
+      if (dedupEi.length < ei.length) console.log('ECB: deduped ' + ei.length + ' -> ' + dedupEi.length + ' items');
+      if (dedupEi.length) {
+        console.log('ECB: persisting ' + dedupEi.length + ' items to DB');
+        for (let i = 0; i < dedupEi.length; i += 50) {
+          const batch = dedupEi.slice(i, i + 50);
+          const payload = batch.map(it => ({
+            bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+            url: it.url || '', is_statistical: it.is_statistical,
+            hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+            label: it.label, word_count: it.word_count, reasons: it.reasons,
+            stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+          }));
+          // Log press conf items for debugging
+          const pressConfInBatch = payload.filter(p => p.source === 'ECB Press Conf');
+          if (pressConfInBatch.length) {
+            console.log('ECB persist batch has ' + pressConfInBatch.length + ' press conf items: ' + pressConfInBatch.map(p => p.title).join(', '));
+          }
+          const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
             method: 'POST', headers: persistHd,
-            body: JSON.stringify(batch.map(it => ({
-              bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
-              url: it.url || '', is_statistical: it.is_statistical,
-              hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
-              label: it.label, word_count: it.word_count, reasons: it.reasons,
-              stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
-            }))),
+            body: JSON.stringify(payload),
           });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => 'no body');
+            console.error('ECB persist error (batch ' + i + '): ' + resp.status + ' ' + errText);
+          }
         }
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
