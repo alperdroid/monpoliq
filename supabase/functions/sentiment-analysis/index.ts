@@ -124,6 +124,10 @@ function xn(title: string): number | null {
   if (!m) return null;
   let v = parseFloat(m[1]);
   if (isNaN(v)) return null;
+  // Don't negate if value follows "to", "at", "of" — it's an absolute level (e.g. "inflation down to 1.7%")
+  const beforeNum = tl.slice(0, m.index);
+  if (/\b(to|at|of)\s*$/.test(beforeNum)) return v;
+  // Only negate for change descriptions (e.g. "fell 0.3%")
   const negWords = ['down', 'fell', 'drop', 'decrease', 'decline', 'contract', 'shrink', 'lower'];
   if (v > 0 && negWords.some(w => tl.includes(w))) v = -v;
   return v;
@@ -242,6 +246,25 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     const data = await resp.json();
     return new Set((data || []).map((d: any) => `${d.title}|${d.item_date}`));
   } catch { return new Set(); }
+}
+
+// ── Load existing STATISTICAL items for dedup ──
+async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
+  try {
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}&is_statistical=eq.true&limit=500`,
+      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
+    );
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data || []).map((d: any) => ({
+      bank: d.bank, source: d.source, item_date: d.item_date, title: d.title,
+      url: d.url || '', is_statistical: d.is_statistical,
+      hawk_pts: d.hawk_pts || 0, dove_pts: d.dove_pts || 0, net_score: Number(d.net_score) || 0,
+      label: d.label || 'neutral', word_count: d.word_count || 0, reasons: d.reasons || [],
+      stat_metric: d.stat_metric, stat_value: d.stat_value != null ? Number(d.stat_value) : null, stat_weight: Number(d.stat_weight) || 0,
+    } as It));
+  } catch { return []; }
 }
 
 // ── Load ALL existing items from DB for aggregation ──
@@ -567,29 +590,38 @@ function ss(title: string): { ns: number; lb: string; met: string; val: number |
 
 // ── Dedup inflation/stat prints within same month ──
 // If two items have the same stat_metric and same stat_value and same month, keep only the first
-function deduplicateStatItems(items: It[]): It[] {
+// Also checks against existing DB items
+function deduplicateStatItems(items: It[], existingDbItems: It[] = []): It[] {
   const seen = new Map<string, It>(); // key: "metric|YYYY-MM|value"
+  // Pre-seed with existing DB items so new duplicates are caught
+  for (const it of existingDbItems) {
+    if (it.is_statistical && it.stat_metric && it.stat_value !== null && Math.abs(it.net_score) > 0.001) {
+      const month = it.item_date.slice(0, 7);
+      const key = `${it.stat_metric}|${month}|${it.stat_value}`;
+      if (!seen.has(key)) seen.set(key, it);
+    }
+  }
   const result: It[] = [];
   for (const it of items) {
     if (it.is_statistical && it.stat_metric) {
       const month = it.item_date.slice(0, 7);
       const key = `${it.stat_metric}|${month}|${it.stat_value}`;
-      if (seen.has(key)) {
+      if (seen.has(key) && seen.get(key)!.item_date !== it.item_date) {
         // Duplicate — mark it with zero score and note
         const dup = { ...it, net_score: 0, label: 'neutral', reasons: ['duplicate: already counted in ' + seen.get(key)!.item_date], stat_weight: 0 };
         result.push(dup);
         console.log('Dedup: "' + it.title + '" same as earlier ' + seen.get(key)!.item_date + ' print');
       } else {
         // Check if same metric, same month but DIFFERENT value (revised estimate)
-        const monthKey = `${it.stat_metric}|${month}`;
-        const existingForMonth = result.find(r => r.is_statistical && r.stat_metric === it.stat_metric && r.item_date.slice(0, 7) === month && r.stat_value !== it.stat_value);
+        const existingForMonth = [...result, ...existingDbItems].find(r => 
+          r.is_statistical && r.stat_metric === it.stat_metric && 
+          r.item_date.slice(0, 7) === month && r.stat_value !== it.stat_value &&
+          Math.abs(r.net_score) > 0.001
+        );
         if (existingForMonth) {
-          // Revised estimate — adjust score based on revision
           const revision = (it.stat_value || 0) - (existingForMonth.stat_value || 0);
           console.log('Revision detected for ' + it.stat_metric + ': ' + existingForMonth.stat_value + ' → ' + it.stat_value + ' (diff: ' + revision + ')');
-          // Re-score based on the revised value, but at reduced weight since it's a revision
-          const revisedWeight = Math.max(0.5, (it.stat_weight || 1) * 0.5);
-          it.stat_weight = revisedWeight;
+          it.stat_weight = Math.max(0.5, (it.stat_weight || 1) * 0.5);
           it.reasons = ['revised estimate from ' + existingForMonth.stat_value + ' to ' + it.stat_value];
         }
         seen.set(key, it);
@@ -602,7 +634,7 @@ function deduplicateStatItems(items: It[]): It[] {
   return result;
 }
 
-async function fetchEcbStats(cs: string): Promise<It[]> {
+async function fetchEcbStats(cs: string, existingDbItems: It[] = []): Promise<It[]> {
   const items: It[] = [];
   try {
     const r = await sf('https://www.ecb.europa.eu/rss/statpress.html');
@@ -629,7 +661,7 @@ async function fetchEcbStats(cs: string): Promise<It[]> {
       }
     }
   } catch (e) { console.error('Eurostat:', e); }
-  return deduplicateStatItems(items);
+  return deduplicateStatItems(items, existingDbItems);
 }
 
 // ── Aggregation (excludes zero-score neutral items) ──
@@ -789,12 +821,15 @@ Deno.serve(async (req) => {
     }
 
     if (bank === 'both' || bank === 'ECB') {
-      const existing = await loadExistingItems('ECB', sbUrl, sbKey);
-      console.log('ECB: ' + existing.size + ' existing items in DB');
+      const [existing, existingStatItems] = await Promise.all([
+        loadExistingItems('ECB', sbUrl, sbKey),
+        loadExistingStatItems('ECB', sbUrl, sbKey),
+      ]);
+      console.log('ECB: ' + existing.size + ' existing items in DB, ' + existingStatItems.length + ' stat items for dedup');
 
       const [rawComms, st, ecbPressConf] = await Promise.allSettled([
         fetchRssRaw(cs, 'ECB'),
-        fetchEcbStats(cs),
+        fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
       ]);
 
