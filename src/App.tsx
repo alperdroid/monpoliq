@@ -12,6 +12,8 @@ import MeetingCycles from "./pages/MeetingCycles";
 import Predictions from "./pages/Predictions";
 import StatisticalData from "./pages/StatisticalData";
 import Communications from "./pages/Communications";
+import Committee from "./pages/Committee";
+import Counterfactual from "./pages/Counterfactual";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
