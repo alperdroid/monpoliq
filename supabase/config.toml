@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.policy-taxonomy]
 verify_jwt = false
+
+[functions.pivot-probability]
+verify_jwt = false
