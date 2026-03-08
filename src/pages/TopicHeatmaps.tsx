@@ -126,10 +126,6 @@ const TopicHeatmaps = () => {
             {tagging ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
             {tagging ? 'Tagging…' : 'Run Topic Analysis'}
           </Button>
-          <Button variant="outline" size="sm" onClick={runTaxonomyAnalysis} disabled={classifying} className="gap-1.5 text-xs h-7">
-            {classifying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Layers className="w-3 h-3" />}
-            {classifying ? 'Classifying…' : 'Run Taxonomy Analysis'}
-          </Button>
         </div>
       </div>
 
@@ -137,9 +133,6 @@ const TopicHeatmaps = () => {
         <TabsList className="h-8">
           <TabsTrigger value="matrix" className="text-xs gap-1.5 h-6">
             <Grid3X3 className="w-3 h-3" /> Topic Heatmap
-          </TabsTrigger>
-          <TabsTrigger value="taxonomy" className="text-xs gap-1.5 h-6">
-            <Layers className="w-3 h-3" /> Policy Taxonomy
           </TabsTrigger>
           <TabsTrigger value="cards" className="text-xs gap-1.5 h-6">
             <FileText className="w-3 h-3" /> Per-Meeting Cards
