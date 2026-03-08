@@ -20,6 +20,8 @@ import {
 import { TrendingUp, Brain, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
+import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
+import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 
 /** Filter items to last N days */
 function recentItems(items: SentimentItem[], days: number) {

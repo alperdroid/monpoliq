@@ -95,6 +95,9 @@ const Predictions = () => {
         </div>
       )}
 
+      {/* Pivot Probability */}
+      <PivotProbabilityPanel />
+
       <div className="rounded-lg border border-border bg-card p-4 space-y-4">
         <h3 className="text-sm font-semibold">Underlying Communication Signals (30-Day Window)</h3>
         <div className="grid md:grid-cols-2 gap-6">
