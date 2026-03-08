@@ -78,6 +78,18 @@ const Committee = () => {
         </span>
       </div>
 
+      <Tabs defaultValue="composition" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="composition" className="text-xs">Composition</TabsTrigger>
+          <TabsTrigger value="dissents" className="text-xs">Dissent History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dissents">
+          <DissentTimeline />
+        </TabsContent>
+
+        <TabsContent value="composition" className="space-y-6">
+
       <div className="flex flex-wrap gap-3 items-center">
         <Select value={bankFilter} onValueChange={setBankFilter}>
           <SelectTrigger className="w-28 h-8 text-xs bg-surface"><SelectValue placeholder="Bank" /></SelectTrigger>
