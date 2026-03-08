@@ -7,7 +7,8 @@ import { TrendChip } from '@/components/analytics/TrendChip';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, User } from 'lucide-react';
-import { getCommunicationItems, type SentimentItem } from '@/lib/api/sentiment';
+import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
 
 /** Known speaker reference data — metrics computed from real items */
 const SPEAKER_REFS = [
