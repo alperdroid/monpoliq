@@ -211,7 +211,7 @@ const MeetingCycles = () => {
   );
 };
 
-function MeetingCard({ meeting }: {
+function MeetingCard({ meeting, allItems }: {
   meeting: {
     meeting_id: string;
     bank: string;
@@ -222,7 +222,9 @@ function MeetingCard({ meeting }: {
     postCount: number;
     allComms: SentimentItem[];
     toneEvolution: { date: string; tone: number }[];
+    prevMeetingDate: string | null;
   };
+  allItems: SentimentItem[];
 }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
