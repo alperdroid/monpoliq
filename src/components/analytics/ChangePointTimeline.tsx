@@ -17,61 +17,98 @@ interface ChangePoint {
  * Groups items by week, computes weekly averages, then detects significant shifts.
  */
 function detectChangePoints(items: SentimentItem[], bank: string): ChangePoint[] {
-  const comms = items
-    .filter(i => i.bank === bank && !i.is_statistical && Math.abs(i.net_score) > 0.001)
+  // Include both comms and statistical items for a richer signal
+  const all = items
+    .filter(i => i.bank === bank && Math.abs(i.net_score) > 0.001)
     .sort((a, b) => a.item_date.localeCompare(b.item_date));
 
-  if (comms.length < 10) return [];
+  if (all.length < 8) return [];
 
-  // Group by ISO week
-  const byWeek: Record<string, { scores: number[]; dates: string[] }> = {};
-  for (const item of comms) {
-    const d = new Date(item.item_date);
-    const weekStart = new Date(d);
-    weekStart.setDate(d.getDate() - d.getDay());
-    const key = weekStart.toISOString().split('T')[0];
-    if (!byWeek[key]) byWeek[key] = { scores: [], dates: [] };
-    byWeek[key].scores.push(item.net_score);
-    byWeek[key].dates.push(item.item_date);
+  // Group by date (daily resolution for finer detection)
+  const byDate: Record<string, number[]> = {};
+  for (const item of all) {
+    if (!byDate[item.item_date]) byDate[item.item_date] = [];
+    byDate[item.item_date].push(item.net_score);
   }
 
-  const weeks = Object.entries(byWeek)
+  const days = Object.entries(byDate)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([week, data]) => ({
-      week,
-      avg: data.scores.reduce((s, v) => s + v, 0) / data.scores.length,
-      count: data.scores.length,
+    .map(([date, scores]) => ({
+      date,
+      avg: scores.reduce((s, v) => s + v, 0) / scores.length,
+      count: scores.length,
     }));
 
-  if (weeks.length < 4) return [];
+  if (days.length < 5) return [];
 
-  // Global mean and std
-  const globalMean = weeks.reduce((s, w) => s + w.avg, 0) / weeks.length;
-  const globalStd = Math.sqrt(weeks.reduce((s, w) => s + (w.avg - globalMean) ** 2, 0) / weeks.length) || 0.05;
+  // Compute rolling 5-day averages for smoothing
+  const windowSize = Math.min(5, Math.floor(days.length / 3));
+  const smoothed: { date: string; avg: number }[] = [];
+  for (let i = 0; i < days.length; i++) {
+    const start = Math.max(0, i - windowSize + 1);
+    const window = days.slice(start, i + 1);
+    const weightedSum = window.reduce((s, w) => s + w.avg * w.count, 0);
+    const totalCount = window.reduce((s, w) => s + w.count, 0);
+    smoothed.push({ date: days[i].date, avg: weightedSum / totalCount });
+  }
 
-  // CUSUM detection
-  const threshold = globalStd * 2.5;
+  // Global stats on smoothed series
+  const globalMean = smoothed.reduce((s, w) => s + w.avg, 0) / smoothed.length;
+  const variance = smoothed.reduce((s, w) => s + (w.avg - globalMean) ** 2, 0) / smoothed.length;
+  const globalStd = Math.sqrt(variance) || 0.03;
+
+  // Adaptive threshold: lower for small datasets, standard for large
+  const baseThreshold = smoothed.length < 15 ? 1.8 : 2.0;
+  const threshold = globalStd * baseThreshold;
+  
+  // Minimum magnitude to report (avoid trivial detections)
+  const minMagnitude = Math.max(0.03, globalStd * 0.5);
+
   const changePoints: ChangePoint[] = [];
   let cusumPos = 0;
   let cusumNeg = 0;
+  const drift = globalStd * 0.3; // Tighter drift allowance
 
-  for (let i = 1; i < weeks.length; i++) {
-    const diff = weeks[i].avg - globalMean;
-    cusumPos = Math.max(0, cusumPos + diff - globalStd * 0.5);
-    cusumNeg = Math.min(0, cusumNeg + diff + globalStd * 0.5);
+  for (let i = 1; i < smoothed.length; i++) {
+    const diff = smoothed[i].avg - globalMean;
+    cusumPos = Math.max(0, cusumPos + diff - drift);
+    cusumNeg = Math.min(0, cusumNeg + diff + drift);
 
     if (cusumPos > threshold || cusumNeg < -threshold) {
-      // Compute before/after averages
-      const beforeStart = Math.max(0, i - 4);
-      const beforeAvg = weeks.slice(beforeStart, i).reduce((s, w) => s + w.avg, 0) / Math.max(i - beforeStart, 1);
-      const afterEnd = Math.min(weeks.length, i + 4);
-      const afterAvg = weeks.slice(i, afterEnd).reduce((s, w) => s + w.avg, 0) / Math.max(afterEnd - i, 1);
+      // Compute before/after using smoothed values
+      const lookback = Math.min(i, Math.max(3, Math.floor(smoothed.length / 4)));
+      const lookahead = Math.min(smoothed.length - i, lookback);
+      
+      const beforeSlice = smoothed.slice(Math.max(0, i - lookback), i);
+      const afterSlice = smoothed.slice(i, i + lookahead);
+      
+      const beforeAvg = beforeSlice.length > 0
+        ? beforeSlice.reduce((s, w) => s + w.avg, 0) / beforeSlice.length : 0;
+      const afterAvg = afterSlice.length > 0
+        ? afterSlice.reduce((s, w) => s + w.avg, 0) / afterSlice.length : 0;
       const magnitude = Math.abs(afterAvg - beforeAvg);
+
+      // Skip if magnitude is trivial
+      if (magnitude < minMagnitude) {
+        // Don't reset CUSUM — let it continue accumulating
+        continue;
+      }
+
+      // Avoid duplicate detections within 7 days
+      const lastCp = changePoints[changePoints.length - 1];
+      if (lastCp) {
+        const daysBetween = (new Date(smoothed[i].date).getTime() - new Date(lastCp.date).getTime()) / 86400000;
+        if (daysBetween < 7) {
+          // Keep the larger magnitude one
+          if (magnitude > lastCp.magnitude) changePoints.pop();
+          else continue;
+        }
+      }
 
       const shift = afterAvg - beforeAvg;
       const type: ChangePoint['type'] =
-        magnitude > globalStd * 3 ? 'regime_shift' :
-        Math.sign(afterAvg) !== Math.sign(beforeAvg) ? 'tone_reversal' :
+        magnitude > globalStd * 2.5 ? 'regime_shift' :
+        (beforeAvg > 0.01 && afterAvg < -0.01) || (beforeAvg < -0.01 && afterAvg > 0.01) ? 'tone_reversal' :
         'guidance_change';
 
       const description =
@@ -80,7 +117,7 @@ function detectChangePoints(items: SentimentItem[], bank: string): ChangePoint[]
         : `Guidance shifted ${shift > 0 ? 'hawkish' : 'dovish'} by ${magnitude.toFixed(3)}`;
 
       changePoints.push({
-        date: weeks[i].week,
+        date: smoothed[i].date,
         type,
         magnitude,
         before_avg: Math.round(beforeAvg * 1000) / 1000,
@@ -88,7 +125,7 @@ function detectChangePoints(items: SentimentItem[], bank: string): ChangePoint[]
         description,
       });
 
-      // Reset CUSUM after detection
+      // Reset CUSUM after confirmed detection
       cusumPos = 0;
       cusumNeg = 0;
     }
