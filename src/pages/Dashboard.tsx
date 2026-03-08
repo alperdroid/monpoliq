@@ -257,6 +257,9 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* CIE: Communication vs Model Gap */}
+      <CIEWidget allItems={allItems} aiPrediction={aiPrediction} isPredictionLoading={isPredictionLoading} />
+
       {/* Bank Panels */}
       <div className="grid lg:grid-cols-2 gap-4">
         <BankPanel
