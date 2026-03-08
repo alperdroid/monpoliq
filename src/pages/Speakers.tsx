@@ -81,6 +81,11 @@ const Speakers = () => {
     queryFn: () => getCommunicationItems(),
   });
 
+  const { data: allItems = [] } = useQuery({
+    queryKey: ['all-sentiment-items'],
+    queryFn: () => getCachedSentimentItems(),
+  });
+
   const speakers = useMemo(() => deriveSpeakers(commItems), [commItems]);
 
   const filtered = useMemo(() => {
