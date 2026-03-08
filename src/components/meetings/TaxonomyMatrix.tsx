@@ -59,10 +59,6 @@ const DIMENSIONS: Record<string, {
 
 const DIM_KEYS = Object.keys(DIMENSIONS);
 
-interface TaxonomyItem {
-  policy_dimensions?: Record<string, string | null> | null;
-}
-
 interface Props {
   meetings: { id: string; label: string; bank: string; items: TaxonomyItem[] }[];
 }
