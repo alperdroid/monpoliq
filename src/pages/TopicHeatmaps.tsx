@@ -102,10 +102,10 @@ const TopicHeatmaps = () => {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps & Taxonomy</h1>
+          <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Thematic + dimensional analysis of <strong>official policy texts</strong> per meeting cycle
-            {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged · ${totalClassified} classified`}
+            Thematic analysis of <strong>official policy texts</strong> per meeting cycle
+            {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
