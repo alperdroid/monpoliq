@@ -89,6 +89,7 @@ const Committee = () => {
         <TabsList>
           <TabsTrigger value="composition" className="text-xs">Composition</TabsTrigger>
           <TabsTrigger value="dissents" className="text-xs">Dissent History</TabsTrigger>
+          <TabsTrigger value="network" className="text-xs">Network Graph</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dissents">
