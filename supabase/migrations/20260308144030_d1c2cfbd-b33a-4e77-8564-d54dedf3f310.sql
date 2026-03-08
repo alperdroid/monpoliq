@@ -1,0 +1,1 @@
+UPDATE sentiment_items SET topics = NULL WHERE topics = '{}' AND is_statistical = false;
