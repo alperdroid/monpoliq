@@ -6,7 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Loader2, Zap, TrendingUp, TrendingDown, Minus, AlertTriangle, History } from 'lucide-react';
+import { Loader2, Zap, TrendingUp, TrendingDown, Minus, AlertTriangle, History, FileText } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatementGenerator } from '@/components/scenarios/StatementGenerator';
 
 interface PolicyStep {
   meeting: string;
