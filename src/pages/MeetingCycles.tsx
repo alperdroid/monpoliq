@@ -121,17 +121,16 @@ function buildToneEvolution(items: SentimentItem[], meetingDate: string) {
 }
 
 const MeetingCycles = () => {
+  const [tagging, setTagging] = useState(false);
   const { data: allItems = [], isLoading } = useQuery({
     queryKey: ['all-sentiment-items'],
     queryFn: () => getCachedSentimentItems(),
   });
 
   const meetings = useMemo(() => {
-    // Sort meetings by date descending (most recent first)
     const sorted = [...REAL_MEETINGS].sort((a, b) => b.meeting_date.localeCompare(a.meeting_date));
 
     return sorted.map((meeting, idx) => {
-      // Find prev/next meetings for same bank
       const sameBankMeetings = REAL_MEETINGS
         .filter(m => m.bank === meeting.bank)
         .sort((a, b) => a.meeting_date.localeCompare(b.meeting_date));
@@ -155,6 +154,7 @@ const MeetingCycles = () => {
         postCount: post.length,
         allComms,
         toneEvolution,
+        prevMeetingDate: prevMeeting,
       };
     });
   }, [allItems]);
@@ -162,31 +162,48 @@ const MeetingCycles = () => {
   const pastMeetings = meetings.filter(m => m.isPast);
   const upcomingMeetings = meetings.filter(m => !m.isPast);
 
+  const runTopicAnalysis = async () => {
+    setTagging(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('topic-analysis', { body: {} });
+      if (error) throw error;
+      toast.success(`Tagged ${data?.tagged || 0} items with topics`);
+    } catch (e: any) {
+      toast.error(e.message || 'Topic analysis failed');
+    } finally {
+      setTagging(false);
+    }
+  };
+
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Meeting Cycles</h1>
-        <span className="text-xs text-muted-foreground font-mono">
-          {isLoading ? 'Loading…' : `${meetings.length} meetings`}
-        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={runTopicAnalysis} disabled={tagging} className="gap-1.5 text-xs h-7">
+            {tagging ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {tagging ? 'Tagging…' : 'Run Topic Analysis'}
+          </Button>
+          <span className="text-xs text-muted-foreground font-mono">
+            {isLoading ? 'Loading…' : `${meetings.length} meetings`}
+          </span>
+        </div>
       </div>
 
-      {/* Upcoming */}
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Upcoming</p>
           {upcomingMeetings.map(meeting => (
-            <MeetingCard key={meeting.meeting_id} meeting={meeting} />
+            <MeetingCard key={meeting.meeting_id} meeting={meeting} allItems={allItems} />
           ))}
         </div>
       )}
 
-      {/* Past */}
       {pastMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Past Decisions</p>
           {pastMeetings.map(meeting => (
-            <MeetingCard key={meeting.meeting_id} meeting={meeting} />
+            <MeetingCard key={meeting.meeting_id} meeting={meeting} allItems={allItems} />
           ))}
         </div>
       )}
