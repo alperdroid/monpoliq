@@ -4,6 +4,7 @@ import { PredictionPanel } from '@/components/dashboard/PredictionPanel';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Brain } from 'lucide-react';
+import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import {
   getCachedSentimentItems,
   type SentimentItem,
@@ -93,6 +94,9 @@ const Predictions = () => {
           <p className="text-xs text-muted-foreground">AI predictions unavailable — check your connection and retry</p>
         </div>
       )}
+
+      {/* Pivot Probability */}
+      <PivotProbabilityPanel />
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-4">
         <h3 className="text-sm font-semibold">Underlying Communication Signals (30-Day Window)</h3>

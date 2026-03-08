@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      analysis_cache: {
+        Row: {
+          analysis_type: string
+          bank: string
+          created_at: string
+          data_hash: string
+          id: string
+          result: Json
+        }
+        Insert: {
+          analysis_type: string
+          bank: string
+          created_at?: string
+          data_hash: string
+          id?: string
+          result: Json
+        }
+        Update: {
+          analysis_type?: string
+          bank?: string
+          created_at?: string
+          data_hash?: string
+          id?: string
+          result?: Json
+        }
+        Relationships: []
+      }
       committee_members: {
         Row: {
           bank: string

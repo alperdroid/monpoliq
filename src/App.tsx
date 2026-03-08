@@ -16,6 +16,7 @@ import Committee from "./pages/Committee";
 import Counterfactual from "./pages/Counterfactual";
 import TopicHeatmaps from "./pages/TopicHeatmaps";
 import PolicyTaxonomy from "./pages/PolicyTaxonomy";
+import PolicyRadar from "./pages/PolicyRadar";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/counterfactual" element={<Counterfactual />} />
             <Route path="/topics" element={<TopicHeatmaps />} />
             <Route path="/taxonomy" element={<PolicyTaxonomy />} />
+            <Route path="/radar" element={<PolicyRadar />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

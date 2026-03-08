@@ -20,6 +20,8 @@ import {
 import { TrendingUp, Brain, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
+import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
+import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 
 /** Filter items to last N days */
 function recentItems(items: SentimentItem[], days: number) {
@@ -259,6 +261,19 @@ const Dashboard = () => {
 
       {/* CIE: Communication vs Model Gap */}
       <CIEWidget allItems={allItems} aiPrediction={aiPrediction} isPredictionLoading={isPredictionLoading} />
+
+      {/* Stance Decomposition Waterfall */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <StanceDecomposition items={allItems as any} bank="FED" />
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <StanceDecomposition items={allItems as any} bank="ECB" />
+        </div>
+      </div>
+
+      {/* Cross-Bank Spread */}
+      <CrossBankSpread allItems={allItems as any} />
 
       {/* Bank Panels */}
       <div className="grid lg:grid-cols-2 gap-4">
