@@ -10,6 +10,7 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceL
 import { CheckCircle, Clock, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { MeetingPrepPack } from '@/components/meetings/MeetingPrepPack';
 
 /** Real central bank meeting dates with verified decisions */
 const REAL_MEETINGS = [
@@ -189,6 +190,13 @@ const MeetingCycles = () => {
           </span>
         </div>
       </div>
+
+      {/* Meeting Prep Pack */}
+      {allItems.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <MeetingPrepPack allItems={allItems as any} />
+        </div>
+      )}
 
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">

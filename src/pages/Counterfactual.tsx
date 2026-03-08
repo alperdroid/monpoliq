@@ -6,7 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Loader2, Zap, TrendingUp, TrendingDown, Minus, AlertTriangle, History } from 'lucide-react';
+import { Loader2, Zap, TrendingUp, TrendingDown, Minus, AlertTriangle, History, FileText } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatementGenerator } from '@/components/scenarios/StatementGenerator';
 
 interface PolicyStep {
   meeting: string;
@@ -80,11 +82,23 @@ const Counterfactual = () => {
   return (
     <div className="space-y-6 animate-slide-in">
       <div>
-        <h1 className="text-lg font-semibold">Counterfactual Generator</h1>
+        <h1 className="text-lg font-semibold">What If… Lab</h1>
         <p className="text-xs text-muted-foreground mt-1">
-          "What if the next statement says X?" — Simulate scenarios and see implied policy shifts.
+          Scenario analysis and synthetic statement generation
         </p>
       </div>
+
+      <Tabs defaultValue="counterfactual" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="counterfactual" className="text-xs gap-1.5"><Zap className="w-3 h-3" /> Counterfactual</TabsTrigger>
+          <TabsTrigger value="generator" className="text-xs gap-1.5"><FileText className="w-3 h-3" /> Statement Generator</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="generator">
+          <StatementGenerator />
+        </TabsContent>
+
+        <TabsContent value="counterfactual">
 
       {/* Controls */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
@@ -251,9 +265,11 @@ const Counterfactual = () => {
                 </span>
               ))}
             </div>
-          )}
-        </div>
+        )}
+      </div>
       )}
+      </TabsContent>
+      </Tabs>
     </div>
   );
 };

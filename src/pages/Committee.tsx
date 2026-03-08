@@ -5,8 +5,10 @@ import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Shield, Vote, Users, Crown, Star } from 'lucide-react';
+import { Shield, Vote, Users, Crown, Star, Network } from 'lucide-react';
 import { DissentTimeline } from '@/components/committee/DissentTimeline';
+import { CommitteeNetworkGraph } from '@/components/committee/CommitteeNetworkGraph';
+import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 
 interface CommitteeMember {
   id: string;
@@ -48,6 +50,11 @@ const Committee = () => {
     },
   });
 
+  const { data: allItems = [] } = useQuery({
+    queryKey: ['all-sentiment-items'],
+    queryFn: () => getCachedSentimentItems(),
+  });
+
   const { fedMembers, ecbMembers } = useMemo(() => {
     const fed = members.filter(m => m.bank === 'FED');
     const ecb = members.filter(m => m.bank === 'ECB');
@@ -82,10 +89,22 @@ const Committee = () => {
         <TabsList>
           <TabsTrigger value="composition" className="text-xs">Composition</TabsTrigger>
           <TabsTrigger value="dissents" className="text-xs">Dissent History</TabsTrigger>
+          <TabsTrigger value="network" className="text-xs">Network Graph</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dissents">
           <DissentTimeline />
+        </TabsContent>
+
+        <TabsContent value="network">
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Network className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold">Committee Alignment Network</h3>
+              <span className="text-[9px] text-muted-foreground">Node size = comms volume • Color = hawk/dove lean • Edge = messaging similarity</span>
+            </div>
+            <CommitteeNetworkGraph allItems={allItems as any} bankFilter={bankFilter} />
+          </div>
         </TabsContent>
 
         <TabsContent value="composition" className="space-y-6">
