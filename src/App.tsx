@@ -16,6 +16,7 @@ import Committee from "./pages/Committee";
 import Counterfactual from "./pages/Counterfactual";
 import TopicHeatmaps from "./pages/TopicHeatmaps";
 import PolicyTaxonomy from "./pages/PolicyTaxonomy";
+import PolicyRadar from "./pages/PolicyRadar";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
