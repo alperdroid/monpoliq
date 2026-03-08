@@ -71,7 +71,7 @@ export function TaxonomyMatrix({ meetings }: Props) {
     return [...meetings].sort((a, b) => {
       const dateA = a.id.split('-').slice(1).join('-');
       const dateB = b.id.split('-').slice(1).join('-');
-      return dateA.localeCompare(dateB);
+      return dateB.localeCompare(dateA);
     });
   }, [meetings]);
 

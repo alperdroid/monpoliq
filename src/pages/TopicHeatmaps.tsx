@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { TopicHeatmap, TopicHeatmapMatrix } from '@/components/meetings/TopicHeatmap';
-import { TaxonomyMatrix } from '@/components/meetings/TaxonomyMatrix';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
-import { RefreshCw, Loader2, FileText, Grid3X3, Layers } from 'lucide-react';
+import { RefreshCw, Loader2, FileText, Grid3X3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -46,7 +45,6 @@ function isPolicyText(item: SentimentItem): boolean {
 
 const TopicHeatmaps = () => {
   const [tagging, setTagging] = useState(false);
-  const [classifying, setClassifying] = useState(false);
   const [bankFilter, setBankFilter] = useState<'ALL' | 'FED' | 'ECB'>('ALL');
 
   const { data: allItems = [], isLoading, refetch } = useQuery({
@@ -96,22 +94,7 @@ const TopicHeatmaps = () => {
     }
   };
 
-  const runTaxonomyAnalysis = async () => {
-    setClassifying(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('policy-taxonomy', { body: {} });
-      if (error) throw error;
-      toast.success(`Classified ${data?.classified || 0} items (${data?.processed || 0} processed)`);
-      refetch();
-    } catch (e: any) {
-      toast.error(e.message || 'Taxonomy analysis failed');
-    } finally {
-      setClassifying(false);
-    }
-  };
-
   const totalTagged = meetingTopicData.reduce((s, m) => s + m.taggedCount, 0);
-  const totalClassified = meetingTopicData.reduce((s, m) => s + m.classifiedCount, 0);
   const totalItems = meetingTopicData.reduce((s, m) => s + m.items.length, 0);
 
   return (
@@ -119,10 +102,10 @@ const TopicHeatmaps = () => {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps & Taxonomy</h1>
+          <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Thematic + dimensional analysis of <strong>official policy texts</strong> per meeting cycle
-            {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged · ${totalClassified} classified`}
+            Thematic analysis of <strong>official policy texts</strong> per meeting cycle
+            {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -143,10 +126,6 @@ const TopicHeatmaps = () => {
             {tagging ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
             {tagging ? 'Tagging…' : 'Run Topic Analysis'}
           </Button>
-          <Button variant="outline" size="sm" onClick={runTaxonomyAnalysis} disabled={classifying} className="gap-1.5 text-xs h-7">
-            {classifying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Layers className="w-3 h-3" />}
-            {classifying ? 'Classifying…' : 'Run Taxonomy Analysis'}
-          </Button>
         </div>
       </div>
 
@@ -154,9 +133,6 @@ const TopicHeatmaps = () => {
         <TabsList className="h-8">
           <TabsTrigger value="matrix" className="text-xs gap-1.5 h-6">
             <Grid3X3 className="w-3 h-3" /> Topic Heatmap
-          </TabsTrigger>
-          <TabsTrigger value="taxonomy" className="text-xs gap-1.5 h-6">
-            <Layers className="w-3 h-3" /> Policy Taxonomy
           </TabsTrigger>
           <TabsTrigger value="cards" className="text-xs gap-1.5 h-6">
             <FileText className="w-3 h-3" /> Per-Meeting Cards
@@ -167,19 +143,6 @@ const TopicHeatmaps = () => {
         <TabsContent value="matrix">
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <TopicHeatmapMatrix meetings={meetingTopicData} />
-          </div>
-        </TabsContent>
-
-        {/* Taxonomy view */}
-        <TabsContent value="taxonomy">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <div className="mb-4">
-              <h2 className="text-sm font-bold text-foreground">Communication Taxonomy</h2>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                Orthogonal policy dimensions — what narrative dominates each meeting cycle
-              </p>
-            </div>
-            <TaxonomyMatrix meetings={meetingTopicData as any} />
           </div>
         </TabsContent>
 

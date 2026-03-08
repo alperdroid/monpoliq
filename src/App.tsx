@@ -15,6 +15,7 @@ import Communications from "./pages/Communications";
 import Committee from "./pages/Committee";
 import Counterfactual from "./pages/Counterfactual";
 import TopicHeatmaps from "./pages/TopicHeatmaps";
+import PolicyTaxonomy from "./pages/PolicyTaxonomy";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/committee" element={<Committee />} />
             <Route path="/counterfactual" element={<Counterfactual />} />
             <Route path="/topics" element={<TopicHeatmaps />} />
+            <Route path="/taxonomy" element={<PolicyTaxonomy />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

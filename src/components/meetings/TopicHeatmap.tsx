@@ -114,12 +114,12 @@ export function TopicHeatmapMatrix({
 }: {
   meetings: { id: string; label: string; bank: string; items: any[] }[];
 }) {
-  // Sort columns chronologically (oldest → newest, left → right)
+  // Sort columns newest → oldest (left → right)
   const sorted = useMemo(() => {
     return [...meetings].sort((a, b) => {
       const dateA = a.id.split('-').slice(1).join('-');
       const dateB = b.id.split('-').slice(1).join('-');
-      return dateA.localeCompare(dateB);
+      return dateB.localeCompare(dateA);
     });
   }, [meetings]);
 
