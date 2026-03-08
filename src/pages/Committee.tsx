@@ -277,6 +277,8 @@ const Committee = () => {
           </div>
         </div>
       )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
