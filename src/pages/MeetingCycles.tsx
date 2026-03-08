@@ -334,13 +334,15 @@ function MeetingCard({ meeting, allItems }: {
         />
       </div>
 
-      {/* Topic Heatmap */}
-      <div className="p-4 border-t border-border">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-          Topic Heatmap
-        </p>
-        <TopicHeatmap items={meeting.allComms} meetingDate={meeting.meeting_date} />
-      </div>
+      {/* Topic Heatmap — only for past meetings with completed policy texts */}
+      {meeting.isPast && (
+        <div className="p-4 border-t border-border">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+            Topic Heatmap
+          </p>
+          <TopicHeatmap items={meeting.allComms} meetingDate={meeting.meeting_date} />
+        </div>
+      )}
     </div>
   );
 }

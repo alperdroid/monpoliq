@@ -14,6 +14,7 @@ import StatisticalData from "./pages/StatisticalData";
 import Communications from "./pages/Communications";
 import Committee from "./pages/Committee";
 import Counterfactual from "./pages/Counterfactual";
+import TopicHeatmaps from "./pages/TopicHeatmaps";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/predictions" element={<Predictions />} />
             <Route path="/committee" element={<Committee />} />
             <Route path="/counterfactual" element={<Counterfactual />} />
+            <Route path="/topics" element={<TopicHeatmaps />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
