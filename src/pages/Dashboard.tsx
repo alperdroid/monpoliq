@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Brain, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { CIEWidget } from '@/components/dashboard/CIEWidget';
 
 /** Filter items to last N days */
 function recentItems(items: SentimentItem[], days: number) {
@@ -255,6 +256,9 @@ const Dashboard = () => {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* CIE: Communication vs Model Gap */}
+      <CIEWidget allItems={allItems} aiPrediction={aiPrediction} isPredictionLoading={isPredictionLoading} />
 
       {/* Bank Panels */}
       <div className="grid lg:grid-cols-2 gap-4">

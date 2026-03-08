@@ -59,6 +59,42 @@ export type Database = {
         }
         Relationships: []
       }
+      dissent_history: {
+        Row: {
+          bank: string
+          committee_action: string | null
+          created_at: string | null
+          dissent_direction: string
+          id: string
+          meeting_date: string
+          member_name: string
+          notes: string | null
+          preferred_action: string | null
+        }
+        Insert: {
+          bank?: string
+          committee_action?: string | null
+          created_at?: string | null
+          dissent_direction: string
+          id?: string
+          meeting_date: string
+          member_name: string
+          notes?: string | null
+          preferred_action?: string | null
+        }
+        Update: {
+          bank?: string
+          committee_action?: string | null
+          created_at?: string | null
+          dissent_direction?: string
+          id?: string
+          meeting_date?: string
+          member_name?: string
+          notes?: string | null
+          preferred_action?: string | null
+        }
+        Relationships: []
+      }
       prediction_cache: {
         Row: {
           created_at: string

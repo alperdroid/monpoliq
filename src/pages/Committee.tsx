@@ -4,7 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Shield, Vote, Users, Crown, Star } from 'lucide-react';
+import { DissentTimeline } from '@/components/committee/DissentTimeline';
 
 interface CommitteeMember {
   id: string;
@@ -75,6 +77,18 @@ const Committee = () => {
           {isLoading ? 'Loading…' : `${members.length} members`}
         </span>
       </div>
+
+      <Tabs defaultValue="composition" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="composition" className="text-xs">Composition</TabsTrigger>
+          <TabsTrigger value="dissents" className="text-xs">Dissent History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dissents">
+          <DissentTimeline />
+        </TabsContent>
+
+        <TabsContent value="composition" className="space-y-6">
 
       <div className="flex flex-wrap gap-3 items-center">
         <Select value={bankFilter} onValueChange={setBankFilter}>
@@ -263,6 +277,8 @@ const Committee = () => {
           </div>
         </div>
       )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
