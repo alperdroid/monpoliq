@@ -146,19 +146,6 @@ const TopicHeatmaps = () => {
           </div>
         </TabsContent>
 
-        {/* Taxonomy view */}
-        <TabsContent value="taxonomy">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <div className="mb-4">
-              <h2 className="text-sm font-bold text-foreground">Communication Taxonomy</h2>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                Orthogonal policy dimensions — what narrative dominates each meeting cycle
-              </p>
-            </div>
-            <TaxonomyMatrix meetings={meetingTopicData as any} />
-          </div>
-        </TabsContent>
-
         {/* Card view */}
         <TabsContent value="cards">
           <div className="space-y-3">
