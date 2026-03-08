@@ -94,22 +94,7 @@ const TopicHeatmaps = () => {
     }
   };
 
-  const runTaxonomyAnalysis = async () => {
-    setClassifying(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('policy-taxonomy', { body: {} });
-      if (error) throw error;
-      toast.success(`Classified ${data?.classified || 0} items (${data?.processed || 0} processed)`);
-      refetch();
-    } catch (e: any) {
-      toast.error(e.message || 'Taxonomy analysis failed');
-    } finally {
-      setClassifying(false);
-    }
-  };
-
   const totalTagged = meetingTopicData.reduce((s, m) => s + m.taggedCount, 0);
-  const totalClassified = meetingTopicData.reduce((s, m) => s + m.classifiedCount, 0);
   const totalItems = meetingTopicData.reduce((s, m) => s + m.items.length, 0);
 
   return (
