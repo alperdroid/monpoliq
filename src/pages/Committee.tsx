@@ -5,8 +5,10 @@ import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Shield, Vote, Users, Crown, Star } from 'lucide-react';
+import { Shield, Vote, Users, Crown, Star, Network } from 'lucide-react';
 import { DissentTimeline } from '@/components/committee/DissentTimeline';
+import { CommitteeNetworkGraph } from '@/components/committee/CommitteeNetworkGraph';
+import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 
 interface CommitteeMember {
   id: string;
