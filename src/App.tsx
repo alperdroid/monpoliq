@@ -35,6 +35,8 @@ const App = () => (
             <Route path="/stats" element={<StatisticalData />} />
             <Route path="/comms" element={<Communications />} />
             <Route path="/predictions" element={<Predictions />} />
+            <Route path="/committee" element={<Committee />} />
+            <Route path="/counterfactual" element={<Counterfactual />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

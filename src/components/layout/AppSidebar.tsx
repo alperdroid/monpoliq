@@ -24,6 +24,8 @@ const mainNav = [
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
   { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
+  { title: 'Committee', url: '/committee', icon: Shield },
+  { title: 'What If…', url: '/counterfactual', icon: Zap },
 ];
 
 const secondaryNav = [
