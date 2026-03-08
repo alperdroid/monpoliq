@@ -60,7 +60,7 @@ const DIMENSIONS: Record<string, {
 const DIM_KEYS = Object.keys(DIMENSIONS);
 
 interface Props {
-  meetings: { id: string; label: string; bank: string; items: TaxonomyItem[] }[];
+  meetings: { id: string; label: string; bank: string; items: Record<string, any>[] }[];
 }
 
 /**
