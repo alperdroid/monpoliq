@@ -265,8 +265,9 @@ const Counterfactual = () => {
                 </span>
               ))}
             </div>
-          )}
-        </div>
+        )}
+      </div>
+      )}
       </TabsContent>
       </Tabs>
     </div>

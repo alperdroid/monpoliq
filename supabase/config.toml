@@ -23,3 +23,12 @@ verify_jwt = false
 
 [functions.contradiction-detector]
 verify_jwt = false
+
+[functions.policy-copilot]
+verify_jwt = false
+
+[functions.historical-analogs]
+verify_jwt = false
+
+[functions.statement-generator]
+verify_jwt = false
