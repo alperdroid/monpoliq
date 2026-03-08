@@ -82,11 +82,23 @@ const Counterfactual = () => {
   return (
     <div className="space-y-6 animate-slide-in">
       <div>
-        <h1 className="text-lg font-semibold">Counterfactual Generator</h1>
+        <h1 className="text-lg font-semibold">What If… Lab</h1>
         <p className="text-xs text-muted-foreground mt-1">
-          "What if the next statement says X?" — Simulate scenarios and see implied policy shifts.
+          Scenario analysis and synthetic statement generation
         </p>
       </div>
+
+      <Tabs defaultValue="counterfactual" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="counterfactual" className="text-xs gap-1.5"><Zap className="w-3 h-3" /> Counterfactual</TabsTrigger>
+          <TabsTrigger value="generator" className="text-xs gap-1.5"><FileText className="w-3 h-3" /> Statement Generator</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="generator">
+          <StatementGenerator />
+        </TabsContent>
+
+        <TabsContent value="counterfactual">
 
       {/* Controls */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
