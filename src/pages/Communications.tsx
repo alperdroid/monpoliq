@@ -9,6 +9,7 @@ import {
   type SentimentItem,
 } from '@/lib/api/sentiment';
 import { RefreshCw, ExternalLink, MessageSquare } from 'lucide-react';
+import { ContradictionFlags } from '@/components/analytics/ContradictionFlags';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
