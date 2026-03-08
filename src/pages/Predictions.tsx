@@ -5,6 +5,7 @@ import { MetricCard } from '@/components/analytics/MetricCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Brain } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
+import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import {
   getCachedSentimentItems,
   type SentimentItem,
@@ -94,6 +95,9 @@ const Predictions = () => {
           <p className="text-xs text-muted-foreground">AI predictions unavailable — check your connection and retry</p>
         </div>
       )}
+
+      {/* Multi-Horizon Forecasts */}
+      <MultiHorizonPanel />
 
       {/* Pivot Probability */}
       <PivotProbabilityPanel />

@@ -22,6 +22,8 @@ import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
 import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
 import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
+import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
+import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 
 /** Filter items to last N days */
 function recentItems(items: SentimentItem[], days: number) {
@@ -271,6 +273,12 @@ const Dashboard = () => {
           <StanceDecomposition items={allItems as any} bank="ECB" />
         </div>
       </div>
+
+      {/* Surprise Index */}
+      <SurpriseIndex allItems={allItems as any} />
+
+      {/* Change-Point Detection */}
+      <ChangePointSection allItems={allItems as any} />
 
       {/* Cross-Bank Spread */}
       <CrossBankSpread allItems={allItems as any} />

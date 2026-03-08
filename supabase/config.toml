@@ -17,3 +17,9 @@ verify_jwt = false
 
 [functions.pivot-probability]
 verify_jwt = false
+
+[functions.multi-horizon]
+verify_jwt = false
+
+[functions.contradiction-detector]
+verify_jwt = false

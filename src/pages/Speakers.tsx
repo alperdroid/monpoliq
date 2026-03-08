@@ -7,7 +7,8 @@ import { TrendChip } from '@/components/analytics/TrendChip';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, User } from 'lucide-react';
-import { getCommunicationItems, type SentimentItem } from '@/lib/api/sentiment';
+import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
 
 /** Known speaker reference data — metrics computed from real items */
 const SPEAKER_REFS = [
@@ -80,6 +81,11 @@ const Speakers = () => {
     queryFn: () => getCommunicationItems(),
   });
 
+  const { data: allItems = [] } = useQuery({
+    queryKey: ['all-sentiment-items'],
+    queryFn: () => getCachedSentimentItems(),
+  });
+
   const speakers = useMemo(() => deriveSpeakers(commItems), [commItems]);
 
   const filtered = useMemo(() => {
@@ -123,6 +129,9 @@ const Speakers = () => {
           </p>
         </div>
       )}
+
+      {/* Speaker DNA Profiles */}
+      {allItems.length > 0 && <SpeakerDNAPanel allItems={allItems} bankFilter={bankFilter} />}
 
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((speaker) => (

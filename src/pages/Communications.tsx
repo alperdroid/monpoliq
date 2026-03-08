@@ -9,6 +9,7 @@ import {
   type SentimentItem,
 } from '@/lib/api/sentiment';
 import { RefreshCw, ExternalLink, MessageSquare } from 'lucide-react';
+import { ContradictionFlags } from '@/components/analytics/ContradictionFlags';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
@@ -175,6 +176,14 @@ const Communications = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Contradiction Detector */}
+      <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-4">
+        <div className="grid md:grid-cols-2 gap-6">
+          <ContradictionFlags bank="FED" />
+          <ContradictionFlags bank="ECB" />
         </div>
       </div>
     </div>
