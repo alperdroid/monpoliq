@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      committee_members: {
+        Row: {
+          bank: string
+          created_at: string | null
+          id: string
+          institution: string
+          is_core_board: boolean | null
+          is_permanent_voter: boolean | null
+          name: string
+          notes: string | null
+          role: string
+          term_end: string | null
+          term_start: string | null
+          voting_years: number[] | null
+        }
+        Insert: {
+          bank: string
+          created_at?: string | null
+          id?: string
+          institution: string
+          is_core_board?: boolean | null
+          is_permanent_voter?: boolean | null
+          name: string
+          notes?: string | null
+          role: string
+          term_end?: string | null
+          term_start?: string | null
+          voting_years?: number[] | null
+        }
+        Update: {
+          bank?: string
+          created_at?: string | null
+          id?: string
+          institution?: string
+          is_core_board?: boolean | null
+          is_permanent_voter?: boolean | null
+          name?: string
+          notes?: string | null
+          role?: string
+          term_end?: string | null
+          term_start?: string | null
+          voting_years?: number[] | null
+        }
+        Relationships: []
+      }
       prediction_cache: {
         Row: {
           created_at: string
@@ -53,6 +98,7 @@ export type Database = {
           stat_value: number | null
           stat_weight: number | null
           title: string
+          topics: string[] | null
           url: string | null
           word_count: number | null
         }
@@ -73,6 +119,7 @@ export type Database = {
           stat_value?: number | null
           stat_weight?: number | null
           title: string
+          topics?: string[] | null
           url?: string | null
           word_count?: number | null
         }
@@ -93,6 +140,7 @@ export type Database = {
           stat_value?: number | null
           stat_weight?: number | null
           title?: string
+          topics?: string[] | null
           url?: string | null
           word_count?: number | null
         }

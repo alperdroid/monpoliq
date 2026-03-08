@@ -1,10 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
+import { TopicHeatmap } from '@/components/meetings/TopicHeatmap';
+import { NarrativeDrift } from '@/components/meetings/NarrativeDrift';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { supabase } from '@/integrations/supabase/client';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from 'recharts';
-import { CheckCircle, Clock } from 'lucide-react';
+import { CheckCircle, Clock, RefreshCw, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 /** Real central bank meeting dates with verified decisions */
 const REAL_MEETINGS = [
@@ -116,17 +121,16 @@ function buildToneEvolution(items: SentimentItem[], meetingDate: string) {
 }
 
 const MeetingCycles = () => {
+  const [tagging, setTagging] = useState(false);
   const { data: allItems = [], isLoading } = useQuery({
     queryKey: ['all-sentiment-items'],
     queryFn: () => getCachedSentimentItems(),
   });
 
   const meetings = useMemo(() => {
-    // Sort meetings by date descending (most recent first)
     const sorted = [...REAL_MEETINGS].sort((a, b) => b.meeting_date.localeCompare(a.meeting_date));
 
     return sorted.map((meeting, idx) => {
-      // Find prev/next meetings for same bank
       const sameBankMeetings = REAL_MEETINGS
         .filter(m => m.bank === meeting.bank)
         .sort((a, b) => a.meeting_date.localeCompare(b.meeting_date));
@@ -150,6 +154,7 @@ const MeetingCycles = () => {
         postCount: post.length,
         allComms,
         toneEvolution,
+        prevMeetingDate: prevMeeting,
       };
     });
   }, [allItems]);
@@ -157,31 +162,48 @@ const MeetingCycles = () => {
   const pastMeetings = meetings.filter(m => m.isPast);
   const upcomingMeetings = meetings.filter(m => !m.isPast);
 
+  const runTopicAnalysis = async () => {
+    setTagging(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('topic-analysis', { body: {} });
+      if (error) throw error;
+      toast.success(`Tagged ${data?.tagged || 0} items with topics`);
+    } catch (e: any) {
+      toast.error(e.message || 'Topic analysis failed');
+    } finally {
+      setTagging(false);
+    }
+  };
+
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Meeting Cycles</h1>
-        <span className="text-xs text-muted-foreground font-mono">
-          {isLoading ? 'Loading…' : `${meetings.length} meetings`}
-        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={runTopicAnalysis} disabled={tagging} className="gap-1.5 text-xs h-7">
+            {tagging ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {tagging ? 'Tagging…' : 'Run Topic Analysis'}
+          </Button>
+          <span className="text-xs text-muted-foreground font-mono">
+            {isLoading ? 'Loading…' : `${meetings.length} meetings`}
+          </span>
+        </div>
       </div>
 
-      {/* Upcoming */}
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Upcoming</p>
           {upcomingMeetings.map(meeting => (
-            <MeetingCard key={meeting.meeting_id} meeting={meeting} />
+            <MeetingCard key={meeting.meeting_id} meeting={meeting} allItems={allItems} />
           ))}
         </div>
       )}
 
-      {/* Past */}
       {pastMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Past Decisions</p>
           {pastMeetings.map(meeting => (
-            <MeetingCard key={meeting.meeting_id} meeting={meeting} />
+            <MeetingCard key={meeting.meeting_id} meeting={meeting} allItems={allItems} />
           ))}
         </div>
       )}
@@ -189,7 +211,7 @@ const MeetingCycles = () => {
   );
 };
 
-function MeetingCard({ meeting }: {
+function MeetingCard({ meeting, allItems }: {
   meeting: {
     meeting_id: string;
     bank: string;
@@ -200,7 +222,9 @@ function MeetingCard({ meeting }: {
     postCount: number;
     allComms: SentimentItem[];
     toneEvolution: { date: string; tone: number }[];
+    prevMeetingDate: string | null;
   };
+  allItems: SentimentItem[];
 }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -295,6 +319,27 @@ function MeetingCard({ meeting }: {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Narrative Drift & Pivot Detector */}
+      <div className="p-4 border-t border-border">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+          Narrative Drift & Pivot Radar
+        </p>
+        <NarrativeDrift
+          items={allItems.filter(i => i.bank === meeting.bank)}
+          meetingDate={meeting.meeting_date}
+          bank={meeting.bank}
+          prevMeetingDate={meeting.prevMeetingDate}
+        />
+      </div>
+
+      {/* Topic Heatmap */}
+      <div className="p-4 border-t border-border">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+          Topic Heatmap
+        </p>
+        <TopicHeatmap items={meeting.allComms} meetingDate={meeting.meeting_date} />
       </div>
     </div>
   );

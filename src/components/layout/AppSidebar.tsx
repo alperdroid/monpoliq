@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare, Shield, Zap } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import { MonPolLogo } from '@/components/brand/MonPolLogo';
@@ -24,6 +24,8 @@ const mainNav = [
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
   { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
+  { title: 'Committee', url: '/committee', icon: Shield },
+  { title: 'What If…', url: '/counterfactual', icon: Zap },
 ];
 
 const secondaryNav = [
