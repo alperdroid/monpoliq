@@ -41,27 +41,48 @@ export function StanceDecomposition({ items, bank }: StanceDecompositionProps) {
 
     for (const item of recent30) {
       const score = item.net_score || 0;
-      const reasons = (item.reasons || []).map((r: string) => r.toLowerCase());
+      const absScore = Math.abs(score);
+      const reasons = (item.reasons || []).map((r: string) => r.toLowerCase()).join(' ');
+      const topics = (item.topics || []).map((t: string) => t.toLowerCase());
       const dims = (item as any).policy_dimensions;
 
       // Inflation persistence language (hawkish +)
-      const hasInflation = reasons.some((r: string) => r.includes('inflation') || r.includes('price'));
-      if (hasInflation) inflationPressure += Math.max(score * 0.4, 0);
+      const hasInflation = reasons.includes('inflation') || reasons.includes('price') ||
+        reasons.includes('cpi') || reasons.includes('pce') || reasons.includes('wage') ||
+        reasons.includes('compensation') || reasons.includes('labor market') ||
+        topics.includes('inflation_dynamics') || topics.includes('wages_labor') ||
+        dims?.reaction_function === 'inflation_priority' || dims?.risk_balance === 'upside_inflation';
+      if (hasInflation && score > 0) inflationPressure += score * 0.4;
+      else if (hasInflation && absScore > 0.001) inflationPressure += 0.01; // still mention = small signal
 
       // Restrictive policy emphasis (hawkish +)
-      const hasRestrictive = reasons.some((r: string) => r.includes('restrictive') || r.includes('tight') || r.includes('more to do'));
-      if (hasRestrictive) restrictiveEmphasis += Math.max(score * 0.3, 0);
+      const hasRestrictive = reasons.includes('restrictive') || reasons.includes('tight') ||
+        reasons.includes('more to do') || reasons.includes('hawkish') || reasons.includes('firm') ||
+        reasons.includes('sufficiently') || reasons.includes('maintain') ||
+        dims?.terminal_rate === 'more_to_do' || dims?.forward_guidance === 'firm' ||
+        dims?.forward_guidance === 'conditional';
+      if (hasRestrictive && score > 0) restrictiveEmphasis += score * 0.3;
+      else if (hasRestrictive) restrictiveEmphasis += 0.005;
 
       // Growth downside risks (dovish -)
-      const hasGrowth = reasons.some((r: string) => r.includes('growth') || r.includes('slowdown') || r.includes('recession'));
-      if (hasGrowth) growthRisks += Math.min(score * 0.3, 0);
+      const hasGrowth = reasons.includes('growth') || reasons.includes('slowdown') ||
+        reasons.includes('recession') || reasons.includes('weak') || reasons.includes('soft') ||
+        reasons.includes('activity') || reasons.includes('demand') || reasons.includes('employment') ||
+        topics.includes('growth_outlook') || dims?.risk_balance === 'downside_growth' ||
+        dims?.reaction_function === 'growth_priority';
+      if (hasGrowth && score < 0) growthRisks += score * 0.3;
+      else if (hasGrowth) growthRisks -= 0.005;
 
       // Uncertainty language (dovish -)
-      const hasUncertainty = reasons.some((r: string) => r.includes('uncertain') || r.includes('data dependent') || r.includes('monitor'));
-      if (hasUncertainty) uncertaintyDrag -= 0.02;
+      const hasUncertainty = reasons.includes('uncertain') || reasons.includes('data dependent') ||
+        reasons.includes('monitor') || reasons.includes('cautious') || reasons.includes('risk') ||
+        reasons.includes('geopoliti') || reasons.includes('tariff') || reasons.includes('trade') ||
+        topics.includes('fiscal_geo_risk') || dims?.forward_guidance === 'open_ended';
+      if (hasUncertainty) uncertaintyDrag -= 0.015;
 
-      // Guidance firmness
+      // Guidance firmness from dimensions
       if (dims?.forward_guidance === 'firm') guidanceFirmness += 0.02;
+      else if (dims?.forward_guidance === 'conditional') guidanceFirmness += 0.005;
       else if (dims?.forward_guidance === 'open-ended' || dims?.forward_guidance === 'open_ended') guidanceFirmness -= 0.02;
 
       // Balance sheet
