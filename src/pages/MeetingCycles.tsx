@@ -191,6 +191,13 @@ const MeetingCycles = () => {
         </div>
       </div>
 
+      {/* Meeting Prep Pack */}
+      {allItems.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <MeetingPrepPack allItems={allItems as any} />
+        </div>
+      )}
+
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Upcoming</p>
