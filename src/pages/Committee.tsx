@@ -96,6 +96,17 @@ const Committee = () => {
           <DissentTimeline />
         </TabsContent>
 
+        <TabsContent value="network">
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Network className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold">Committee Alignment Network</h3>
+              <span className="text-[9px] text-muted-foreground">Node size = comms volume • Color = hawk/dove lean • Edge = messaging similarity</span>
+            </div>
+            <CommitteeNetworkGraph allItems={allItems as any} bankFilter={bankFilter} />
+          </div>
+        </TabsContent>
+
         <TabsContent value="composition" className="space-y-6">
 
       <div className="flex flex-wrap gap-3 items-center">
