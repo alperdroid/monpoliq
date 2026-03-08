@@ -16,6 +16,8 @@ export interface SentimentItem {
   stat_metric: string | null;
   stat_value: number | null;
   stat_weight: number;
+  topics?: string[];
+  policy_dimensions?: Record<string, string | null>;
 }
 
 export interface ScoreAggregate {
