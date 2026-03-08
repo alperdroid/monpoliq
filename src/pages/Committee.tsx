@@ -50,6 +50,11 @@ const Committee = () => {
     },
   });
 
+  const { data: allItems = [] } = useQuery({
+    queryKey: ['all-sentiment-items'],
+    queryFn: () => getCachedSentimentItems(),
+  });
+
   const { fedMembers, ecbMembers } = useMemo(() => {
     const fed = members.filter(m => m.bank === 'FED');
     const ecb = members.filter(m => m.bank === 'ECB');
