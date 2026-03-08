@@ -96,6 +96,9 @@ const Predictions = () => {
         </div>
       )}
 
+      {/* Multi-Horizon Forecasts */}
+      <MultiHorizonPanel />
+
       {/* Pivot Probability */}
       <PivotProbabilityPanel />
 

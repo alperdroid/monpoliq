@@ -130,6 +130,9 @@ const Speakers = () => {
         </div>
       )}
 
+      {/* Speaker DNA Profiles */}
+      {allItems.length > 0 && <SpeakerDNAPanel allItems={allItems} bankFilter={bankFilter} />}
+
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((speaker) => (
           <div key={speaker.name} className="rounded-lg border border-border bg-card p-4 space-y-3 hover:border-primary/30 transition-colors">

@@ -274,6 +274,12 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Surprise Index */}
+      <SurpriseIndex allItems={allItems as any} />
+
+      {/* Change-Point Detection */}
+      <ChangePointSection allItems={allItems as any} />
+
       {/* Cross-Bank Spread */}
       <CrossBankSpread allItems={allItems as any} />
 
