@@ -32,14 +32,15 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Fetch items that don't have topics yet (or have empty topics)
+    // Only fetch items where topics IS NULL (not yet processed)
+    // Items with empty array [] have been processed but had no relevant topics
     const { data: items, error } = await sb
       .from("sentiment_items")
       .select("id, bank, title, source, reasons, label, net_score")
       .eq("is_statistical", false)
-      .or("topics.is.null,topics.eq.{}")
+      .is("topics", null)
       .order("item_date", { ascending: false })
-      .limit(50);
+      .limit(200);
 
     if (error) throw new Error(error.message);
     if (!items || items.length === 0) {
@@ -48,7 +49,6 @@ serve(async (req) => {
       });
     }
 
-    // Batch items for AI tagging (groups of 10)
     const BATCH_SIZE = 10;
     let totalTagged = 0;
 
@@ -88,7 +88,6 @@ Rules:
       if (!aiResp.ok) {
         console.error("AI error:", aiResp.status, await aiResp.text());
         if (aiResp.status === 429) {
-          // Wait and continue
           await new Promise(r => setTimeout(r, 5000));
           continue;
         }
@@ -107,10 +106,9 @@ Rules:
         continue;
       }
 
-      // Update each item with its topics
+      // Update each item — even if tags are empty, mark as processed with []
       for (let j = 0; j < Math.min(batch.length, tagArrays.length); j++) {
         const tags = (tagArrays[j] || []).filter((t: string) => TOPIC_TAGS.includes(t));
-        if (tags.length === 0) continue;
 
         const { error: updateErr } = await sb
           .from("sentiment_items")
@@ -119,7 +117,7 @@ Rules:
 
         if (updateErr) {
           console.error("Update error:", updateErr.message);
-        } else {
+        } else if (tags.length > 0) {
           totalTagged++;
         }
       }
