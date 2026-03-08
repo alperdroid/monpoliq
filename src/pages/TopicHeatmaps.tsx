@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { TopicHeatmap, TopicHeatmapMatrix } from '@/components/meetings/TopicHeatmap';
-import { TaxonomyMatrix } from '@/components/meetings/TaxonomyMatrix';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
-import { RefreshCw, Loader2, FileText, Grid3X3, Layers } from 'lucide-react';
+import { RefreshCw, Loader2, FileText, Grid3X3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
