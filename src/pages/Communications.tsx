@@ -212,15 +212,6 @@ function CommScoreCard({ bank, label, score }: {
         </div>
       )}
     </div>
-
-      {/* Contradiction Detector */}
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-4">
-        <div className="grid md:grid-cols-2 gap-6">
-          <ContradictionFlags bank="FED" />
-          <ContradictionFlags bank="ECB" />
-        </div>
-      </div>
-    </div>
   );
 }
 
