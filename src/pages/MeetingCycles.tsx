@@ -320,6 +320,27 @@ function MeetingCard({ meeting, allItems }: {
           </div>
         </div>
       </div>
+
+      {/* Narrative Drift & Pivot Detector */}
+      <div className="p-4 border-t border-border">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+          Narrative Drift & Pivot Radar
+        </p>
+        <NarrativeDrift
+          items={allItems.filter(i => i.bank === meeting.bank)}
+          meetingDate={meeting.meeting_date}
+          bank={meeting.bank}
+          prevMeetingDate={meeting.prevMeetingDate}
+        />
+      </div>
+
+      {/* Topic Heatmap */}
+      <div className="p-4 border-t border-border">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+          Topic Heatmap
+        </p>
+        <TopicHeatmap items={meeting.allComms} meetingDate={meeting.meeting_date} />
+      </div>
     </div>
   );
 }
