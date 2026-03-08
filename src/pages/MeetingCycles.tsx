@@ -1,10 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
+import { TopicHeatmap } from '@/components/meetings/TopicHeatmap';
+import { NarrativeDrift } from '@/components/meetings/NarrativeDrift';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { supabase } from '@/integrations/supabase/client';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from 'recharts';
-import { CheckCircle, Clock } from 'lucide-react';
+import { CheckCircle, Clock, RefreshCw, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 /** Real central bank meeting dates with verified decisions */
 const REAL_MEETINGS = [
