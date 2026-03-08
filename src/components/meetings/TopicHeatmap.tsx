@@ -4,32 +4,34 @@ import type { SentimentItem } from '@/lib/api/sentiment';
 
 const TOPIC_LABELS: Record<string, string> = {
   inflation_dynamics: 'Inflation',
-  wages_labor: 'Wages/Labor',
+  wages_labor: 'Wages / Labor',
   credit_conditions: 'Credit',
   housing: 'Housing',
-  energy_supply: 'Energy/Supply',
-  fiscal_geo_risk: 'Fiscal/Geo',
+  energy_supply: 'Energy / Supply',
+  fiscal_geo_risk: 'Fiscal / Geo',
   financial_stability: 'Fin. Stability',
   growth_outlook: 'Growth',
-  qe_qt: 'QE/QT',
+  qe_qt: 'QE / QT',
   forward_guidance: 'Fwd Guidance',
 };
 
 const ALL_TOPICS = Object.keys(TOPIC_LABELS);
 
-// Heat colors: transparent → cool blue → warm orange → hot red
+/**
+ * Smooth heat color ramp using CSS oklch for perceptually uniform gradients.
+ * 0 → neutral gray, 0.01–0.3 → cool teal, 0.3–0.6 → warm amber, 0.6–1 → hot coral/red
+ */
 function heatColor(intensity: number): string {
-  if (intensity === 0) return 'hsl(220 15% 96%)';
-  if (intensity <= 0.2) return 'hsl(220 60% 92%)';
-  if (intensity <= 0.4) return 'hsl(220 70% 78%)';
-  if (intensity <= 0.6) return 'hsl(30 80% 70%)';
-  if (intensity <= 0.8) return 'hsl(20 90% 58%)';
-  return 'hsl(0 85% 50%)';
+  if (intensity === 0) return 'hsl(var(--muted))';
+  // Interpolate through a perceptual ramp
+  const h = 200 - intensity * 200; // 200 (teal) → 0 (red)
+  const s = 50 + intensity * 40;   // 50% → 90%
+  const l = 85 - intensity * 40;   // 85% → 45%
+  return `hsl(${h} ${s}% ${l}%)`;
 }
 
 function heatTextColor(intensity: number): string {
-  if (intensity <= 0.4) return 'hsl(220 20% 30%)';
-  return 'hsl(0 0% 100%)';
+  return intensity > 0.5 ? 'hsl(0 0% 100%)' : 'hsl(var(--foreground))';
 }
 
 interface TopicHeatmapProps {
@@ -76,7 +78,7 @@ export function TopicHeatmap({ items, meetingDate, compact }: TopicHeatmapProps)
           return (
             <div
               key={topic}
-              className="relative rounded-md overflow-hidden text-center transition-all"
+              className="relative rounded-md overflow-hidden text-center transition-all duration-300"
               style={{
                 backgroundColor: heatColor(intensity),
                 color: heatTextColor(intensity),
@@ -106,15 +108,24 @@ export function TopicHeatmap({ items, meetingDate, compact }: TopicHeatmapProps)
   );
 }
 
-/** Cross-meeting heatmap matrix: rows = topics, columns = meetings */
+/** Cross-meeting heatmap matrix: rows = topics, columns = meetings (chronological) */
 export function TopicHeatmapMatrix({
   meetings,
 }: {
   meetings: { id: string; label: string; bank: string; items: any[] }[];
 }) {
+  // Sort columns chronologically (oldest → newest, left → right)
+  const sorted = useMemo(() => {
+    return [...meetings].sort((a, b) => {
+      const dateA = a.id.split('-').slice(1).join('-');
+      const dateB = b.id.split('-').slice(1).join('-');
+      return dateA.localeCompare(dateB);
+    });
+  }, [meetings]);
+
   const matrix = useMemo(() => {
     return ALL_TOPICS.map(topic => {
-      const row = meetings.map(m => {
+      const row = sorted.map(m => {
         let count = 0;
         for (const item of m.items) {
           const topics = (item as any).topics as string[] | undefined;
@@ -124,7 +135,7 @@ export function TopicHeatmapMatrix({
       });
       return { topic, row };
     });
-  }, [meetings]);
+  }, [sorted]);
 
   const globalMax = Math.max(1, ...matrix.flatMap(r => r.row));
 
@@ -133,46 +144,49 @@ export function TopicHeatmapMatrix({
       <table className="w-full border-collapse text-[10px]">
         <thead>
           <tr>
-            <th className="text-left py-2 px-2 font-semibold text-muted-foreground sticky left-0 bg-background z-10 min-w-[90px]">
+            <th className="text-left py-2.5 px-3 font-semibold text-muted-foreground sticky left-0 bg-card z-10 min-w-[100px] border-b border-border">
               Topic
             </th>
-            {meetings.map(m => (
-              <th
-                key={m.id}
-                className="py-2 px-1 font-medium text-muted-foreground text-center min-w-[60px]"
-              >
-                <div className="truncate max-w-[80px]">{m.label.split('—')[0].trim()}</div>
-                <span
-                  className={cn(
-                    'inline-block mt-0.5 text-[8px] font-bold px-1 py-0.5 rounded',
-                    m.bank === 'FED'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-accent/10 text-accent-foreground',
-                  )}
+            {sorted.map(m => {
+              const dateParts = m.label.split('—')[0].trim();
+              return (
+                <th
+                  key={m.id}
+                  className="py-2.5 px-1 font-medium text-muted-foreground text-center min-w-[54px] border-b border-border"
                 >
-                  {m.bank}
-                </span>
-              </th>
-            ))}
+                  <div className="truncate max-w-[72px] text-[9px]">{dateParts}</div>
+                  <span
+                    className={cn(
+                      'inline-block mt-0.5 text-[7px] font-bold px-1.5 py-0.5 rounded-full',
+                      m.bank === 'FED'
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-accent text-accent-foreground',
+                    )}
+                  >
+                    {m.bank}
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {matrix.map(({ topic, row }) => (
-            <tr key={topic} className="border-t border-border/30">
-              <td className="py-1.5 px-2 font-semibold text-foreground sticky left-0 bg-background z-10">
+            <tr key={topic} className="group">
+              <td className="py-2 px-3 font-semibold text-foreground sticky left-0 bg-card z-10 border-b border-border/30 text-[11px]">
                 {TOPIC_LABELS[topic]}
               </td>
               {row.map((count, i) => {
                 const intensity = count / globalMax;
                 return (
-                  <td key={meetings[i].id} className="py-1 px-0.5 text-center">
+                  <td key={sorted[i].id} className="py-1 px-0.5 text-center border-b border-border/30">
                     <div
-                      className="mx-auto rounded w-full h-8 flex items-center justify-center font-bold text-xs transition-all"
+                      className="mx-auto rounded-md w-full h-9 flex items-center justify-center font-bold text-xs transition-all duration-300 hover:scale-105 hover:shadow-md cursor-default"
                       style={{
                         backgroundColor: heatColor(intensity),
                         color: heatTextColor(intensity),
                       }}
-                      title={`${TOPIC_LABELS[topic]}: ${count}`}
+                      title={`${TOPIC_LABELS[topic]}: ${count} mentions`}
                     >
                       {count > 0 ? count : ''}
                     </div>
@@ -183,18 +197,19 @@ export function TopicHeatmapMatrix({
           ))}
         </tbody>
       </table>
+
       {/* Legend */}
-      <div className="flex items-center gap-2 mt-3 text-[9px] text-muted-foreground">
-        <span>Intensity:</span>
-        {[0, 0.2, 0.4, 0.6, 0.8, 1].map(v => (
+      <div className="flex items-center gap-1.5 mt-4 text-[9px] text-muted-foreground">
+        <span className="font-medium mr-1">Intensity</span>
+        {[0, 0.15, 0.3, 0.5, 0.7, 0.85, 1].map(v => (
           <div
             key={v}
-            className="w-5 h-3 rounded-sm"
+            className="w-6 h-3.5 rounded-sm transition-all"
             style={{ backgroundColor: heatColor(v) }}
             title={`${Math.round(v * 100)}%`}
           />
         ))}
-        <span className="ml-1">Low → High</span>
+        <span className="ml-1 text-[8px]">Low → High</span>
       </div>
     </div>
   );
