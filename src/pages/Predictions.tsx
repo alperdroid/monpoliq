@@ -4,6 +4,7 @@ import { PredictionPanel } from '@/components/dashboard/PredictionPanel';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Brain } from 'lucide-react';
+import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import {
   getCachedSentimentItems,
   type SentimentItem,
