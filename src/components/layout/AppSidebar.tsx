@@ -26,6 +26,7 @@ const mainNav = [
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
   { title: 'Topic Heatmaps', url: '/topics', icon: Grid3X3 },
   { title: 'Policy Taxonomy', url: '/taxonomy', icon: Layers },
+  { title: 'Policy Radar', url: '/radar', icon: Crosshair },
   { title: 'Committee', url: '/committee', icon: Shield },
   { title: 'What If…', url: '/counterfactual', icon: Zap },
 ];

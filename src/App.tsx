@@ -42,6 +42,7 @@ const App = () => (
             <Route path="/counterfactual" element={<Counterfactual />} />
             <Route path="/topics" element={<TopicHeatmaps />} />
             <Route path="/taxonomy" element={<PolicyTaxonomy />} />
+            <Route path="/radar" element={<PolicyRadar />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
