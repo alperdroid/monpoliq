@@ -92,6 +92,7 @@ export type Database = {
           item_date: string
           label: string | null
           net_score: number | null
+          policy_dimensions: Json | null
           reasons: string[] | null
           source: string
           stat_metric: string | null
@@ -113,6 +114,7 @@ export type Database = {
           item_date: string
           label?: string | null
           net_score?: number | null
+          policy_dimensions?: Json | null
           reasons?: string[] | null
           source: string
           stat_metric?: string | null
@@ -134,6 +136,7 @@ export type Database = {
           item_date?: string
           label?: string | null
           net_score?: number | null
+          policy_dimensions?: Json | null
           reasons?: string[] | null
           source?: string
           stat_metric?: string | null

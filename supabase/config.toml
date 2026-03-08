@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.counterfactual]
 verify_jwt = false
+
+[functions.policy-taxonomy]
+verify_jwt = false

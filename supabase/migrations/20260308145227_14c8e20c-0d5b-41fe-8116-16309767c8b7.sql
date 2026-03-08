@@ -1,0 +1,1 @@
+ALTER TABLE sentiment_items ADD COLUMN IF NOT EXISTS policy_dimensions jsonb DEFAULT NULL;
