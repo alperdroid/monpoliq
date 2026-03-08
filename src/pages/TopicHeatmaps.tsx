@@ -45,7 +45,6 @@ function isPolicyText(item: SentimentItem): boolean {
 
 const TopicHeatmaps = () => {
   const [tagging, setTagging] = useState(false);
-  const [classifying, setClassifying] = useState(false);
   const [bankFilter, setBankFilter] = useState<'ALL' | 'FED' | 'ECB'>('ALL');
 
   const { data: allItems = [], isLoading, refetch } = useQuery({
