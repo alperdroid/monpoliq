@@ -179,7 +179,7 @@ const TopicHeatmaps = () => {
                 Orthogonal policy dimensions — what narrative dominates each meeting cycle
               </p>
             </div>
-            <TaxonomyMatrix meetings={meetingTopicData} />
+            <TaxonomyMatrix meetings={meetingTopicData as any} />
           </div>
         </TabsContent>
 
