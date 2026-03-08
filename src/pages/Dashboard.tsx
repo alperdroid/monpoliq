@@ -262,6 +262,19 @@ const Dashboard = () => {
       {/* CIE: Communication vs Model Gap */}
       <CIEWidget allItems={allItems} aiPrediction={aiPrediction} isPredictionLoading={isPredictionLoading} />
 
+      {/* Stance Decomposition Waterfall */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <StanceDecomposition items={allItems as any} bank="FED" />
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <StanceDecomposition items={allItems as any} bank="ECB" />
+        </div>
+      </div>
+
+      {/* Cross-Bank Spread */}
+      <CrossBankSpread allItems={allItems as any} />
+
       {/* Bank Panels */}
       <div className="grid lg:grid-cols-2 gap-4">
         <BankPanel
