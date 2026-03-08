@@ -24,6 +24,7 @@ const mainNav = [
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
   { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
+  { title: 'Topic Heatmaps', url: '/topics', icon: Grid3X3 },
   { title: 'Committee', url: '/committee', icon: Shield },
   { title: 'What If…', url: '/counterfactual', icon: Zap },
 ];
