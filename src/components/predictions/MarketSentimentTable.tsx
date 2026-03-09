@@ -66,10 +66,11 @@ function ProbabilityDiff({ market, ai, type }: { market: number; ai: number; typ
 }
 
 export function MarketSentimentTable() {
-  const { data: marketData = [] } = useQuery({
+  const { data: marketData = [], isLoading, error } = useQuery({
     queryKey: ['market-sentiment'],
-    queryFn: () => generateMarketData(),
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    queryFn: fetchMarketData,
+    staleTime: 1000 * 60 * 30, // 30 minutes cache
+    retry: 2,
   });
 
   return (
