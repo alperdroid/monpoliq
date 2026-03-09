@@ -20,73 +20,27 @@ interface MarketInstrument {
   change_24h: number;
 }
 
-// AI-generated market expectations data
-function generateMarketData(): MarketInstrument[] {
-  const nextFedMeeting = '2024-03-20';
-  const nextEcbMeeting = '2024-04-11';
-  
-  return [
-    {
-      id: 'fed-funds-mar24',
-      name: 'Fed Funds Mar 24',
-      type: 'futures',
-      bank: 'FED',
-      meeting_date: nextFedMeeting,
-      market_hike_prob: 0.05,
-      market_hold_prob: 0.82,
-      market_cut_prob: 0.13,
-      ai_hike_prob: 0.02,
-      ai_hold_prob: 0.75,
-      ai_cut_prob: 0.23,
-      price: 94.87,
-      change_24h: -0.02,
+// Fetch live market data from Gemini AI
+async function fetchMarketData(): Promise<MarketInstrument[]> {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const url = `https://${projectId}.supabase.co/functions/v1/market-futures`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${anonKey}`,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
     },
-    {
-      id: 'euribor-apr24',
-      name: 'Euribor Apr 24',
-      type: 'futures',
-      bank: 'ECB',
-      meeting_date: nextEcbMeeting,
-      market_hike_prob: 0.08,
-      market_hold_prob: 0.89,
-      market_cut_prob: 0.03,
-      ai_hike_prob: 0.12,
-      ai_hold_prob: 0.85,
-      ai_cut_prob: 0.03,
-      price: 96.25,
-      change_24h: 0.01,
-    },
-    {
-      id: 'fed-funds-may24',
-      name: 'Fed Funds May 24',
-      type: 'futures',
-      bank: 'FED',
-      meeting_date: '2024-05-01',
-      market_hike_prob: 0.03,
-      market_hold_prob: 0.71,
-      market_cut_prob: 0.26,
-      ai_hike_prob: 0.01,
-      ai_hold_prob: 0.65,
-      ai_cut_prob: 0.34,
-      price: 94.74,
-      change_24h: -0.03,
-    },
-    {
-      id: 'euribor-jun24',
-      name: 'Euribor Jun 24',
-      type: 'futures',
-      bank: 'ECB',
-      meeting_date: '2024-06-06',
-      market_hike_prob: 0.02,
-      market_hold_prob: 0.78,
-      market_cut_prob: 0.20,
-      ai_hike_prob: 0.05,
-      ai_hold_prob: 0.72,
-      ai_cut_prob: 0.23,
-      price: 96.15,
-      change_24h: -0.01,
-    }
-  ];
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Market data fetch failed: ${errorText}`);
+  }
+
+  return response.json();
 }
 
 function ProbabilityDiff({ market, ai, type }: { market: number; ai: number; type: 'hike' | 'hold' | 'cut' }) {
