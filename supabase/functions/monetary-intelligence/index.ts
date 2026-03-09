@@ -49,11 +49,12 @@ serve(async (req) => {
     const scores = scoresRes.data || [];
 
     // ── 2. Compute data hash for caching ──
-    // Hash = count of items + latest item date + scores. If unchanged, return cached prediction.
+    // Hash = count of items + latest item date + scores + geopolitical date suffix for daily updates
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
-    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}`;
+    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}`;
+    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
 
     // Check cache: return if same data hash AND less than 24h old
     const { data: cached } = await sb.from("prediction_cache")
