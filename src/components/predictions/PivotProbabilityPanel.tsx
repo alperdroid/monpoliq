@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Button } from '@/components/ui/button';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { toast } from 'sonner';
