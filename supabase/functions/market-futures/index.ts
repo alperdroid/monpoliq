@@ -5,22 +5,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-interface MarketInstrument {
-  id: string;
-  name: string;
-  type: 'futures' | 'bonds' | 'swaps';
-  bank: 'FED' | 'ECB';
-  meeting_date: string;
-  market_hike_prob: number;
-  market_hold_prob: number;
-  market_cut_prob: number;
-  ai_hike_prob: number;
-  ai_hold_prob: number;
-  ai_cut_prob: number;
-  price: number;
-  change_24h: number;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -34,36 +18,27 @@ serve(async (req) => {
 
     const today = new Date().toISOString().split('T')[0];
     
-    const prompt = `You are a financial data analyst. Provide current futures market data for Federal Reserve and ECB interest rate expectations.
+    const prompt = `You are a financial data analyst. For today (${today}), provide current market data across these categories:
 
-For today (${today}), return data for these key instruments:
+**RATE FUTURES** (category: "rate_futures"):
 1. Fed Funds futures for next 2-3 upcoming FOMC meetings
 2. Euribor futures for next 2-3 upcoming ECB meetings
+- Include: price, market-implied hike/hold/cut probabilities, AI-assessed probabilities, 24h change
 
-For each instrument, provide:
-- Current futures price
-- Market-implied probabilities for hike/hold/cut
-- Your AI assessment of probabilities based on recent central bank communications
-- 24-hour price change
+**TREASURY & SOVEREIGN BONDS** (category: "bonds"):
+1. US 10-Year Treasury Note futures
+2. US 2-Year Treasury Note futures  
+3. German 10-Year Bund futures
+4. US 10Y-2Y yield curve spread
+- Include: price/yield, 24h change, direction (bullish/bearish/neutral), ai_direction
 
-Format as JSON array with this structure:
-{
-  "id": "fed-funds-mar24",
-  "name": "Fed Funds Mar 24", 
-  "type": "futures",
-  "bank": "FED",
-  "meeting_date": "2024-03-20",
-  "market_hike_prob": 0.05,
-  "market_hold_prob": 0.82,
-  "market_cut_prob": 0.13,
-  "ai_hike_prob": 0.02,
-  "ai_hold_prob": 0.75,
-  "ai_cut_prob": 0.23,
-  "price": 94.87,
-  "change_24h": -0.02
-}
+**CURRENCY FORWARDS** (category: "currency"):
+1. EUR/USD 3-month forward
+2. GBP/USD 3-month forward
+3. USD/JPY 3-month forward
+- Include: price (forward rate), 24h change, direction, ai_direction
 
-Use actual market data and current meeting schedules. Ensure probabilities sum to 1.0 for both market and AI assessments.`;
+Use actual current market data. For rate futures, probabilities must sum to 1.0.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -74,21 +49,15 @@ Use actual market data and current meeting schedules. Ensure probabilities sum t
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
-          {
-            role: "system",
-            content: "You are a financial data expert with access to current futures market data. Provide accurate, up-to-date information."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
+          { role: "system", content: "You are a financial data expert. Provide accurate, up-to-date market information." },
+          { role: "user", content: prompt }
         ],
         tools: [
           {
             type: "function",
             function: {
-              name: "provide_futures_data",
-              description: "Return current futures market data and rate expectations",
+              name: "provide_market_data",
+              description: "Return current multi-asset market data",
               parameters: {
                 type: "object",
                 properties: {
@@ -99,19 +68,23 @@ Use actual market data and current meeting schedules. Ensure probabilities sum t
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
-                        type: { type: "string", enum: ["futures", "bonds", "swaps"] },
-                        bank: { type: "string", enum: ["FED", "ECB"] },
-                        meeting_date: { type: "string" },
-                        market_hike_prob: { type: "number", minimum: 0, maximum: 1 },
-                        market_hold_prob: { type: "number", minimum: 0, maximum: 1 },
-                        market_cut_prob: { type: "number", minimum: 0, maximum: 1 },
-                        ai_hike_prob: { type: "number", minimum: 0, maximum: 1 },
-                        ai_hold_prob: { type: "number", minimum: 0, maximum: 1 },
-                        ai_cut_prob: { type: "number", minimum: 0, maximum: 1 },
+                        category: { type: "string", enum: ["rate_futures", "bonds", "currency"] },
+                        bank: { type: "string", enum: ["FED", "ECB", "BOJ", "BOE", "MULTI"] },
+                        reference_date: { type: "string", description: "Meeting date for rate futures, maturity for bonds, or settlement for FX" },
                         price: { type: "number" },
-                        change_24h: { type: "number" }
+                        change_24h: { type: "number" },
+                        yield_value: { type: "number", description: "Yield for bonds, null for others" },
+                        spread_bps: { type: "number", description: "Spread in basis points for curve trades, null for others" },
+                        market_hike_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        market_hold_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        market_cut_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        ai_hike_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        ai_hold_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        ai_cut_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
+                        direction: { type: "string", enum: ["bullish", "bearish", "neutral"], description: "Market direction for bonds/currency" },
+                        ai_direction: { type: "string", enum: ["bullish", "bearish", "neutral"], description: "AI-assessed direction for bonds/currency" }
                       },
-                      required: ["id", "name", "type", "bank", "meeting_date", "market_hike_prob", "market_hold_prob", "market_cut_prob", "ai_hike_prob", "ai_hold_prob", "ai_cut_prob", "price", "change_24h"]
+                      required: ["id", "name", "category", "bank", "reference_date", "price", "change_24h"]
                     }
                   }
                 },
@@ -120,57 +93,41 @@ Use actual market data and current meeting schedules. Ensure probabilities sum t
             }
           }
         ],
-        tool_choice: { type: "function", function: { name: "provide_futures_data" } }
+        tool_choice: { type: "function", function: { name: "provide_market_data" } }
       }),
     });
 
     if (!response.ok) {
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Payment required. Please add credits to continue." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Payment required. Please add credits to continue." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      
       const errorText = await response.text();
-      console.error("Gemini API error:", response.status, errorText);
-      throw new Error(`Gemini API call failed: ${errorText}`);
+      console.error("API error:", response.status, errorText);
+      throw new Error(`API call failed: ${errorText}`);
     }
 
     const data = await response.json();
-    console.log("Gemini response:", JSON.stringify(data, null, 2));
-
-    // Extract the tool call result
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall || toolCall.function?.name !== "provide_futures_data") {
-      throw new Error("Invalid response format from Gemini");
+    if (!toolCall || toolCall.function?.name !== "provide_market_data") {
+      throw new Error("Invalid response format");
     }
 
-    const futuresData = JSON.parse(toolCall.function.arguments);
+    const result = JSON.parse(toolCall.function.arguments);
     
-    return new Response(
-      JSON.stringify(futuresData.instruments),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify(result.instruments), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
   } catch (error) {
-    console.error("Market futures error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-    
+    console.error("Market data error:", error);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
