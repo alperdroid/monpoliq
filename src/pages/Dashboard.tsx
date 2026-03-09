@@ -175,15 +175,15 @@ const Dashboard = () => {
             </>
           ) : fedPred && ecbPred && eurusdPred ? (
             <>
-              <MetricCard label="Fed Next" value={fedPred.next_decision.toUpperCase()} sublabel={`${(fedPred.hold_probability * 100).toFixed(0)}% hold`} variant="prediction" />
-              <MetricCard label="ECB Next" value={ecbPred.next_decision.toUpperCase()} sublabel={`${(ecbPred.cut_probability * 100).toFixed(0)}% cut`} variant="prediction" />
-              <MetricCard label="EUR/USD" value={eurusdPred.direction.toUpperCase()} sublabel={`${(eurusdPred.signal_strength * 100).toFixed(0)}% signal`} variant="prediction" />
+              <MetricCard label="Fed Path (Fund.)" value={fedPred.next_decision.toUpperCase()} sublabel={`${(fedPred.hold_probability * 100).toFixed(0)}% hold`} variant="prediction" />
+              <MetricCard label="ECB Path (Fund.)" value={ecbPred.next_decision.toUpperCase()} sublabel={`${(ecbPred.cut_probability * 100).toFixed(0)}% cut`} variant="prediction" />
+              <MetricCard label="EUR/USD (Fund.)" value={eurusdPred.direction.toUpperCase()} sublabel={`${(eurusdPred.signal_strength * 100).toFixed(0)}% signal`} variant="prediction" />
             </>
           ) : (
             <>
-              <MetricCard label="Fed Next" value="—" sublabel="Loading..." variant="prediction" />
-              <MetricCard label="ECB Next" value="—" sublabel="Loading..." variant="prediction" />
-              <MetricCard label="EUR/USD" value="—" sublabel="Loading..." variant="prediction" />
+              <MetricCard label="Fed Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
+              <MetricCard label="ECB Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
+              <MetricCard label="EUR/USD (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
             </>
           )}
           <MetricCard label="Comm. Volume" value={String(recent30.length)} sublabel="30d events" trend={recent7.length > 5 ? 'up' : 'flat'} trendValue={`${recent7.length} this week`} />
