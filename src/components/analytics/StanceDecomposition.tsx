@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 import { Layers } from 'lucide-react';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 interface StanceDecompositionProps {

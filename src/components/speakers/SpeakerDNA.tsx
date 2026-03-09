@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Dna } from 'lucide-react';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
@@ -149,6 +150,7 @@ export function SpeakerDNAPanel({ allItems, bankFilter }: SpeakerDNAProps) {
       <div className="flex items-center gap-2">
         <Dna className="w-4 h-4 text-prediction" />
         <h3 className="text-sm font-semibold">Speaker DNA Profiles</h3>
+        <TooltipInfo content="Real-time behavioral analysis of individual central bank officials. Tracks inflation focus, guidance commitment, volatility, and ideological drift using historical communication patterns." />
       </div>
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
         {profiles.map(p => (
