@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Dna } from 'lucide-react';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
