@@ -197,7 +197,7 @@ export function MarketSentimentTable() {
           </TableBody>
         </Table>
         <div className="mt-3 text-[10px] text-muted-foreground">
-          Market data simulated • AI diff shows direction and magnitude vs market consensus • Updates every 2 minutes
+          Live market data via Gemini AI • AI diff shows direction and magnitude vs market consensus • Updates every 30 minutes
         </div>
       </CardContent>
     </Card>
