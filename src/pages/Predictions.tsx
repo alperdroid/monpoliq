@@ -99,6 +99,9 @@ const Predictions = () => {
         </div>
       )}
 
+      {/* Divergence Alert */}
+      <DivergenceAlertWidget />
+
       {/* Multi-Horizon Forecasts */}
       <MultiHorizonPanel />
 
