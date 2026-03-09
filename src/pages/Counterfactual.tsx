@@ -82,11 +82,14 @@ const Counterfactual = () => {
 
   return (
     <div className="space-y-6 animate-slide-in">
-      <div>
-        <h1 className="text-lg font-semibold">What If… Lab</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          Scenario analysis and synthetic statement generation
-        </p>
+      <div className="flex items-center gap-2">
+        <div>
+          <h1 className="text-lg font-semibold">What If… Lab</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Scenario analysis and synthetic statement generation
+          </p>
+        </div>
+        <TooltipInfo content="AI-powered counterfactual analysis. Generate alternative policy statements and analyze their impact on market expectations, decision probabilities, and historical analogies." />
       </div>
 
       <Tabs defaultValue="counterfactual" className="space-y-4">

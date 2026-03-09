@@ -92,12 +92,15 @@ const PolicyTaxonomy = () => {
   return (
     <div className="space-y-6 animate-slide-in">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Policy Taxonomy</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Orthogonal policy dimensions — which narrative dominates each meeting cycle
-            {isLoading ? ' — loading…' : ` — ${totalClassified}/${totalItems} classified`}
-          </p>
+        <div className="flex items-center gap-2">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight">Policy Taxonomy</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Orthogonal policy dimensions — which narrative dominates each meeting cycle
+              {isLoading ? ' — loading…' : ` — ${totalClassified}/${totalItems} classified`}
+            </p>
+          </div>
+          <TooltipInfo content="Machine learning classification of policy communications into 6 dimensional categories: reaction function, forward guidance, risk balance, terminal rate view, time horizon, and balance sheet approach." />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 rounded-lg border border-border p-0.5 bg-muted/30">

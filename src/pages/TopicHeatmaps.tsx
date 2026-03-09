@@ -102,12 +102,15 @@ const TopicHeatmaps = () => {
     <div className="space-y-6 animate-slide-in">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Thematic analysis of <strong>official policy texts</strong> per meeting cycle
-            {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged`}
-          </p>
+        <div className="flex items-center gap-2">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight">Topic Heatmaps</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Thematic analysis of <strong>official policy texts</strong> per meeting cycle
+              {isLoading ? ' — loading…' : ` — ${totalTagged}/${totalItems} tagged`}
+            </p>
+          </div>
+          <TooltipInfo content="Heat map visualization showing concentration of policy topics (inflation, growth, QE/QT, etc.) across different meeting cycles. Darker colors indicate higher frequency of topic mentions." />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 rounded-lg border border-border p-0.5 bg-muted/30">
