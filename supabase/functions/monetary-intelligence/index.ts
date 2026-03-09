@@ -177,13 +177,19 @@ ${summarizeItems(ecbStats)}
 
 ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
 
-IMPORTANT CONSISTENCY CHECK:
-- If ECB sentiment is more dovish than Fed → ECB more likely to cut → EUR weakens → EUR/USD direction MUST be "bearish"
-- If Fed sentiment is more dovish than ECB → Fed more likely to cut → USD weakens → EUR/USD direction MUST be "bullish"
-- The EUR/USD direction MUST logically follow from the policy predictions above.
+## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
+Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
+ECB 30-day sentiment: ${avg(ecbComms) ?? "N/A"}
+
+MANDATORY CONSISTENCY RULE:
+- Fed sentiment (${avg(fedComms) ?? "N/A"}) vs ECB sentiment (${avg(ecbComms) ?? "N/A"})
+- MORE NEGATIVE score = MORE DOVISH = currency WEAKENS
+- If Fed more dovish (more negative) → USD weakens → EUR/USD direction MUST be "bullish"
+- If ECB more dovish (more negative) → EUR weakens → EUR/USD direction MUST be "bearish"
+- The EUR/USD direction MUST be mathematically consistent with the sentiment differential above.
 
 Current date: ${new Date().toISOString().split("T")[0]}
-Provide your prediction as the JSON object described.`;
+Consider current market expectations, geopolitical tensions, and any emerging risks that may override historical data patterns.`;
 
     // ── 4. Call Lovable AI (Gemini) ──
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
