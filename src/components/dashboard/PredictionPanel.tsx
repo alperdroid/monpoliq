@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import type { PredictionOutput, CurrencyPrediction } from '@/types/central-bank';
 import type { TreasuryPrediction } from '@/lib/api/predictions';
 import { ProbabilityBar } from '@/components/analytics/ProbabilityBar';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 
 interface PredictionPanelProps {
