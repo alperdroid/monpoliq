@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Brain } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
+import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
 import {
   getCachedSentimentItems,
