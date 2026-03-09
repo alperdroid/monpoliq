@@ -102,8 +102,13 @@ export function CommitteeNetworkGraph({ allItems, bankFilter = 'all' }: Committe
   const nodeMap = Object.fromEntries(nodes.map(n => [n.name, n]));
 
   return (
-    <div className="relative">
-      <svg viewBox="0 0 400 360" className="w-full max-w-lg mx-auto">
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold">Committee Network Graph</h3>
+        <TooltipInfo content="Network visualization showing speaker positioning based on communication patterns. Node size = activity level, position = hawkish/dovish stance, connections = similarity in messaging tone." />
+      </div>
+      <div className="relative">
+        <svg viewBox="0 0 400 360" className="w-full max-w-lg mx-auto">
         {/* Edges */}
         {edges.map((e, i) => {
           const from = nodeMap[e.from];
