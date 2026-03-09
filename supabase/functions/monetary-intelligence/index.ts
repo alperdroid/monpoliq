@@ -95,19 +95,27 @@ serve(async (req) => {
         `- [${i.item_date}] "${i.title}" → score: ${i.net_score}, label: ${i.label}${i.stat_metric ? `, metric: ${i.stat_metric}=${i.stat_value}` : ""}`
       ).join("\n");
 
-    const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, and market expectations to predict the next policy decision. Do not mention any AI model names in your reasoning.
+    const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, market expectations, and geopolitical risks to predict the next policy decision. Do not mention any AI model names in your reasoning.
 
 CRITICAL EUR/USD LOGIC — you MUST follow this:
 - EUR/USD = how many USD per 1 EUR
-- If the ECB is expected to CUT rates (dovish) while Fed HOLDS or is less dovish → EUR weakens → EUR/USD is BEARISH
-- If the Fed is expected to CUT rates (dovish) while ECB holds or is less dovish → USD weakens → EUR/USD is BULLISH
-- The direction MUST be consistent with the rate differential logic. If ECB is more dovish than Fed → BEARISH for EUR/USD. Period.
-- "Bullish EUR/USD" means EUR strengthening. "Bearish EUR/USD" means EUR weakening.
+- Compare ACTUAL SENTIMENT SCORES, not just decisions
+- If Fed sentiment score is MORE NEGATIVE (more dovish) than ECB → USD weakens → EUR/USD is BULLISH
+- If ECB sentiment score is MORE NEGATIVE (more dovish) than Fed → EUR weakens → EUR/USD is BEARISH
+- The direction MUST be consistent with the sentiment differential. More dovish = currency weakens.
+- "Bullish EUR/USD" means EUR strengthening vs USD. "Bearish EUR/USD" means EUR weakening vs USD.
 
-GEOPOLITICAL CONTEXT — include in your reasoning:
-- For Fed and ECB decisions: include ONE sentence about relevant geopolitical factors (trade wars, tariffs, sanctions, geopolitical tensions) affecting the policy outlook
+MARKET EXPECTATIONS & GEOPOLITICAL RISKS:
+- Consider current market pricing and positioning when making predictions
+- If significant geopolitical tensions emerge (wars, trade conflicts, sanctions) that cannot be captured by historical data, adjust predictions accordingly and mention this risk explicitly
+- For abrupt geopolitical changes, override data-based predictions if the external shock is material
+- For Fed and ECB decisions: include ONE sentence about relevant geopolitical factors affecting policy
 - For EUR/USD: include ONE sentence about geopolitical effects on the currency pair
-- For US 10Y Treasury: include ONE sentence about either geopolitical risk or fiscal policy effects (US deficit, debt ceiling, Treasury issuance)
+- For US 10Y Treasury: include ONE sentence about either geopolitical risk or fiscal policy effects
+
+PREDICTION STABILITY:
+- Only generate new predictions if data has changed or significant external events warrant it
+- Maintain consistency with underlying sentiment scores unless external shocks override
 
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:
 {
@@ -131,7 +139,7 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
     "direction": "bullish" | "bearish" | "neutral",
     "signal_strength": 0.0-1.0,
     "confidence": 0.0-1.0,
-    "reasoning": "2-3 sentences. MUST be logically consistent with the rate decisions above. Include one sentence on geopolitical effects."
+    "reasoning": "2-3 sentences. MUST be logically consistent with sentiment scores. Include one sentence on geopolitical effects."
   },
   "us10y": {
     "direction": "bullish" | "bearish" | "neutral",
@@ -143,10 +151,11 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
 }
 
 Probabilities for each bank MUST sum to 1.0. Base your analysis on:
-1. Communication sentiment scores (positive = hawkish, negative = dovish)
+1. Communication sentiment scores (negative = dovish, positive = hawkish)
 2. Statistical/economic data trends
-3. Rate differential logic for EUR/USD (the MORE dovish central bank weakens its currency)
-4. Recent policy trajectory and forward guidance`;
+3. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
+4. Market expectations and positioning
+5. Geopolitical risk assessment`;
 
     const userPrompt = `Analyze the following data and predict the next Fed and ECB decisions:
 
@@ -168,13 +177,19 @@ ${summarizeItems(ecbStats)}
 
 ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
 
-IMPORTANT CONSISTENCY CHECK:
-- If ECB sentiment is more dovish than Fed → ECB more likely to cut → EUR weakens → EUR/USD direction MUST be "bearish"
-- If Fed sentiment is more dovish than ECB → Fed more likely to cut → USD weakens → EUR/USD direction MUST be "bullish"
-- The EUR/USD direction MUST logically follow from the policy predictions above.
+## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
+Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
+ECB 30-day sentiment: ${avg(ecbComms) ?? "N/A"}
+
+MANDATORY CONSISTENCY RULE:
+- Fed sentiment (${avg(fedComms) ?? "N/A"}) vs ECB sentiment (${avg(ecbComms) ?? "N/A"})
+- MORE NEGATIVE score = MORE DOVISH = currency WEAKENS
+- If Fed more dovish (more negative) → USD weakens → EUR/USD direction MUST be "bullish"
+- If ECB more dovish (more negative) → EUR weakens → EUR/USD direction MUST be "bearish"
+- The EUR/USD direction MUST be mathematically consistent with the sentiment differential above.
 
 Current date: ${new Date().toISOString().split("T")[0]}
-Provide your prediction as the JSON object described.`;
+Consider current market expectations, geopolitical tensions, and any emerging risks that may override historical data patterns.`;
 
     // ── 4. Call Lovable AI (Gemini) ──
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -240,20 +255,24 @@ Provide your prediction as the JSON object described.`;
       }
     }
 
-    // ── 5. Post-hoc consistency check for EUR/USD ──
-    const fedDecision = prediction.fed?.next_decision;
-    const ecbDecision = prediction.ecb?.next_decision;
-    if (ecbDecision === "cut" && fedDecision !== "cut") {
-      // ECB cutting while Fed isn't → EUR weakens → must be bearish
-      if (prediction.eurusd?.direction === "bullish") {
-        console.log("Correcting EUR/USD: ECB cutting + Fed not cutting → forcing bearish");
-        prediction.eurusd.direction = "bearish";
-      }
-    } else if (fedDecision === "cut" && ecbDecision !== "cut") {
-      // Fed cutting while ECB isn't → USD weakens → must be bullish
+    // ── 5. Post-hoc consistency check for EUR/USD based on sentiment scores ──
+    const fedSentiment = avg(fedComms) ?? 0;
+    const ecbSentiment = avg(ecbComms) ?? 0;
+    
+    // More negative = more dovish = currency weakens
+    if (fedSentiment < ecbSentiment) {
+      // Fed more dovish → USD weakens → EUR/USD must be bullish
       if (prediction.eurusd?.direction === "bearish") {
-        console.log("Correcting EUR/USD: Fed cutting + ECB not cutting → forcing bullish");
+        console.log(`Correcting EUR/USD: Fed more dovish (${fedSentiment}) than ECB (${ecbSentiment}) → forcing bullish`);
         prediction.eurusd.direction = "bullish";
+        prediction.eurusd.reasoning = `Fed sentiment significantly more dovish (${fedSentiment}) than ECB (${ecbSentiment}), indicating USD weakness relative to EUR. ${prediction.eurusd.reasoning.split('. ').slice(1).join('. ')}`;
+      }
+    } else if (ecbSentiment < fedSentiment) {
+      // ECB more dovish → EUR weakens → EUR/USD must be bearish
+      if (prediction.eurusd?.direction === "bullish") {
+        console.log(`Correcting EUR/USD: ECB more dovish (${ecbSentiment}) than Fed (${fedSentiment}) → forcing bearish`);
+        prediction.eurusd.direction = "bearish";
+        prediction.eurusd.reasoning = `ECB sentiment more dovish (${ecbSentiment}) than Fed (${fedSentiment}), indicating EUR weakness relative to USD. ${prediction.eurusd.reasoning.split('. ').slice(1).join('. ')}`;
       }
     }
 
