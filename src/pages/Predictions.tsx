@@ -3,10 +3,11 @@ import { cn } from '@/lib/utils';
 import { PredictionPanel } from '@/components/dashboard/PredictionPanel';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Brain } from 'lucide-react';
+import { Brain, LineChart } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
+import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
 import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
 import {
   getCachedSentimentItems,
@@ -61,11 +62,11 @@ const Predictions = () => {
     <div className="space-y-6 animate-slide-in max-w-3xl">
       <div>
         <div className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-prediction" />
-          <h1 className="text-lg font-semibold">AI Monetary Intelligence</h1>
+          <LineChart className="w-5 h-5 text-prediction" />
+          <h1 className="text-lg font-semibold">Fundamental vs Market View</h1>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Predictions generated using live sentiment data, economic indicators, and market signals
+          Comparing communication-implied policy paths against market pricing expectations
         </p>
       </div>
 
@@ -94,9 +95,12 @@ const Predictions = () => {
         />
       ) : (
         <div className="rounded-lg border border-destructive/30 bg-card p-4 text-center">
-          <p className="text-xs text-muted-foreground">AI predictions unavailable — check your connection and retry</p>
+          <p className="text-xs text-muted-foreground">Fundamental predictions unavailable — check your connection and retry</p>
         </div>
       )}
+
+      {/* Divergence Alert */}
+      <DivergenceAlertWidget />
 
       {/* Multi-Horizon Forecasts */}
       <MultiHorizonPanel />

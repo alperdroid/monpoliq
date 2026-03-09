@@ -30,8 +30,8 @@ export function PredictionPanel({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-prediction animate-pulse-glow" />
-          <h3 className="text-sm font-semibold">AI Monetary Intelligence</h3>
-          <TooltipInfo content="Real-time predictions using Fed/ECB communications, economic data, market signals, and geopolitical risk assessment. Updates daily to incorporate current events." />
+          <h3 className="text-sm font-semibold">Fundamental Policy Path</h3>
+          <TooltipInfo content="Algorithm-derived expectations based on central bank communications and macroeconomic statistical data (Fundamental View)." />
         </div>
         <div className="flex items-center gap-2">
           {generatedAt && (
