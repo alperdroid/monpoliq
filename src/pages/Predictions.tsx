@@ -95,7 +95,7 @@ const Predictions = () => {
         />
       ) : (
         <div className="rounded-lg border border-destructive/30 bg-card p-4 text-center">
-          <p className="text-xs text-muted-foreground">AI predictions unavailable — check your connection and retry</p>
+          <p className="text-xs text-muted-foreground">Fundamental predictions unavailable — check your connection and retry</p>
         </div>
       )}
 
