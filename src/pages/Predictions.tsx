@@ -32,7 +32,7 @@ const Predictions = () => {
   const { data: aiPrediction, isLoading } = useQuery({
     queryKey: ['ai-predictions'],
     queryFn: fetchAIPredictions,
-    staleTime: 1000 * 60 * 30,
+    staleTime: 1000 * 60 * 5,
     retry: 1,
   });
 
