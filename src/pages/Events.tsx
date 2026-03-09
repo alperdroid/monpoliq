@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { mockEvents } from '@/data/mock-data';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,7 +28,10 @@ const Events = () => {
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Events Explorer</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold">Events Explorer</h1>
+          <TooltipInfo content="Comprehensive database of all central bank communications, speeches, interviews, and policy decisions with filtering and search capabilities." />
+        </div>
         <span className="text-xs text-muted-foreground font-mono">{filtered.length} events</span>
       </div>
 

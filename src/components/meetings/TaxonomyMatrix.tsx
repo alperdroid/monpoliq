@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 
 /** Dimension definitions with human labels and value colors */
 const DIMENSIONS: Record<string, {

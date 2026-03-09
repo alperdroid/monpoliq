@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Radar, Filter } from 'lucide-react';
@@ -151,6 +152,7 @@ const PolicyRadar = () => {
         <div className="flex items-center gap-2">
           <Radar className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-semibold">Policy Radar</h1>
+          <TooltipInfo content="2D scatter plot positioning communications by stance (hawkish/dovish) vs guidance strength (firm/conditional). Quadrant analysis reveals committee positioning and drift patterns over time." />
         </div>
         <span className="text-xs text-muted-foreground font-mono">
           {isLoading ? 'Loading…' : `${filteredData.length} communications plotted`}

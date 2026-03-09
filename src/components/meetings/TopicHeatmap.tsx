@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 const TOPIC_LABELS: Record<string, string> = {
