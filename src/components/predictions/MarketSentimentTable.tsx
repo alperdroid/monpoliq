@@ -20,73 +20,27 @@ interface MarketInstrument {
   change_24h: number;
 }
 
-// AI-generated market expectations data
-function generateMarketData(): MarketInstrument[] {
-  const nextFedMeeting = '2024-03-20';
-  const nextEcbMeeting = '2024-04-11';
-  
-  return [
-    {
-      id: 'fed-funds-mar24',
-      name: 'Fed Funds Mar 24',
-      type: 'futures',
-      bank: 'FED',
-      meeting_date: nextFedMeeting,
-      market_hike_prob: 0.05,
-      market_hold_prob: 0.82,
-      market_cut_prob: 0.13,
-      ai_hike_prob: 0.02,
-      ai_hold_prob: 0.75,
-      ai_cut_prob: 0.23,
-      price: 94.87,
-      change_24h: -0.02,
+// Fetch live market data from Gemini AI
+async function fetchMarketData(): Promise<MarketInstrument[]> {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const url = `https://${projectId}.supabase.co/functions/v1/market-futures`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${anonKey}`,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
     },
-    {
-      id: 'euribor-apr24',
-      name: 'Euribor Apr 24',
-      type: 'futures',
-      bank: 'ECB',
-      meeting_date: nextEcbMeeting,
-      market_hike_prob: 0.08,
-      market_hold_prob: 0.89,
-      market_cut_prob: 0.03,
-      ai_hike_prob: 0.12,
-      ai_hold_prob: 0.85,
-      ai_cut_prob: 0.03,
-      price: 96.25,
-      change_24h: 0.01,
-    },
-    {
-      id: 'fed-funds-may24',
-      name: 'Fed Funds May 24',
-      type: 'futures',
-      bank: 'FED',
-      meeting_date: '2024-05-01',
-      market_hike_prob: 0.03,
-      market_hold_prob: 0.71,
-      market_cut_prob: 0.26,
-      ai_hike_prob: 0.01,
-      ai_hold_prob: 0.65,
-      ai_cut_prob: 0.34,
-      price: 94.74,
-      change_24h: -0.03,
-    },
-    {
-      id: 'euribor-jun24',
-      name: 'Euribor Jun 24',
-      type: 'futures',
-      bank: 'ECB',
-      meeting_date: '2024-06-06',
-      market_hike_prob: 0.02,
-      market_hold_prob: 0.78,
-      market_cut_prob: 0.20,
-      ai_hike_prob: 0.05,
-      ai_hold_prob: 0.72,
-      ai_cut_prob: 0.23,
-      price: 96.15,
-      change_24h: -0.01,
-    }
-  ];
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Market data fetch failed: ${errorText}`);
+  }
+
+  return response.json();
 }
 
 function ProbabilityDiff({ market, ai, type }: { market: number; ai: number; type: 'hike' | 'hold' | 'cut' }) {
@@ -112,11 +66,51 @@ function ProbabilityDiff({ market, ai, type }: { market: number; ai: number; typ
 }
 
 export function MarketSentimentTable() {
-  const { data: marketData = [] } = useQuery({
+  const { data: marketData = [], isLoading, error } = useQuery({
     queryKey: ['market-sentiment'],
-    queryFn: () => generateMarketData(),
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    queryFn: fetchMarketData,
+    staleTime: 1000 * 60 * 30, // 30 minutes cache
+    retry: 2,
   });
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Clock className="w-4 h-4 text-destructive" />
+            Market vs AI Expectations
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8">
+            <p className="text-xs text-destructive">Failed to load market data</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {error instanceof Error ? error.message : 'Unknown error occurred'}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Clock className="w-4 h-4 text-primary animate-pulse" />
+            Market vs AI Expectations
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8">
+            <p className="text-xs text-muted-foreground">Loading live market data...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -203,7 +197,7 @@ export function MarketSentimentTable() {
           </TableBody>
         </Table>
         <div className="mt-3 text-[10px] text-muted-foreground">
-          Market data simulated • AI diff shows direction and magnitude vs market consensus • Updates every 2 minutes
+          Live market data via Gemini AI • AI diff shows direction and magnitude vs market consensus • Updates every 30 minutes
         </div>
       </CardContent>
     </Card>
