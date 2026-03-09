@@ -5,47 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TrendingUp, TrendingDown, Minus, Clock, BarChart3, Landmark, DollarSign } from 'lucide-react';
 
-interface MarketInstrument {
-  id: string;
-  name: string;
-  category: 'rate_futures' | 'bonds' | 'currency';
-  bank: string;
-  reference_date: string;
-  price: number;
-  change_24h: number;
-  yield_value?: number;
-  spread_bps?: number;
-  market_hike_prob?: number;
-  market_hold_prob?: number;
-  market_cut_prob?: number;
-  ai_hike_prob?: number;
-  ai_hold_prob?: number;
-  ai_cut_prob?: number;
-  direction?: 'bullish' | 'bearish' | 'neutral';
-  ai_direction?: 'bullish' | 'bearish' | 'neutral';
-}
-
-async function fetchMarketData(): Promise<MarketInstrument[]> {
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  const url = `https://${projectId}.supabase.co/functions/v1/market-futures`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${anonKey}`,
-      'apikey': anonKey,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Market data fetch failed: ${errorText}`);
-  }
-
-  return response.json();
-}
+import { type MarketInstrument, fetchMarketData } from '@/lib/api/predictions';
 
 function PriceChange({ value }: { value: number }) {
   const color = value > 0 ? 'text-green-600' : value < 0 ? 'text-red-600' : 'text-muted-foreground';
