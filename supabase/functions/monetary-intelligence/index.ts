@@ -56,7 +56,7 @@ serve(async (req) => {
     const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}`;
     const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
 
-    // Check cache: return if same data hash AND less than 24h old
+    // Check cache: return if same data hash AND less than 12h old (reduced for geopolitical events)
     const { data: cached } = await sb.from("prediction_cache")
       .select("*")
       .order("created_at", { ascending: false })
@@ -64,9 +64,9 @@ serve(async (req) => {
 
     if (cached && cached.length > 0) {
       const cacheAge = Date.now() - new Date(cached[0].created_at).getTime();
-      const ONE_DAY = 24 * 60 * 60 * 1000;
-      if (cached[0].data_hash === dataHash && cacheAge < ONE_DAY) {
-        console.log("Returning cached prediction (same data, < 24h old)");
+      const TWELVE_HOURS = 12 * 60 * 60 * 1000; // Reduced from 24h for faster geopolitical updates
+      if (cached[0].data_hash === dataHash && cacheAge < TWELVE_HOURS) {
+        console.log("Returning cached prediction (same data, < 12h old)");
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
