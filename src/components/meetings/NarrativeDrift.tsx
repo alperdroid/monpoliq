@@ -100,6 +100,10 @@ export function NarrativeDrift({ items, meetingDate, bank, prevMeetingDate }: Na
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <h4 className="text-sm font-semibold">Narrative Drift Analysis</h4>
+        <TooltipInfo content="Tracks changes in communication tone over time using rolling averages and regression analysis. Detects pivot points where messaging direction shifts significantly between meetings." />
+      </div>
       {/* Drift Indicators */}
       <div className="flex flex-wrap gap-3">
         <div className="flex items-center gap-1.5 bg-surface rounded-md px-2.5 py-1.5 border border-border">

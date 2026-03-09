@@ -165,6 +165,7 @@ export function CommitteeNetworkGraph({ allItems, bankFilter = 'all' }: Committe
           );
         })}
       </svg>
+      </div>
     </div>
   );
 }
