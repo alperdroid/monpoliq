@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { TopicHeatmap, TopicHeatmapMatrix } from '@/components/meetings/TopicHeatmap';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';

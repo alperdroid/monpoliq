@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Radar, Filter } from 'lucide-react';
