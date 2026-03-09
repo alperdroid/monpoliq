@@ -104,6 +104,9 @@ const Predictions = () => {
       {/* Pivot Probability */}
       <PivotProbabilityPanel />
 
+      {/* Market Sentiment Table */}
+      <MarketSentimentTable />
+
       {/* Historical Analogs */}
       <div className="rounded-lg border border-border bg-card p-4">
         <HistoricalAnalogs />
