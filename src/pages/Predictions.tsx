@@ -62,11 +62,11 @@ const Predictions = () => {
     <div className="space-y-6 animate-slide-in max-w-3xl">
       <div>
         <div className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-prediction" />
-          <h1 className="text-lg font-semibold">AI Monetary Intelligence</h1>
+          <LineChart className="w-5 h-5 text-prediction" />
+          <h1 className="text-lg font-semibold">Fundamental vs Market View</h1>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Predictions generated using live sentiment data, economic indicators, and market signals
+          Comparing communication-implied policy paths against market pricing expectations
         </p>
       </div>
 
