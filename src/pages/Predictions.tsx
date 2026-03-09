@@ -3,10 +3,11 @@ import { cn } from '@/lib/utils';
 import { PredictionPanel } from '@/components/dashboard/PredictionPanel';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Brain } from 'lucide-react';
+import { Brain, LineChart } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
+import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
 import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
 import {
   getCachedSentimentItems,
