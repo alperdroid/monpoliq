@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Brain } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
+import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
 import {
   getCachedSentimentItems,
@@ -102,6 +103,9 @@ const Predictions = () => {
 
       {/* Pivot Probability */}
       <PivotProbabilityPanel />
+
+      {/* Market Sentiment Table */}
+      <MarketSentimentTable />
 
       {/* Historical Analogs */}
       <div className="rounded-lg border border-border bg-card p-4">
