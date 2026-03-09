@@ -255,20 +255,24 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       }
     }
 
-    // ── 5. Post-hoc consistency check for EUR/USD ──
-    const fedDecision = prediction.fed?.next_decision;
-    const ecbDecision = prediction.ecb?.next_decision;
-    if (ecbDecision === "cut" && fedDecision !== "cut") {
-      // ECB cutting while Fed isn't → EUR weakens → must be bearish
-      if (prediction.eurusd?.direction === "bullish") {
-        console.log("Correcting EUR/USD: ECB cutting + Fed not cutting → forcing bearish");
-        prediction.eurusd.direction = "bearish";
-      }
-    } else if (fedDecision === "cut" && ecbDecision !== "cut") {
-      // Fed cutting while ECB isn't → USD weakens → must be bullish
+    // ── 5. Post-hoc consistency check for EUR/USD based on sentiment scores ──
+    const fedSentiment = avg(fedComms) ?? 0;
+    const ecbSentiment = avg(ecbComms) ?? 0;
+    
+    // More negative = more dovish = currency weakens
+    if (fedSentiment < ecbSentiment) {
+      // Fed more dovish → USD weakens → EUR/USD must be bullish
       if (prediction.eurusd?.direction === "bearish") {
-        console.log("Correcting EUR/USD: Fed cutting + ECB not cutting → forcing bullish");
+        console.log(`Correcting EUR/USD: Fed more dovish (${fedSentiment}) than ECB (${ecbSentiment}) → forcing bullish`);
         prediction.eurusd.direction = "bullish";
+        prediction.eurusd.reasoning = `Fed sentiment significantly more dovish (${fedSentiment}) than ECB (${ecbSentiment}), indicating USD weakness relative to EUR. ${prediction.eurusd.reasoning.split('. ').slice(1).join('. ')}`;
+      }
+    } else if (ecbSentiment < fedSentiment) {
+      // ECB more dovish → EUR weakens → EUR/USD must be bearish
+      if (prediction.eurusd?.direction === "bullish") {
+        console.log(`Correcting EUR/USD: ECB more dovish (${ecbSentiment}) than Fed (${fedSentiment}) → forcing bearish`);
+        prediction.eurusd.direction = "bearish";
+        prediction.eurusd.reasoning = `ECB sentiment more dovish (${ecbSentiment}) than Fed (${fedSentiment}), indicating EUR weakness relative to USD. ${prediction.eurusd.reasoning.split('. ').slice(1).join('. ')}`;
       }
     }
 
