@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine, Area, ComposedChart } from 'recharts';
 import { AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import type { SentimentItem } from '@/lib/api/sentiment';
