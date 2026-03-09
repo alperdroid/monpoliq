@@ -97,13 +97,27 @@ const Committee = () => {
         </TabsContent>
 
         <TabsContent value="network">
-          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <Network className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold">Committee Alignment Network</h3>
-              <span className="text-[9px] text-muted-foreground">Node size = comms volume • Color = hawk/dove lean • Edge = messaging similarity</span>
-            </div>
-            <CommitteeNetworkGraph allItems={allItems as any} bankFilter={bankFilter} />
+          <div className="grid lg:grid-cols-2 gap-4">
+            {(bankFilter === 'all' || bankFilter === 'FED') && (
+              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Network className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-semibold">Federal Reserve Alignment</h3>
+                </div>
+                <p className="text-[9px] text-muted-foreground -mt-1">Node size = comms volume • Color = hawk/dove lean • Edge = messaging similarity</p>
+                <CommitteeNetworkGraph allItems={allItems as any} bankFilter="FED" />
+              </div>
+            )}
+            {(bankFilter === 'all' || bankFilter === 'ECB') && (
+              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Network className="w-4 h-4 text-prediction" />
+                  <h3 className="text-sm font-semibold">ECB Alignment</h3>
+                </div>
+                <p className="text-[9px] text-muted-foreground -mt-1">Node size = comms volume • Color = hawk/dove lean • Edge = messaging similarity</p>
+                <CommitteeNetworkGraph allItems={allItems as any} bankFilter="ECB" />
+              </div>
+            )}
           </div>
         </TabsContent>
 
