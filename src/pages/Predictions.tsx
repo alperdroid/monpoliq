@@ -111,10 +111,6 @@ const Predictions = () => {
       {/* Market Sentiment Table */}
       <MarketSentimentTable />
 
-      {/* Historical Analogs */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <HistoricalAnalogs />
-      </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-4">
         <h3 className="text-sm font-semibold">Underlying Communication Signals (30-Day Window)</h3>

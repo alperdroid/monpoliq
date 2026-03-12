@@ -40,7 +40,7 @@ const App = () => (
             <Route path="/comms" element={<Communications />} />
             <Route path="/predictions" element={<Predictions />} />
             <Route path="/committee" element={<Committee />} />
-            <Route path="/counterfactual" element={<Counterfactual />} />
+            
             <Route path="/topics" element={<TopicHeatmaps />} />
             <Route path="/taxonomy" element={<PolicyTaxonomy />} />
             <Route path="/radar" element={<PolicyRadar />} />
