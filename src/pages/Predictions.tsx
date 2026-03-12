@@ -8,7 +8,7 @@ import { PivotProbabilityPanel } from '@/components/predictions/PivotProbability
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
-import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
+
 import {
   getCachedSentimentItems,
   type SentimentItem,
