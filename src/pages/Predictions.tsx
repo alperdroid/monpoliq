@@ -8,7 +8,7 @@ import { PivotProbabilityPanel } from '@/components/predictions/PivotProbability
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
-import { HistoricalAnalogs } from '@/components/analytics/HistoricalAnalogs';
+
 import {
   getCachedSentimentItems,
   type SentimentItem,
@@ -111,10 +111,6 @@ const Predictions = () => {
       {/* Market Sentiment Table */}
       <MarketSentimentTable />
 
-      {/* Historical Analogs */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <HistoricalAnalogs />
-      </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-4">
         <h3 className="text-sm font-semibold">Underlying Communication Signals (30-Day Window)</h3>

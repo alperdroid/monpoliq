@@ -18,49 +18,91 @@ interface DissentRecord {
 
 interface MemberDissentProfile {
   name: string;
+  bank: string;
   totalDissents: number;
   hawkishDissents: number;
   dovishDissents: number;
-  dissentRate: number; // dissents / total meetings they could have voted in
   lastDissent: string;
   dissents: DissentRecord[];
 }
 
+function DissentSplitBar({ label, hawkishPct, totalHawkish, totalDovish }: {
+  label: string; hawkishPct: number; totalHawkish: number; totalDovish: number;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+        <span className="text-[10px] text-muted-foreground font-mono">{totalHawkish + totalDovish} total</span>
+      </div>
+      {totalHawkish + totalDovish === 0 ? (
+        <div className="h-7 rounded bg-muted flex items-center justify-center">
+          <span className="text-[10px] text-muted-foreground">No dissent data</span>
+        </div>
+      ) : (
+        <div className="flex h-7 rounded overflow-hidden">
+          <div
+            className="bg-signal-hawkish flex items-center justify-center transition-all"
+            style={{ width: `${hawkishPct}%` }}
+          >
+            {hawkishPct > 15 && (
+              <span className="text-[10px] font-mono font-bold text-signal-hawkish-fg flex items-center gap-1">
+                <ArrowUp className="w-3 h-3" /> {hawkishPct}% Hawk
+              </span>
+            )}
+          </div>
+          <div
+            className="bg-signal-dovish flex items-center justify-center transition-all"
+            style={{ width: `${100 - hawkishPct}%` }}
+          >
+            {(100 - hawkishPct) > 15 && (
+              <span className="text-[10px] font-mono font-bold text-signal-dovish-fg flex items-center gap-1">
+                <ArrowDown className="w-3 h-3" /> {100 - hawkishPct}% Dove
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DissentTimeline() {
   const { data: dissents = [], isLoading } = useQuery({
-    queryKey: ['dissent-history'],
+    queryKey: ['dissent-history-all'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('dissent_history')
         .select('*')
-        .eq('bank', 'FED')
         .order('meeting_date', { ascending: false });
       if (error) throw error;
       return (data || []) as unknown as DissentRecord[];
     },
   });
 
-  // Member profiles
+  const fedDissents = useMemo(() => dissents.filter(d => d.bank === 'FED'), [dissents]);
+  const ecbDissents = useMemo(() => dissents.filter(d => d.bank === 'ECB'), [dissents]);
+
   const profiles = useMemo<MemberDissentProfile[]>(() => {
     const byMember: Record<string, DissentRecord[]> = {};
     for (const d of dissents) {
-      if (!byMember[d.member_name]) byMember[d.member_name] = [];
-      byMember[d.member_name].push(d);
+      const key = `${d.member_name}|${d.bank}`;
+      if (!byMember[key]) byMember[key] = [];
+      byMember[key].push(d);
     }
     return Object.entries(byMember)
-      .map(([name, recs]) => ({
-        name,
+      .map(([key, recs]) => ({
+        name: recs[0].member_name,
+        bank: recs[0].bank,
         totalDissents: recs.length,
         hawkishDissents: recs.filter(r => r.dissent_direction === 'hawkish').length,
         dovishDissents: recs.filter(r => r.dissent_direction === 'dovish').length,
-        dissentRate: recs.length / 8, // approximate: ~8 meetings/year
         lastDissent: recs[0].meeting_date,
         dissents: recs,
       }))
       .sort((a, b) => b.totalDissents - a.totalDissents);
   }, [dissents]);
 
-  // Timeline data grouped by year
   const byYear = useMemo(() => {
     const years: Record<string, DissentRecord[]> = {};
     for (const d of dissents) {
@@ -71,10 +113,14 @@ export function DissentTimeline() {
     return Object.entries(years).sort(([a], [b]) => b.localeCompare(a));
   }, [dissents]);
 
-  // Stats
-  const totalHawkish = dissents.filter(d => d.dissent_direction === 'hawkish').length;
-  const totalDovish = dissents.filter(d => d.dissent_direction === 'dovish').length;
-  const hawkishPct = dissents.length > 0 ? Math.round((totalHawkish / dissents.length) * 100) : 0;
+  // Per-bank stats
+  const fedHawkish = fedDissents.filter(d => d.dissent_direction === 'hawkish').length;
+  const fedDovish = fedDissents.length - fedHawkish;
+  const fedHawkishPct = fedDissents.length > 0 ? Math.round((fedHawkish / fedDissents.length) * 100) : 0;
+
+  const ecbHawkish = ecbDissents.filter(d => d.dissent_direction === 'hawkish').length;
+  const ecbDovish = ecbDissents.length - ecbHawkish;
+  const ecbHawkishPct = ecbDissents.length > 0 ? Math.round((ecbHawkish / ecbDissents.length) * 100) : 0;
 
   if (isLoading) {
     return <div className="text-xs text-muted-foreground animate-pulse p-4">Loading dissent history…</div>;
@@ -87,17 +133,17 @@ export function DissentTimeline() {
         <div className="rounded-lg border border-border bg-card p-3 space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Dissents</span>
           <p className="text-2xl font-mono font-bold text-foreground">{dissents.length}</p>
-          <p className="text-[9px] text-muted-foreground">2015–2026</p>
+          <p className="text-[9px] text-muted-foreground">Fed: {fedDissents.length} · ECB: {ecbDissents.length}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Hawkish Dissents</span>
-          <p className="text-2xl font-mono font-bold text-signal-hawkish">{totalHawkish}</p>
-          <p className="text-[9px] text-muted-foreground">{hawkishPct}% of all dissents</p>
+          <p className="text-2xl font-mono font-bold text-signal-hawkish">{fedHawkish + ecbHawkish}</p>
+          <p className="text-[9px] text-muted-foreground">Fed: {fedHawkish} · ECB: {ecbHawkish}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Dovish Dissents</span>
-          <p className="text-2xl font-mono font-bold text-signal-dovish">{totalDovish}</p>
-          <p className="text-[9px] text-muted-foreground">{100 - hawkishPct}% of all dissents</p>
+          <p className="text-2xl font-mono font-bold text-signal-dovish">{fedDovish + ecbDovish}</p>
+          <p className="text-[9px] text-muted-foreground">Fed: {fedDovish} · ECB: {ecbDovish}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-3 space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Unique Dissenters</span>
@@ -106,26 +152,12 @@ export function DissentTimeline() {
         </div>
       </div>
 
-      {/* Dissent Direction Split Bar */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Dissent Direction Split</span>
-        <div className="flex h-7 rounded overflow-hidden">
-          <div
-            className="bg-signal-hawkish flex items-center justify-center transition-all"
-            style={{ width: `${hawkishPct}%` }}
-          >
-            <span className="text-[10px] font-mono font-bold text-signal-hawkish-fg flex items-center gap-1">
-              <ArrowUp className="w-3 h-3" /> {hawkishPct}% Hawkish
-            </span>
-          </div>
-          <div
-            className="bg-signal-dovish flex items-center justify-center transition-all"
-            style={{ width: `${100 - hawkishPct}%` }}
-          >
-            <span className="text-[10px] font-mono font-bold text-signal-dovish-fg flex items-center gap-1">
-              <ArrowDown className="w-3 h-3" /> {100 - hawkishPct}% Dovish
-            </span>
-          </div>
+      {/* Separate Dissent Direction Split Bars */}
+      <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Dissent Direction Split by Central Bank</span>
+        <div className="grid md:grid-cols-2 gap-4">
+          <DissentSplitBar label="Federal Reserve" hawkishPct={fedHawkishPct} totalHawkish={fedHawkish} totalDovish={fedDovish} />
+          <DissentSplitBar label="European Central Bank" hawkishPct={ecbHawkishPct} totalHawkish={ecbHawkish} totalDovish={ecbDovish} />
         </div>
       </div>
 
@@ -137,16 +169,20 @@ export function DissentTimeline() {
         </div>
         <div className="grid grid-cols-12 gap-2 p-3 bg-surface text-[10px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border">
           <div className="col-span-3">Member</div>
+          <div className="col-span-1 text-center">Bank</div>
           <div className="col-span-2 text-center">Total</div>
-          <div className="col-span-3 text-center">Direction</div>
+          <div className="col-span-2 text-center">Direction</div>
           <div className="col-span-2 text-center">Last Dissent</div>
           <div className="col-span-2 text-center">Lean</div>
         </div>
         {profiles.map(p => (
-          <div key={p.name} className="grid grid-cols-12 gap-2 p-3 border-b border-border last:border-0 text-xs items-center">
+          <div key={`${p.name}-${p.bank}`} className="grid grid-cols-12 gap-2 p-3 border-b border-border last:border-0 text-xs items-center">
             <div className="col-span-3 font-medium">{p.name}</div>
+            <div className="col-span-1 text-center">
+              <span className={cn('text-[9px] font-bold', p.bank === 'FED' ? 'text-primary' : 'text-prediction')}>{p.bank}</span>
+            </div>
             <div className="col-span-2 text-center font-mono font-bold">{p.totalDissents}</div>
-            <div className="col-span-3 flex justify-center gap-1">
+            <div className="col-span-2 flex justify-center gap-1">
               {p.hawkishDissents > 0 && (
                 <span className="text-[9px] bg-signal-hawkish/15 text-signal-hawkish border border-signal-hawkish/25 px-1.5 py-0.5 rounded font-mono">
                   {p.hawkishDissents}H
@@ -191,6 +227,7 @@ export function DissentTimeline() {
                 <span className="font-mono text-muted-foreground w-20 flex-shrink-0">
                   {new Date(r.meeting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </span>
+                <span className={cn('text-[9px] font-bold w-8 flex-shrink-0', r.bank === 'FED' ? 'text-primary' : 'text-prediction')}>{r.bank}</span>
                 <span className="font-medium flex-shrink-0 w-36">{r.member_name}</span>
                 <span className="text-muted-foreground flex-1 truncate">
                   Preferred <strong>{r.preferred_action}</strong> vs committee <strong>{r.committee_action}</strong>

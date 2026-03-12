@@ -258,15 +258,26 @@ async function scoreBatchWithAI(
 }
 
 // ── Load existing scored items from DB to skip re-scoring ──
+// Items with score=0 from press conferences/minutes are considered unscored and will be re-fetched
 async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Promise<Set<string>> {
   try {
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
+      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date,net_score,source&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
       { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
     );
     if (!resp.ok) return new Set();
     const data = await resp.json();
-    return new Set((data || []).map((d: any) => `${d.title}|${d.item_date}`));
+    // Skip items with 0 score from policy documents — they need re-scoring
+    const policySourceKeywords = ['minutes', 'press conf', 'statement'];
+    return new Set((data || [])
+      .filter((d: any) => {
+        const src = (d.source || '').toLowerCase();
+        const isPolicyDoc = policySourceKeywords.some(k => src.includes(k));
+        // If it's a policy doc with 0 score, don't mark as existing so it gets re-fetched
+        if (isPolicyDoc && Math.abs(Number(d.net_score) || 0) < 0.001) return false;
+        return true;
+      })
+      .map((d: any) => `${d.title}|${d.item_date}`));
   } catch { return new Set(); }
 }
 
@@ -312,41 +323,53 @@ async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: st
 interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir: string; w: number }
 const FR: FS[] = [
   { id: 'CPIAUCSL', met: 'CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
+  { id: 'CPIAUCSL', met: 'CPI MoM Trend', tr: 'p1', ht: 0.4, dt: 0.1, dir: 'hh', w: 2 },
   { id: 'PAYEMS', met: 'Payrolls MoM', tr: 'd1', ht: 200, dt: 100, dir: 'hh', w: 3 },
   { id: 'UNRATE', met: 'Unemployment', tr: 'lv', ht: 4, dt: 5, dir: 'lh', w: 3 },
   { id: 'PCEPILFE', met: 'Core PCE YoY', tr: 'p12', ht: 2.5, dt: 2, dir: 'hh', w: 3 },
   // FEDFUNDS removed — it's what we're trying to predict, not a leading indicator
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
+  { id: 'MANEMP', met: 'ISM Mfg PMI Proxy', tr: 'lv', ht: 51, dt: 49, dir: 'hh', w: 2 },
 ];
 
 async function fetchFred(key: string, days: number): Promise<It[]> {
   const co = new Date(); co.setDate(co.getDate() - days);
   const cs = co.toISOString().split('T')[0];
-  const res = await Promise.allSettled(FR.map(async s => {
-    const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + s.id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
-    if (!r || !r.ok) return null;
+  // Deduplicate by series ID to avoid fetching same series twice (e.g. CPI YoY + CPI MoM)
+  const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
+  const seriesCache: Record<string, any[]> = {};
+  
+  // Fetch each unique series once
+  await Promise.allSettled(uniqueSeriesIds.map(async id => {
+    const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
+    if (!r || !r.ok) return;
     const d = await r.json();
-    const obs = (d.observations || []).filter((o: any) => o.value !== '.');
-    if (!obs.length || obs[0].date < cs) return null;
+    seriesCache[id] = (d.observations || []).filter((o: any) => o.value !== '.');
+  }));
+  
+  const results: It[] = [];
+  for (const s of FR) {
+    const obs = seriesCache[s.id];
+    if (!obs || !obs.length || obs[0].date < cs) continue;
     const v = obs.map((o: any) => parseFloat(o.value));
     let val: number | null = null;
     if (s.tr === 'lv') val = v[0];
     else if (s.tr === 'd1' && v.length >= 2) val = v[0] - v[1];
     else if (s.tr === 'p1' && v.length >= 2 && v[1] !== 0) val = ((v[0] - v[1]) / Math.abs(v[1])) * 100;
     else if (s.tr === 'p12' && v.length >= 13 && v[12] !== 0) val = ((v[0] - v[12]) / Math.abs(v[12])) * 100;
-    if (val === null) return null;
+    if (val === null) continue;
     const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
-    return {
+    results.push({
       bank: 'FED', source: 'FRED', item_date: obs[0].date,
       title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ')',
       url: 'https://fred.stlouisfed.org/series/' + s.id,
       is_statistical: true, hawk_pts: 0, dove_pts: 0,
       net_score: r2.net_score, label: r2.label, word_count: 0,
       reasons: ['fred'], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
-    } as It;
-  }));
-  return res.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<It>).value);
+    } as It);
+  }
+  return results;
 }
 
 // ── FOMC Minutes ──
@@ -653,6 +676,8 @@ const EU: SR[] = [
   { pattern: 'unemployment', met: 'Unemployment', ht: 6, dt: 7.5, dir: 'lh', w: 3 },
   { pattern: 'producer prices', met: 'PPI', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
   { pattern: 'retail trade', met: 'Retail', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
+  { pattern: 'purchasing managers', met: 'PMI', ht: 52, dt: 48, dir: 'hh', w: 2 },
+  { pattern: 'pmi', met: 'PMI', ht: 52, dt: 48, dir: 'hh', w: 2 },
 ];
 
 function ss(title: string): { ns: number; lb: string; met: string; val: number | null; w: number } | null {
