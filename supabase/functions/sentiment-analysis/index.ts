@@ -312,12 +312,14 @@ async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: st
 interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir: string; w: number }
 const FR: FS[] = [
   { id: 'CPIAUCSL', met: 'CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
+  { id: 'CPIAUCSL', met: 'CPI MoM Trend', tr: 'p1', ht: 0.4, dt: 0.1, dir: 'hh', w: 2 },
   { id: 'PAYEMS', met: 'Payrolls MoM', tr: 'd1', ht: 200, dt: 100, dir: 'hh', w: 3 },
   { id: 'UNRATE', met: 'Unemployment', tr: 'lv', ht: 4, dt: 5, dir: 'lh', w: 3 },
   { id: 'PCEPILFE', met: 'Core PCE YoY', tr: 'p12', ht: 2.5, dt: 2, dir: 'hh', w: 3 },
   // FEDFUNDS removed — it's what we're trying to predict, not a leading indicator
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
+  { id: 'MANEMP', met: 'ISM Mfg PMI Proxy', tr: 'lv', ht: 51, dt: 49, dir: 'hh', w: 2 },
 ];
 
 async function fetchFred(key: string, days: number): Promise<It[]> {
