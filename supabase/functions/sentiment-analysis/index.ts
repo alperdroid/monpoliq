@@ -258,15 +258,26 @@ async function scoreBatchWithAI(
 }
 
 // ── Load existing scored items from DB to skip re-scoring ──
+// Items with score=0 from press conferences/minutes are considered unscored and will be re-fetched
 async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Promise<Set<string>> {
   try {
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
+      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date,net_score,source&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
       { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
     );
     if (!resp.ok) return new Set();
     const data = await resp.json();
-    return new Set((data || []).map((d: any) => `${d.title}|${d.item_date}`));
+    // Skip items with 0 score from policy documents — they need re-scoring
+    const policySourceKeywords = ['minutes', 'press conf', 'statement'];
+    return new Set((data || [])
+      .filter((d: any) => {
+        const src = (d.source || '').toLowerCase();
+        const isPolicyDoc = policySourceKeywords.some(k => src.includes(k));
+        // If it's a policy doc with 0 score, don't mark as existing so it gets re-fetched
+        if (isPolicyDoc && Math.abs(Number(d.net_score) || 0) < 0.001) return false;
+        return true;
+      })
+      .map((d: any) => `${d.title}|${d.item_date}`));
   } catch { return new Set(); }
 }
 
