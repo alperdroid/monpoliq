@@ -325,30 +325,40 @@ const FR: FS[] = [
 async function fetchFred(key: string, days: number): Promise<It[]> {
   const co = new Date(); co.setDate(co.getDate() - days);
   const cs = co.toISOString().split('T')[0];
-  const res = await Promise.allSettled(FR.map(async s => {
-    const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + s.id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
-    if (!r || !r.ok) return null;
+  // Deduplicate by series ID to avoid fetching same series twice (e.g. CPI YoY + CPI MoM)
+  const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
+  const seriesCache: Record<string, any[]> = {};
+  
+  // Fetch each unique series once
+  await Promise.allSettled(uniqueSeriesIds.map(async id => {
+    const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
+    if (!r || !r.ok) return;
     const d = await r.json();
-    const obs = (d.observations || []).filter((o: any) => o.value !== '.');
-    if (!obs.length || obs[0].date < cs) return null;
+    seriesCache[id] = (d.observations || []).filter((o: any) => o.value !== '.');
+  }));
+  
+  const results: It[] = [];
+  for (const s of FR) {
+    const obs = seriesCache[s.id];
+    if (!obs || !obs.length || obs[0].date < cs) continue;
     const v = obs.map((o: any) => parseFloat(o.value));
     let val: number | null = null;
     if (s.tr === 'lv') val = v[0];
     else if (s.tr === 'd1' && v.length >= 2) val = v[0] - v[1];
     else if (s.tr === 'p1' && v.length >= 2 && v[1] !== 0) val = ((v[0] - v[1]) / Math.abs(v[1])) * 100;
     else if (s.tr === 'p12' && v.length >= 13 && v[12] !== 0) val = ((v[0] - v[12]) / Math.abs(v[12])) * 100;
-    if (val === null) return null;
+    if (val === null) continue;
     const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
-    return {
+    results.push({
       bank: 'FED', source: 'FRED', item_date: obs[0].date,
       title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ')',
       url: 'https://fred.stlouisfed.org/series/' + s.id,
       is_statistical: true, hawk_pts: 0, dove_pts: 0,
       net_score: r2.net_score, label: r2.label, word_count: 0,
       reasons: ['fred'], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
-    } as It;
-  }));
-  return res.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<It>).value);
+    } as It);
+  }
+  return results;
 }
 
 // ── FOMC Minutes ──
