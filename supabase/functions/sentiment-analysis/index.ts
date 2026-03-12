@@ -330,7 +330,7 @@ const FR: FS[] = [
   // FEDFUNDS removed — it's what we're trying to predict, not a leading indicator
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
-  { id: 'MANEMP', met: 'ISM Mfg PMI Proxy', tr: 'lv', ht: 51, dt: 49, dir: 'hh', w: 2 },
+  { id: 'MANEMP', met: 'Mfg Employment Trend', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
 ];
 
 async function fetchFred(key: string, days: number): Promise<It[]> {
