@@ -330,7 +330,7 @@ const FR: FS[] = [
   // FEDFUNDS removed — it's what we're trying to predict, not a leading indicator
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
-  { id: 'MANEMP', met: 'ISM Mfg PMI Proxy', tr: 'lv', ht: 51, dt: 49, dir: 'hh', w: 2 },
+  { id: 'MANEMP', met: 'Mfg Employment Trend', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
 ];
 
 async function fetchFred(key: string, days: number): Promise<It[]> {
@@ -957,11 +957,47 @@ Deno.serve(async (req) => {
       }
 
       // Reclassify consumer expectations surveys and similar as statistical
+      // But score them with AI since they contain policy-relevant textual content
       const actualComms: RawComm[] = [];
+      const reclassifiedSurveys: RawComm[] = [];
       for (const c of allRawComms) {
         if (shouldReclassifyAsStatistical(c.title)) {
-          console.log('Reclassifying as statistical: ' + c.title);
-          // Score with AI but mark as statistical
+          console.log('Reclassifying as statistical (will AI-score): ' + c.title);
+          reclassifiedSurveys.push(c);
+        } else {
+          actualComms.push(c);
+        }
+      }
+
+      // AI-score reclassified surveys and add as statistical items
+      if (reclassifiedSurveys.length > 0 && aiKey) {
+        const surveyTexts: { title: string; text: string; bank: string }[] = [];
+        for (const s of reclassifiedSurveys) {
+          // Fetch page text if not already available
+          let text = s.text;
+          if (!text && s.url) text = await fetchPageText(s.url);
+          surveyTexts.push({ title: s.title, text: text || s.title, bank: s.bank });
+        }
+        const surveyScores = await scoreBatchWithAI(surveyTexts, aiKey);
+        for (let i = 0; i < reclassifiedSurveys.length; i++) {
+          const c = reclassifiedSurveys[i];
+          const sc = surveyScores[i];
+          ei.push({
+            bank: 'ECB', source: c.source, item_date: c.date,
+            title: c.title, url: c.url,
+            is_statistical: true,
+            hawk_pts: sc.score > 0 ? Math.round(Math.abs(sc.score) * 10) : 0,
+            dove_pts: sc.score < 0 ? Math.round(Math.abs(sc.score) * 10) : 0,
+            net_score: sc.score,
+            label: sc.label,
+            word_count: surveyTexts[i].text.split(/\s+/).length,
+            reasons: ['survey-reclassified-as-statistical', 'ai:' + sc.reasoning],
+            stat_metric: 'Survey', stat_value: null, stat_weight: 1,
+          });
+        }
+      } else {
+        // No AI key — still add them but with 0 score
+        for (const c of reclassifiedSurveys) {
           ei.push({
             bank: 'ECB', source: c.source, item_date: c.date,
             title: c.title, url: c.url,
@@ -970,8 +1006,6 @@ Deno.serve(async (req) => {
             label: 'neutral', word_count: 0, reasons: ['survey-reclassified-as-statistical'],
             stat_metric: 'Survey', stat_value: null, stat_weight: 1,
           });
-        } else {
-          actualComms.push(c);
         }
       }
 
