@@ -667,7 +667,7 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
 // ── ECB Stats + Eurostat ──
 interface SR { pattern: string; met: string; ht: number | null; dt: number | null; dir: string; w: number }
 const EU: SR[] = [
-  { pattern: 'government deficit', met: 'Gov Deficit', ht: -2.5, dt: -4.0, dir: 'hh', w: 0.5 },
+  { pattern: 'government deficit', met: 'Gov Deficit', ht: 4.0, dt: 2.5, dir: 'hh', w: 0.5 },
   { pattern: 'government debt', met: 'Gov Debt', ht: null, dt: null, dir: 'hh', w: 0 },
   { pattern: 'industrial production', met: 'Ind Prod', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },
   { pattern: 'production in construction', met: 'Construction', ht: 0.5, dt: -0.5, dir: 'hh', w: 2 },

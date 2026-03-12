@@ -1,0 +1,1 @@
+DELETE FROM sentiment_items WHERE id = '9f2d8a2c-b56d-486d-8504-2debbce88fdb';
