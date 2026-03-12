@@ -665,6 +665,8 @@ const EU: SR[] = [
   { pattern: 'unemployment', met: 'Unemployment', ht: 6, dt: 7.5, dir: 'lh', w: 3 },
   { pattern: 'producer prices', met: 'PPI', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
   { pattern: 'retail trade', met: 'Retail', ht: 0.5, dt: -0.3, dir: 'hh', w: 2 },
+  { pattern: 'purchasing managers', met: 'PMI', ht: 52, dt: 48, dir: 'hh', w: 2 },
+  { pattern: 'pmi', met: 'PMI', ht: 52, dt: 48, dir: 'hh', w: 2 },
 ];
 
 function ss(title: string): { ns: number; lb: string; met: string; val: number | null; w: number } | null {
