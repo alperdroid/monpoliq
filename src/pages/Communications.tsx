@@ -13,10 +13,10 @@ import { ContradictionFlags } from '@/components/analytics/ContradictionFlags';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute 30-day average from comm items only */
-function compute30dCommScore(items: SentimentItem[], bank: string) {
+/** Compute 45-day average from comm items only */
+function compute45dCommScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
+  cutoff.setDate(cutoff.getDate() - 45);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
