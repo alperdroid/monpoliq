@@ -207,7 +207,7 @@ function CommScoreCard({ bank, label, score }: {
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <MessageSquare className="w-3 h-3 text-chart-2" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Communications Only (30-Day)</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Communications Only (45-Day)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
