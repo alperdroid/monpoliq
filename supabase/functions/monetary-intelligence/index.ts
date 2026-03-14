@@ -108,8 +108,9 @@ CRITICAL EUR/USD LOGIC — you MUST follow this:
 
 MARKET EXPECTATIONS & GEOPOLITICAL RISKS:
 - Consider current market pricing and positioning when making predictions
-- If significant geopolitical tensions emerge (wars, trade conflicts, sanctions) that cannot be captured by historical data, adjust predictions accordingly and mention this risk explicitly
+- If significant geopolitical tensions emerge (wars, trade conflicts, sanctions, Middle East instability) that cannot be captured by historical data, adjust predictions accordingly and mention this risk explicitly
 - For abrupt geopolitical changes, override data-based predictions if the external shock is material
+- ALWAYS mention Middle East tensions alongside other geopolitical factors when discussing geopolitical risks
 - For Fed and ECB decisions: include ONE sentence about relevant geopolitical factors affecting policy
 - For EUR/USD: include ONE sentence about geopolitical effects on the currency pair
 - For US 10Y Treasury: include ONE sentence about either geopolitical risk or fiscal policy effects
