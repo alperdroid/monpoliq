@@ -12,10 +12,10 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute stat score from a 75-day window for a given bank */
-function compute75dStatScore(items: SentimentItem[], bank: string) {
+/** Compute stat score from a 60-day window for a given bank */
+function compute60dStatScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 75);
+  cutoff.setDate(cutoff.getDate() - 60);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
