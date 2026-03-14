@@ -12,10 +12,10 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute stat score from a 75-day window for a given bank */
-function compute75dStatScore(items: SentimentItem[], bank: string) {
+/** Compute stat score from a 60-day window for a given bank */
+function compute60dStatScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 75);
+  cutoff.setDate(cutoff.getDate() - 60);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
@@ -58,8 +58,8 @@ const StatisticalData = () => {
     },
   });
 
-  const fedStatScore = useMemo(() => compute75dStatScore(allStatItems, 'FED'), [allStatItems]);
-  const ecbStatScore = useMemo(() => compute75dStatScore(allStatItems, 'ECB'), [allStatItems]);
+  const fedStatScore = useMemo(() => compute60dStatScore(allStatItems, 'FED'), [allStatItems]);
+  const ecbStatScore = useMemo(() => compute60dStatScore(allStatItems, 'ECB'), [allStatItems]);
 
   const filteredItems = bankFilter
     ? statItems.filter(i => i.bank === bankFilter)
@@ -71,7 +71,7 @@ const StatisticalData = () => {
         <div>
           <h1 className="text-lg font-semibold">Statistical Releases</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on statistical data only (FRED, Eurostat) — 75-day window
+            Score based on statistical data only (FRED, Eurostat) — 60-day window
           </p>
         </div>
         <Button
@@ -200,7 +200,7 @@ function StatScoreCard({ bank, label, score }: {
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy (75d)</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy (60d)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
