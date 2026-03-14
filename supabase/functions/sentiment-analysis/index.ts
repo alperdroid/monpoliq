@@ -1012,10 +1012,11 @@ Deno.serve(async (req) => {
       ]);
       console.log('ECB: ' + existing.size + ' existing items in DB, ' + existingStatItems.length + ' stat items for dedup');
 
-      const [rawComms, st, ecbPressConf] = await Promise.allSettled([
+      const [rawComms, st, ecbPressConf, ecbAccounts] = await Promise.allSettled([
         fetchRssRaw(cs, 'ECB'),
         fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
+        fetchEcbAccounts(cs),
       ]);
 
       const ei: It[] = [];
@@ -1028,6 +1029,14 @@ Deno.serve(async (req) => {
         for (const pc of ecbPressConf.value) {
           allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: 'ECB Press Conf', bank: 'ECB' });
         }
+      }
+
+      // Add ECB meeting accounts (minutes equivalent)
+      if (ecbAccounts.status === 'fulfilled') {
+        for (const ac of ecbAccounts.value) {
+          allRawComms.push({ title: ac.title, text: ac.text, date: ac.date, url: ac.url, source: 'ECB Monetary Policy Accounts', bank: 'ECB' });
+        }
+        console.log('ECB: ' + ecbAccounts.value.length + ' meeting accounts found');
       }
 
       // Reclassify consumer expectations surveys and similar as statistical
