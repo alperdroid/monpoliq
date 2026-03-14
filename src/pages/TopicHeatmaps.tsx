@@ -77,7 +77,8 @@ const TopicHeatmaps = () => {
       );
 
       const policyItems = bankItems.filter(isPolicyText);
-      const itemsForHeatmap = policyItems.length > 0 ? policyItems : bankItems;
+      const policyTaggedCount = policyItems.filter(i => (i as any).topics?.length > 0).length;
+      const itemsForHeatmap = policyTaggedCount > 0 ? policyItems : bankItems;
       const taggedCount = itemsForHeatmap.filter(i => (i as any).topics?.length > 0).length;
       const classifiedCount = itemsForHeatmap.filter(i => (i as any).policy_dimensions != null).length;
 
