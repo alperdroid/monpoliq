@@ -85,28 +85,29 @@ const Dashboard = () => {
     retry: 1,
   });
 
-  // 30-day ALL items for aggregate score (comms + stats) — HIGHLIGHTED
-  const recent30 = recentItems(allItems, 30);
+  // Use 45-day window for comms, 60-day for stats (matching dedicated pages)
+  const recentComms45 = recentItems(allItems.filter(i => !i.is_statistical), 45);
+  const recentStats60 = recentItems(allItems.filter(i => i.is_statistical), 60);
   const recent7 = recentItems(allItems, 7);
 
-  const fed30All = recent30.filter(i => i.bank === 'FED');
-  const ecb30All = recent30.filter(i => i.bank === 'ECB');
-  const fed30Comms = fed30All.filter(i => !i.is_statistical);
-  const ecb30Comms = ecb30All.filter(i => !i.is_statistical);
-  const fed30Stats = fed30All.filter(i => i.is_statistical);
-  const ecb30Stats = ecb30All.filter(i => i.is_statistical);
+  const fed45Comms = recentComms45.filter(i => i.bank === 'FED');
+  const ecb45Comms = recentComms45.filter(i => i.bank === 'ECB');
+  const fed60Stats = recentStats60.filter(i => i.bank === 'FED');
+  const ecb60Stats = recentStats60.filter(i => i.bank === 'ECB');
   const fed7 = recent7.filter(i => i.bank === 'FED');
   const ecb7 = recent7.filter(i => i.bank === 'ECB');
 
-  // Aggregate 30-day scores (comms + stats combined)
-  const fed30AggAvg = compute30dAvg(fed30All);
-  const ecb30AggAvg = compute30dAvg(ecb30All);
+  // Aggregate scores (comms 45d + stats 60d combined)
+  const fedAggAll = [...fed45Comms, ...fed60Stats];
+  const ecbAggAll = [...ecb45Comms, ...ecb60Stats];
+  const fedAggAvg = computeAvg(fedAggAll);
+  const ecbAggAvg = computeAvg(ecbAggAll);
 
-  // Separate 30-day scores
-  const fed30CommAvg = compute30dAvg(fed30Comms);
-  const ecb30CommAvg = compute30dAvg(ecb30Comms);
-  const fed30StatAvg = compute30dAvg(fed30Stats);
-  const ecb30StatAvg = compute30dAvg(ecb30Stats);
+  // Separate scores
+  const fedCommAvg = computeAvg(fed45Comms);
+  const ecbCommAvg = computeAvg(ecb45Comms);
+  const fedStatAvg = computeAvg(fed60Stats);
+  const ecbStatAvg = computeAvg(ecb60Stats);
 
   // 1-year monthly fluctuation data
   const fedMonthly = monthlyAverages(allItems, 'FED');
