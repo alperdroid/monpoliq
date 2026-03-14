@@ -186,7 +186,7 @@ const StatisticalData = () => {
 function StatScoreCard({ bank, label, score }: {
   bank: string;
   label: string;
-  score: { avg: number; count: number; label: string; month: string } | null;
+  score: { avg: number; count: number; label: string } | null;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -200,7 +200,7 @@ function StatScoreCard({ bank, label, score }: {
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy — {score.month}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy (75d)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
