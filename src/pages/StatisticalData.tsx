@@ -76,7 +76,8 @@ const StatisticalData = () => {
         <div>
           <h1 className="text-lg font-semibold">Statistical Releases</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on statistical data only (FRED, Eurostat) — latest releases
+            Score based on statistical data only (FRED, Eurostat) — latest month's releases
+          </p>
           </p>
         </div>
         <Button
