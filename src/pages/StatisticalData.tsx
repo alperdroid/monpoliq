@@ -191,7 +191,7 @@ const StatisticalData = () => {
 function StatScoreCard({ bank, label, score }: {
   bank: string;
   label: string;
-  score: { avg: number; count: number; label: string } | null;
+  score: { avg: number; count: number; label: string; month: string } | null;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -200,7 +200,7 @@ function StatScoreCard({ bank, label, score }: {
         <h3 className="text-sm font-semibold">{label}</h3>
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data in the last 60 days. Click "Refresh Data" to fetch latest releases.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data available. Click "Refresh Data" to fetch latest releases.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
