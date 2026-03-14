@@ -13,10 +13,10 @@ import { ContradictionFlags } from '@/components/analytics/ContradictionFlags';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute 30-day average from comm items only */
-function compute30dCommScore(items: SentimentItem[], bank: string) {
+/** Compute 45-day average from comm items only */
+function compute45dCommScore(items: SentimentItem[], bank: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 30);
+  cutoff.setDate(cutoff.getDate() - 45);
   const cs = cutoff.toISOString().split('T')[0];
   const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
   if (!recent.length) return null;
@@ -59,8 +59,8 @@ const Communications = () => {
     },
   });
 
-  const fedCommScore = useMemo(() => compute30dCommScore(allCommItems, 'FED'), [allCommItems]);
-  const ecbCommScore = useMemo(() => compute30dCommScore(allCommItems, 'ECB'), [allCommItems]);
+  const fedCommScore = useMemo(() => compute45dCommScore(allCommItems, 'FED'), [allCommItems]);
+  const ecbCommScore = useMemo(() => compute45dCommScore(allCommItems, 'ECB'), [allCommItems]);
 
   const filteredItems = bankFilter
     ? commItems.filter(i => i.bank === bankFilter)
@@ -72,7 +72,7 @@ const Communications = () => {
         <div>
           <h1 className="text-lg font-semibold">Communications & Speeches</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on communications only (speeches, testimony, press conferences) — 30-day window
+            Score based on communications only (speeches, testimony, press conferences) — 45-day window
           </p>
         </div>
         <Button
@@ -202,12 +202,12 @@ function CommScoreCard({ bank, label, score }: {
         <h3 className="text-sm font-semibold">{label}</h3>
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No communications in the last 30 days. Run analysis to populate.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No communications in the last 45 days. Run analysis to populate.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <MessageSquare className="w-3 h-3 text-chart-2" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Communications Only (30-Day)</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Communications Only (45-Day)</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
@@ -216,7 +216,7 @@ function CommScoreCard({ bank, label, score }: {
             {score.avg > 0 ? '+' : ''}{score.avg.toFixed(3)}
           </p>
           <p className="text-[10px] text-muted-foreground">{score.label}</p>
-          <p className="text-[10px] text-muted-foreground">{score.count} items (30d)</p>
+          <p className="text-[10px] text-muted-foreground">{score.count} items (45d)</p>
         </div>
       )}
     </div>

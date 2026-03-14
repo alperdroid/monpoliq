@@ -749,6 +749,11 @@ async function fetchEcbStats(cs: string, existingDbItems: It[] = []): Promise<It
       xml = xml.replace(new RegExp('&(?!amp;|lt;|gt;|quot;|apos;|#)', 'g'), '&amp;');
       for (const ri of pi(xml).filter(ri => { const p = td(ri.pubDate); return p && p >= cs; }).slice(0, 50)) {
         const pub = td(ri.pubDate)!;
+        // Skip meeting accounts — these belong in communications, not statistical
+        if (/meeting\s+of\s+/i.test(ri.title) || /monetary\s+policy\s+account/i.test(ri.title)) {
+          console.log('ECB Stats: skipping meeting account from stats: ' + ri.title);
+          continue;
+        }
         const st = ss(ri.title);
         if (st) items.push({ bank: 'ECB', source: 'ECB Stats', item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: st.ns, label: st.lb, word_count: 0, reasons: ['numeric'], stat_metric: st.met, stat_value: st.val, stat_weight: st.w });
         else items.push({ bank: 'ECB', source: 'ECB Stats', item_date: pub, title: ri.title, url: ri.link, is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral', word_count: 0, reasons: [], stat_metric: null, stat_value: null, stat_weight: 0 });

@@ -12,18 +12,23 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute score from latest statistical items (90-day window to cover monthly FRED releases with lag) */
-function compute30dStatScore(items: SentimentItem[], bank: string) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 90);
-  const cs = cutoff.toISOString().split('T')[0];
-  const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
-  if (!recent.length) return null;
+/** Compute stat score from the LATEST MONTH with data releases for a given bank */
+function computeLatestMonthStatScore(items: SentimentItem[], bank: string) {
+  const bankItems = items.filter(i => i.bank === bank && Math.abs(i.net_score) > 0.001);
+  if (!bankItems.length) return null;
+
+  // Find the latest month that has statistical data
+  // Items are sorted by item_date desc, so first item's month is the latest
+  const latestMonth = bankItems[0].item_date.slice(0, 7); // "YYYY-MM"
+  const monthItems = bankItems.filter(i => i.item_date.slice(0, 7) === latestMonth);
+
+  if (!monthItems.length) return null;
   return {
-    avg: Math.round(recent.reduce((s, i) => s + i.net_score, 0) / recent.length * 1000) / 1000,
-    count: recent.length,
+    avg: Math.round(monthItems.reduce((s, i) => s + i.net_score, 0) / monthItems.length * 1000) / 1000,
+    count: monthItems.length,
+    month: latestMonth,
     label: (() => {
-      const avg = recent.reduce((s, i) => s + i.net_score, 0) / recent.length;
+      const avg = monthItems.reduce((s, i) => s + i.net_score, 0) / monthItems.length;
       return avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
     })(),
   };
@@ -58,8 +63,8 @@ const StatisticalData = () => {
     },
   });
 
-  const fedStatScore = useMemo(() => compute30dStatScore(allStatItems, 'FED'), [allStatItems]);
-  const ecbStatScore = useMemo(() => compute30dStatScore(allStatItems, 'ECB'), [allStatItems]);
+  const fedStatScore = useMemo(() => computeLatestMonthStatScore(allStatItems, 'FED'), [allStatItems]);
+  const ecbStatScore = useMemo(() => computeLatestMonthStatScore(allStatItems, 'ECB'), [allStatItems]);
 
   const filteredItems = bankFilter
     ? statItems.filter(i => i.bank === bankFilter)
@@ -71,7 +76,7 @@ const StatisticalData = () => {
         <div>
           <h1 className="text-lg font-semibold">Statistical Releases</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on statistical data only (FRED, Eurostat) — latest releases
+            Score based on statistical data only (FRED, Eurostat) — latest month's releases
           </p>
         </div>
         <Button
@@ -186,7 +191,7 @@ const StatisticalData = () => {
 function StatScoreCard({ bank, label, score }: {
   bank: string;
   label: string;
-  score: { avg: number; count: number; label: string } | null;
+  score: { avg: number; count: number; label: string; month: string } | null;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -195,12 +200,12 @@ function StatScoreCard({ bank, label, score }: {
         <h3 className="text-sm font-semibold">{label}</h3>
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data in the last 60 days. Click "Refresh Data" to fetch latest releases.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No scored statistical data available. Click "Refresh Data" to fetch latest releases.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Database className="w-3 h-3 text-chart-3" />
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy Only</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Statistical Data-Implied Policy — {score.month}</p>
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
