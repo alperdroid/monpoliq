@@ -59,8 +59,8 @@ const Communications = () => {
     },
   });
 
-  const fedCommScore = useMemo(() => compute30dCommScore(allCommItems, 'FED'), [allCommItems]);
-  const ecbCommScore = useMemo(() => compute30dCommScore(allCommItems, 'ECB'), [allCommItems]);
+  const fedCommScore = useMemo(() => compute45dCommScore(allCommItems, 'FED'), [allCommItems]);
+  const ecbCommScore = useMemo(() => compute45dCommScore(allCommItems, 'ECB'), [allCommItems]);
 
   const filteredItems = bankFilter
     ? commItems.filter(i => i.bank === bankFilter)
