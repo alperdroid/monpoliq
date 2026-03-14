@@ -63,8 +63,8 @@ const StatisticalData = () => {
     },
   });
 
-  const fedStatScore = useMemo(() => compute30dStatScore(allStatItems, 'FED'), [allStatItems]);
-  const ecbStatScore = useMemo(() => compute30dStatScore(allStatItems, 'ECB'), [allStatItems]);
+  const fedStatScore = useMemo(() => computeLatestMonthStatScore(allStatItems, 'FED'), [allStatItems]);
+  const ecbStatScore = useMemo(() => computeLatestMonthStatScore(allStatItems, 'ECB'), [allStatItems]);
 
   const filteredItems = bankFilter
     ? statItems.filter(i => i.bank === bankFilter)
