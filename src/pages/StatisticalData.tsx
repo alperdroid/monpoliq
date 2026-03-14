@@ -58,8 +58,8 @@ const StatisticalData = () => {
     },
   });
 
-  const fedStatScore = useMemo(() => compute75dStatScore(allStatItems, 'FED'), [allStatItems]);
-  const ecbStatScore = useMemo(() => compute75dStatScore(allStatItems, 'ECB'), [allStatItems]);
+  const fedStatScore = useMemo(() => compute60dStatScore(allStatItems, 'FED'), [allStatItems]);
+  const ecbStatScore = useMemo(() => compute60dStatScore(allStatItems, 'ECB'), [allStatItems]);
 
   const filteredItems = bankFilter
     ? statItems.filter(i => i.bank === bankFilter)
