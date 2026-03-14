@@ -216,7 +216,7 @@ function CommScoreCard({ bank, label, score }: {
             {score.avg > 0 ? '+' : ''}{score.avg.toFixed(3)}
           </p>
           <p className="text-[10px] text-muted-foreground">{score.label}</p>
-          <p className="text-[10px] text-muted-foreground">{score.count} items (30d)</p>
+          <p className="text-[10px] text-muted-foreground">{score.count} items (45d)</p>
         </div>
       )}
     </div>
