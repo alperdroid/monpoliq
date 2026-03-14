@@ -33,8 +33,8 @@ function recentItems(items: SentimentItem[], days: number) {
   return items.filter(i => i.item_date >= cs);
 }
 
-/** Compute 30-day average excluding neutral zero-score items */
-function compute30dAvg(items: SentimentItem[]) {
+/** Compute average excluding neutral zero-score items */
+function computeAvg(items: SentimentItem[]) {
   const scored = items.filter(i => Math.abs(i.net_score) > 0.001);
   if (!scored.length) return null;
   return Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
