@@ -12,23 +12,18 @@ import { RefreshCw, ExternalLink, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-/** Compute stat score from the LATEST MONTH with data releases for a given bank */
-function computeLatestMonthStatScore(items: SentimentItem[], bank: string) {
-  const bankItems = items.filter(i => i.bank === bank && Math.abs(i.net_score) > 0.001);
-  if (!bankItems.length) return null;
-
-  // Find the latest month that has statistical data
-  // Items are sorted by item_date desc, so first item's month is the latest
-  const latestMonth = bankItems[0].item_date.slice(0, 7); // "YYYY-MM"
-  const monthItems = bankItems.filter(i => i.item_date.slice(0, 7) === latestMonth);
-
-  if (!monthItems.length) return null;
+/** Compute stat score from a 75-day window for a given bank */
+function compute75dStatScore(items: SentimentItem[], bank: string) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 75);
+  const cs = cutoff.toISOString().split('T')[0];
+  const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
+  if (!recent.length) return null;
   return {
-    avg: Math.round(monthItems.reduce((s, i) => s + i.net_score, 0) / monthItems.length * 1000) / 1000,
-    count: monthItems.length,
-    month: latestMonth,
+    avg: Math.round(recent.reduce((s, i) => s + i.net_score, 0) / recent.length * 1000) / 1000,
+    count: recent.length,
     label: (() => {
-      const avg = monthItems.reduce((s, i) => s + i.net_score, 0) / monthItems.length;
+      const avg = recent.reduce((s, i) => s + i.net_score, 0) / recent.length;
       return avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
     })(),
   };
