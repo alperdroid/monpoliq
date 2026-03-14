@@ -72,7 +72,7 @@ const Communications = () => {
         <div>
           <h1 className="text-lg font-semibold">Communications & Speeches</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Score based on communications only (speeches, testimony, press conferences) — 30-day window
+            Score based on communications only (speeches, testimony, press conferences) — 45-day window
           </p>
         </div>
         <Button
