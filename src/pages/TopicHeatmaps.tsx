@@ -67,9 +67,12 @@ const TopicHeatmaps = () => {
       const myIdx = sameBankAll.findIndex(m => m.id === meeting.id);
       const prevDate = myIdx > 0 ? sameBankAll[myIdx - 1].date : null;
       const startDate = prevDate || '2000-01-01';
+      // Use next meeting date as upper bound so post-meeting publications 
+      // (accounts, minutes) are attributed to this meeting
+      const nextDate = myIdx < sameBankAll.length - 1 ? sameBankAll[myIdx + 1].date : '2099-12-31';
 
       const bankItems = allItems.filter(
-        i => i.bank === meeting.bank && !i.is_statistical && i.item_date > startDate && i.item_date <= meeting.date,
+        i => i.bank === meeting.bank && !i.is_statistical && i.item_date > startDate && i.item_date < nextDate,
       );
 
       const policyItems = bankItems.filter(isPolicyText);
