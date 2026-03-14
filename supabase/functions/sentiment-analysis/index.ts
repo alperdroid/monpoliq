@@ -595,6 +595,75 @@ Respond with ONLY a JSON array of objects: [{"date": "YYYY-MM-DD", "url": "full_
   return items;
 }
 
+// ── ECB Monetary Policy Accounts (Meeting Minutes equivalent) ──
+// Published ~4 weeks after each Governing Council meeting
+async function fetchEcbAccounts(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+  const items: { title: string; text: string; date: string; url: string }[] = [];
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const years = [currentYear, currentYear - 1];
+
+  try {
+    const includeResults = await Promise.allSettled(years.map(async (yr) => {
+      const includeUrl = `https://www.ecb.europa.eu/press/accounts/${yr}/html/index_include.en.html`;
+      const r = await sf(includeUrl, 15000);
+      if (!r || !r.ok) { console.log('ECB accounts include file not found for ' + yr); return []; }
+      const html = await r.text();
+
+      // Match links to account pages: ecb.mg{YYMMDD}~HASH.en.html
+      const linkRe = /href="([^"]*ecb\.mg\d{6}~[^"]*\.en\.html)"/gi;
+      let m;
+      const links: { url: string; dateStr: string }[] = [];
+      while ((m = linkRe.exec(html)) !== null) {
+        let link = m[1];
+        if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
+        const dateMatch = link.match(/ecb\.mg(\d{2})(\d{2})(\d{2})/);
+        if (dateMatch) {
+          const fullDate = '20' + dateMatch[1] + '-' + dateMatch[2] + '-' + dateMatch[3];
+          if (fullDate >= cutoffDate && new Date(fullDate) <= now) {
+            links.push({ url: link, dateStr: fullDate });
+          }
+        }
+      }
+      return links;
+    }));
+
+    const allLinksRaw: { url: string; dateStr: string }[] = [];
+    for (const r of includeResults) {
+      if (r.status === 'fulfilled') allLinksRaw.push(...r.value);
+    }
+    const seenDates = new Set<string>();
+    const allLinks: { url: string; dateStr: string }[] = [];
+    for (const l of allLinksRaw) {
+      if (!seenDates.has(l.dateStr)) {
+        seenDates.add(l.dateStr);
+        allLinks.push(l);
+      }
+    }
+    console.log('ECB Accounts: found ' + allLinks.length + ' unique account links from include files');
+
+    const fetchResults = await Promise.allSettled(allLinks.slice(0, 12).map(async ({ url, dateStr }) => {
+      const r = await sf(url, 15000);
+      if (!r || !r.ok) return null;
+      const pageHtml = await r.text();
+      const text = extractText(pageHtml);
+      if (text.length < 500) return null;
+
+      const parts = dateStr.split('-');
+      console.log('ECB Account found: ' + dateStr + ' (' + text.length + ' chars)');
+      return {
+        title: 'ECB Monetary Policy Account — ' + parts[1] + '/' + parts[2] + '/' + parts[0],
+        text, date: dateStr, url,
+      };
+    }));
+    for (const r of fetchResults) {
+      if (r.status === 'fulfilled' && r.value) items.push(r.value);
+    }
+  } catch (e) { console.error('ECB accounts scrape error:', e); }
+
+  return items;
+}
+
 // ── Patterns to reclassify as statistical (not commentary) ──
 const STATISTICAL_RECLASSIFY_PATTERNS = [
   /consumer\s+expectations?\s+survey/i,
