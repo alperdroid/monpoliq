@@ -129,10 +129,10 @@ const Dashboard = () => {
   const latestEcb = ecbItems[0];
 
   // Regime
-  const regime = fed30AggAvg !== null && ecb30AggAvg !== null
-    ? (fed30AggAvg > 0.1 && ecb30AggAvg < -0.1 ? 'Divergent'
-      : fed30AggAvg > 0.1 && ecb30AggAvg > 0.1 ? 'Both Hawkish'
-      : fed30AggAvg < -0.1 && ecb30AggAvg < -0.1 ? 'Both Dovish'
+  const regime = fedAggAvg !== null && ecbAggAvg !== null
+    ? (fedAggAvg > 0.1 && ecbAggAvg < -0.1 ? 'Divergent'
+      : fedAggAvg > 0.1 && ecbAggAvg > 0.1 ? 'Both Hawkish'
+      : fedAggAvg < -0.1 && ecbAggAvg < -0.1 ? 'Both Dovish'
       : 'Converging')
     : '—';
 
@@ -145,6 +145,8 @@ const Dashboard = () => {
   const stanceLabel = (v: number | null) =>
     v === null ? '—' : v > 0.3 ? 'Hawkish' : v > 0.1 ? 'Sl. Hawkish' : v < -0.3 ? 'Dovish' : v < -0.1 ? 'Sl. Dovish' : 'Neutral';
 
+  const totalRecentItems = fedAggAll.length + ecbAggAll.length;
+
   return (
     <div className="space-y-6 animate-slide-in">
       {/* Executive Summary Bar */}
@@ -152,19 +154,19 @@ const Dashboard = () => {
         <div className="flex items-center gap-2 mb-3">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-glow" />
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Executive Summary</span>
-          <span className="text-[10px] text-muted-foreground font-mono ml-auto">30-Day Aggregate Signal</span>
+          <span className="text-[10px] text-muted-foreground font-mono ml-auto">Aggregate Signal (Comms 45d + Stats 60d)</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <MetricCard
             label="Fed Aggregate"
-            value={fed30AggAvg !== null ? (fed30AggAvg > 0 ? '+' : '') + fed30AggAvg.toFixed(3) : '—'}
-            sublabel={stanceLabel(fed30AggAvg)}
+            value={fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
+            sublabel={stanceLabel(fedAggAvg)}
             variant="primary"
           />
           <MetricCard
             label="ECB Aggregate"
-            value={ecb30AggAvg !== null ? (ecb30AggAvg > 0 ? '+' : '') + ecb30AggAvg.toFixed(3) : '—'}
-            sublabel={stanceLabel(ecb30AggAvg)}
+            value={ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
+            sublabel={stanceLabel(ecbAggAvg)}
             variant="primary"
           />
           <MetricCard label="Regime" value={regime} sublabel="FED vs ECB" />
@@ -187,16 +189,16 @@ const Dashboard = () => {
               <MetricCard label="EUR/USD (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
             </>
           )}
-          <MetricCard label="Comm. Volume" value={String(recent30.length)} sublabel="30d events" trend={recent7.length > 5 ? 'up' : 'flat'} trendValue={`${recent7.length} this week`} />
+          <MetricCard label="Comm. Volume" value={String(totalRecentItems)} sublabel="recent events" trend={recent7.length > 5 ? 'up' : 'flat'} trendValue={`${recent7.length} this week`} />
         </div>
       </div>
 
-      {/* HIGHLIGHTED: 30-Day Aggregate Scores (Comms + Stats) */}
+      {/* Aggregate Scores (Comms 45d + Stats 60d) */}
       <div className="rounded-xl border border-primary/20 bg-card p-4 space-y-3 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-primary animate-pulse-glow" />
-            <span className="text-xs font-bold uppercase tracking-widest text-primary">30-Day Aggregate Score (Communications + Statistical Data)</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-primary">Aggregate Score (Comms 45d + Stats 60d)</span>
           </div>
           <div className="flex gap-2">
             <Link to="/comms" className="text-[10px] text-primary hover:underline">Comms →</Link>
@@ -207,35 +209,35 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              fed30AggAvg !== null && fed30AggAvg > 0.05 ? 'text-signal-hawkish' : fed30AggAvg !== null && fed30AggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              fedAggAvg !== null && fedAggAvg > 0.05 ? 'text-signal-hawkish' : fedAggAvg !== null && fedAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
-              {fed30AggAvg !== null ? (fed30AggAvg > 0 ? '+' : '') + fed30AggAvg.toFixed(3) : '—'}
+              {fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
             </p>
-            <p className="text-[9px] text-muted-foreground">{fed30Comms.length} comms + {fed30Stats.length} stats</p>
+            <p className="text-[9px] text-muted-foreground">{fed45Comms.length} comms (45d) + {fed60Stats.length} stats (60d)</p>
           </div>
           <div className="space-y-1">
-            <span className="text-[10px] text-muted-foreground">FED Comms Only</span>
+            <span className="text-[10px] text-muted-foreground">FED Comms Only (45d)</span>
             <p className={cn('text-lg font-mono font-semibold',
-              fed30CommAvg !== null && fed30CommAvg > 0.05 ? 'text-signal-hawkish' : fed30CommAvg !== null && fed30CommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              fedCommAvg !== null && fedCommAvg > 0.05 ? 'text-signal-hawkish' : fedCommAvg !== null && fedCommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
-              {fed30CommAvg !== null ? (fed30CommAvg > 0 ? '+' : '') + fed30CommAvg.toFixed(3) : '—'}
+              {fedCommAvg !== null ? (fedCommAvg > 0 ? '+' : '') + fedCommAvg.toFixed(3) : '—'}
             </p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              ecb30AggAvg !== null && ecb30AggAvg > 0.05 ? 'text-signal-hawkish' : ecb30AggAvg !== null && ecb30AggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbAggAvg !== null && ecbAggAvg > 0.05 ? 'text-signal-hawkish' : ecbAggAvg !== null && ecbAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
-              {ecb30AggAvg !== null ? (ecb30AggAvg > 0 ? '+' : '') + ecb30AggAvg.toFixed(3) : '—'}
+              {ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
             </p>
-            <p className="text-[9px] text-muted-foreground">{ecb30Comms.length} comms + {ecb30Stats.length} stats</p>
+            <p className="text-[9px] text-muted-foreground">{ecb45Comms.length} comms (45d) + {ecb60Stats.length} stats (60d)</p>
           </div>
           <div className="space-y-1">
-            <span className="text-[10px] text-muted-foreground">ECB Comms Only</span>
+            <span className="text-[10px] text-muted-foreground">ECB Comms Only (45d)</span>
             <p className={cn('text-lg font-mono font-semibold',
-              ecb30CommAvg !== null && ecb30CommAvg > 0.05 ? 'text-signal-hawkish' : ecb30CommAvg !== null && ecb30CommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbCommAvg !== null && ecbCommAvg > 0.05 ? 'text-signal-hawkish' : ecbCommAvg !== null && ecbCommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
-              {ecb30CommAvg !== null ? (ecb30CommAvg > 0 ? '+' : '') + ecb30CommAvg.toFixed(3) : '—'}
+              {ecbCommAvg !== null ? (ecbCommAvg > 0 ? '+' : '') + ecbCommAvg.toFixed(3) : '—'}
             </p>
           </div>
         </div>
@@ -288,9 +290,9 @@ const Dashboard = () => {
       <div className="grid lg:grid-cols-2 gap-4">
         <BankPanel
           bank="FED"
-          score30d={fed30AggAvg ?? 0}
-          commCount30d={fed30Comms.length}
-          statCount30d={fed30Stats.length}
+          score30d={fedAggAvg ?? 0}
+          commCount30d={fed45Comms.length}
+          statCount30d={fed60Stats.length}
           totalItems={fedItems.length}
           latestTitle={latestFed?.title || ''}
           latestDate={latestFed?.item_date || ''}
@@ -298,9 +300,9 @@ const Dashboard = () => {
         />
         <BankPanel
           bank="ECB"
-          score30d={ecb30AggAvg ?? 0}
-          commCount30d={ecb30Comms.length}
-          statCount30d={ecb30Stats.length}
+          score30d={ecbAggAvg ?? 0}
+          commCount30d={ecb45Comms.length}
+          statCount30d={ecb60Stats.length}
           totalItems={ecbItems.length}
           latestTitle={latestEcb?.title || ''}
           latestDate={latestEcb?.item_date || ''}

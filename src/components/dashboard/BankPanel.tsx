@@ -40,7 +40,7 @@ export function BankPanel({
         <p className="text-sm font-medium truncate">{latestTitle || 'No data'}</p>
       </div>
 
-      <StanceGauge value={score30d} label="30-Day Aggregate Score" size="sm" />
+      <StanceGauge value={score30d} label="Aggregate Score" size="sm" />
 
       <div className="grid grid-cols-3 gap-3">
         <div>
