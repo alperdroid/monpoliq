@@ -202,7 +202,7 @@ function CommScoreCard({ bank, label, score }: {
         <h3 className="text-sm font-semibold">{label}</h3>
       </div>
       {!score ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No communications in the last 30 days. Run analysis to populate.</p>
+        <p className="text-xs text-muted-foreground py-4 text-center">No communications in the last 45 days. Run analysis to populate.</p>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
