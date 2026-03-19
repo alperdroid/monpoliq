@@ -480,28 +480,49 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
       }
     }
 
-    // 4. Summary of Economic Projections (SEP) PDF
-    const sepUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
-    const sepResp = await sf(sepUrl, 15000);
-    if (sepResp && sepResp.ok) {
-      const ct = sepResp.headers.get('content-type') || '';
-      if (ct.includes('pdf')) {
-        const buf = await sepResp.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        const decoder = new TextDecoder('latin1');
-        const raw = decoder.decode(bytes);
-        let sepText = '';
-        const parenRe2 = /\(([^)]*)\)/g;
-        let pm2;
-        while ((pm2 = parenRe2.exec(raw)) !== null) {
-          const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
-          if (t.length > 1) sepText += t + ' ';
+    // 4. Summary of Economic Projections (SEP) — try HTML first, then PDF
+    // SEP is only published at projection meetings (March, June, September, December)
+    const SEP_MONTHS = ['03', '06', '09', '12'];
+    if (SEP_MONTHS.includes(m)) {
+      const sepHtmlUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl' + dateStr + '.htm';
+      const sepPdfUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
+      let sepText = '';
+      let sepFinalUrl = sepHtmlUrl;
+
+      // Try HTML page first (much better text extraction)
+      const sepHtmlResp = await sf(sepHtmlUrl, 12000);
+      if (sepHtmlResp && sepHtmlResp.ok) {
+        const html = await sepHtmlResp.text();
+        if (!html.toLowerCase().includes('page not found') && html.length > 1000) {
+          sepText = extractText(html);
         }
-        sepText = sepText.replace(/\s+/g, ' ').trim();
-        if (sepText.length > 200) {
-          console.log('FOMC SEP PDF found: ' + dateStr + ' (' + sepText.length + ' chars)');
-          foundItems.push({ title: 'FOMC Summary of Economic Projections — ' + m + '/' + day + '/' + y, text: sepText, date: y + '-' + m + '-' + day, url: sepUrl });
+      }
+
+      // Fallback to PDF if HTML failed
+      if (sepText.length < 500) {
+        const sepResp = await sf(sepPdfUrl, 15000);
+        if (sepResp && sepResp.ok) {
+          const ct = sepResp.headers.get('content-type') || '';
+          if (ct.includes('pdf')) {
+            const buf = await sepResp.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            const decoder = new TextDecoder('latin1');
+            const raw = decoder.decode(bytes);
+            const parenRe2 = /\(([^)]*)\)/g;
+            let pm2;
+            while ((pm2 = parenRe2.exec(raw)) !== null) {
+              const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+              if (t.length > 1) sepText += t + ' ';
+            }
+            sepText = sepText.replace(/\s+/g, ' ').trim();
+            sepFinalUrl = sepPdfUrl;
+          }
         }
+      }
+
+      if (sepText.length > 200) {
+        console.log('FOMC SEP found: ' + dateStr + ' (' + sepText.length + ' chars, ' + (sepFinalUrl.endsWith('.htm') ? 'HTML' : 'PDF') + ')');
+        foundItems.push({ title: 'FOMC Summary of Economic Projections — ' + m + '/' + day + '/' + y, text: sepText, date: y + '-' + m + '-' + day, url: sepFinalUrl });
       }
     }
 
