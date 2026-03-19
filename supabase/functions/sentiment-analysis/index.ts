@@ -710,6 +710,10 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
       if (bank === 'FED' && MINUTES_SKIP.test(ri.title)) return false;
       if (bank === 'FED' && PRESS_CONF_SKIP.test(ri.title)) return false; // handled separately
+      // Skip FOMC statement from Fed Monetary — already captured by Fed Press
+      if (f.lbl === 'Fed Monetary' && /FOMC\s+statement/i.test(ri.title)) return false;
+      // Skip economic projections from Fed Press — already captured by Fed Monetary (or SEP scraper)
+      if (f.lbl === 'Fed Press' && /economic\s+projections?\s+from/i.test(ri.title)) return false;
       return true;
     }).slice(0, 50);
 
