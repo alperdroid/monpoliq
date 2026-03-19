@@ -29,10 +29,12 @@ const PAST_MEETINGS = [
 ].sort((a, b) => a.date.localeCompare(b.date));
 
 const POLICY_SOURCES = [
-  'fomc press conference', 'fomc minutes', 'fomc statement',
+  'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',
+  'fomc press conf', 'fomc summary of economic projections',
   'ecb press conference', 'ecb monetary policy statement', 'ecb monetary policy accounts',
   'fed press conference', 'fed minutes', 'fed statement',
   'press conf', 'minutes', 'statement', 'monetary policy', 'fed monetary',
+  'summary of economic projections',
 ];
 
 function isPolicyText(item: SentimentItem): boolean {
