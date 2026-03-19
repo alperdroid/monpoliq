@@ -257,6 +257,200 @@ async function scoreBatchWithAI(
   return results;
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── SEP DELTA SCORING — Compare projections between meetings ──
+// ══════════════════════════════════════════════════════════════
+
+interface SEPProjections {
+  gdp_current: number | null;
+  gdp_next: number | null;
+  unemployment_current: number | null;
+  unemployment_next: number | null;
+  pce_current: number | null;
+  pce_next: number | null;
+  core_pce_current: number | null;
+  core_pce_next: number | null;
+  fed_funds_current: number | null;
+  fed_funds_next: number | null;
+  fed_funds_longer_run: number | null;
+}
+
+const SEP_EXTRACTION_PROMPT = `You are an expert at reading FOMC Summary of Economic Projections (SEP) tables.
+
+Extract the MEDIAN projections from this SEP document. The document contains tables with projections for:
+- Change in real GDP (%)
+- Unemployment rate (%)
+- PCE inflation (%)
+- Core PCE inflation (%)
+- Federal funds rate (%)
+
+For each variable, extract the median value for:
+- "current_year" = the year the meeting is in
+- "next_year" = the following year
+- "longer_run" = only for federal funds rate
+
+IMPORTANT: Look for the MEDIAN row in each table. The median is typically the middle value.
+If the text is garbled or you cannot reliably extract numbers, use null.
+
+Respond with ONLY a JSON object (no markdown):
+{
+  "gdp_current": <number or null>,
+  "gdp_next": <number or null>,
+  "unemployment_current": <number or null>,
+  "unemployment_next": <number or null>,
+  "pce_current": <number or null>,
+  "pce_next": <number or null>,
+  "core_pce_current": <number or null>,
+  "core_pce_next": <number or null>,
+  "fed_funds_current": <number or null>,
+  "fed_funds_next": <number or null>,
+  "fed_funds_longer_run": <number or null>
+}`;
+
+async function extractSEPProjections(text: string, meetingDate: string, apiKey: string): Promise<SEPProjections | null> {
+  try {
+    const truncated = text.length > 8000 ? text.slice(0, 8000) : text;
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'system', content: SEP_EXTRACTION_PROMPT },
+          { role: 'user', content: `Meeting date: ${meetingDate}\n\nSEP Document:\n${truncated}` },
+        ],
+      }),
+    });
+    if (!resp.ok) { console.error('SEP extraction AI failed:', resp.status); return null; }
+    const data = await resp.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const parsed = JSON.parse(content);
+    const values = [parsed.gdp_current, parsed.unemployment_current, parsed.pce_current, parsed.core_pce_current, parsed.fed_funds_current];
+    const nonNull = values.filter((v: any) => v !== null && v !== undefined);
+    if (nonNull.length < 2) { console.log('SEP extraction got too few values (' + nonNull.length + '), skipping'); return null; }
+    console.log('SEP projections extracted for ' + meetingDate + ': GDP=' + parsed.gdp_current + ', UE=' + parsed.unemployment_current + ', PCE=' + parsed.pce_current + ', CorePCE=' + parsed.core_pce_current + ', FFR=' + parsed.fed_funds_current);
+    return parsed as SEPProjections;
+  } catch (e) { console.error('SEP extraction error:', e); return null; }
+}
+
+function scoreSEPDelta(current: SEPProjections, previous: SEPProjections): { score: number; label: string; reasons: string[] } {
+  const deltas: { name: string; delta: number; direction: string; weight: number }[] = [];
+  if (current.gdp_current != null && previous.gdp_current != null) deltas.push({ name: 'GDP current yr', delta: current.gdp_current - previous.gdp_current, direction: 'hh', weight: 2 });
+  if (current.gdp_next != null && previous.gdp_next != null) deltas.push({ name: 'GDP next yr', delta: current.gdp_next - previous.gdp_next, direction: 'hh', weight: 1.5 });
+  if (current.unemployment_current != null && previous.unemployment_current != null) deltas.push({ name: 'UE current yr', delta: current.unemployment_current - previous.unemployment_current, direction: 'lh', weight: 2 });
+  if (current.unemployment_next != null && previous.unemployment_next != null) deltas.push({ name: 'UE next yr', delta: current.unemployment_next - previous.unemployment_next, direction: 'lh', weight: 1.5 });
+  if (current.pce_current != null && previous.pce_current != null) deltas.push({ name: 'PCE current yr', delta: current.pce_current - previous.pce_current, direction: 'hh', weight: 3 });
+  if (current.pce_next != null && previous.pce_next != null) deltas.push({ name: 'PCE next yr', delta: current.pce_next - previous.pce_next, direction: 'hh', weight: 2 });
+  if (current.core_pce_current != null && previous.core_pce_current != null) deltas.push({ name: 'Core PCE current yr', delta: current.core_pce_current - previous.core_pce_current, direction: 'hh', weight: 3.5 });
+  if (current.core_pce_next != null && previous.core_pce_next != null) deltas.push({ name: 'Core PCE next yr', delta: current.core_pce_next - previous.core_pce_next, direction: 'hh', weight: 2.5 });
+  if (current.fed_funds_current != null && previous.fed_funds_current != null) deltas.push({ name: 'FFR current yr', delta: current.fed_funds_current - previous.fed_funds_current, direction: 'hh', weight: 3 });
+  if (current.fed_funds_next != null && previous.fed_funds_next != null) deltas.push({ name: 'FFR next yr', delta: current.fed_funds_next - previous.fed_funds_next, direction: 'hh', weight: 2.5 });
+  if (current.fed_funds_longer_run != null && previous.fed_funds_longer_run != null) deltas.push({ name: 'FFR longer-run', delta: current.fed_funds_longer_run - previous.fed_funds_longer_run, direction: 'hh', weight: 2 });
+
+  if (deltas.length === 0) return { score: 0, label: 'neutral', reasons: ['No comparable projections found'] };
+
+  let weightedSum = 0, totalWeight = 0;
+  const reasons: string[] = [];
+  for (const d of deltas) {
+    let rawSignal = d.delta / 0.3; // 0.3pp normalizer
+    if (d.direction === 'lh') rawSignal = -rawSignal;
+    rawSignal = Math.max(-1, Math.min(1, rawSignal));
+    weightedSum += rawSignal * d.weight;
+    totalWeight += d.weight;
+    if (Math.abs(d.delta) >= 0.05) {
+      const dir = (d.direction === 'hh' ? (d.delta > 0 ? '↑hawk' : '↓dove') : (d.delta > 0 ? '↓dove' : '↑hawk'));
+      reasons.push(`${d.name}: ${d.delta > 0 ? '+' : ''}${d.delta.toFixed(1)}pp ${dir}`);
+    }
+  }
+  const score = Math.round((weightedSum / totalWeight) * 1000) / 1000;
+  const clampedScore = Math.max(-1, Math.min(1, score));
+  const label = clampedScore > 0.05 ? 'hawkish' : clampedScore < -0.05 ? 'dovish' : 'neutral';
+  if (reasons.length === 0) reasons.push('Minimal changes from previous SEP');
+  return { score: clampedScore, label, reasons };
+}
+
+async function runSEPDeltaScoring(sbUrl: string, sbKey: string, apiKey: string): Promise<{ updated: number }> {
+  const resp = await fetch(
+    `${sbUrl}/rest/v1/sentiment_items?select=id,title,item_date,net_score,policy_dimensions,reasons&source=eq.FOMC SEP&order=item_date.asc&limit=50`,
+    { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
+  );
+  if (!resp.ok) return { updated: 0 };
+  const sepItems = await resp.json();
+  if (!sepItems || sepItems.length === 0) return { updated: 0 };
+  console.log('SEP delta scoring: ' + sepItems.length + ' SEP items found');
+
+  let extractCount = 0;
+  for (const item of sepItems) {
+    const dims = item.policy_dimensions;
+    if (dims && dims.sep_projections && Object.values(dims.sep_projections).some((v: any) => v !== null)) continue;
+    const dateMatch = item.title.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!dateMatch) continue;
+    const dateStr = dateMatch[3] + dateMatch[1] + dateMatch[2];
+
+    let sepText = '';
+    const sepHtmlUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl' + dateStr + '.htm';
+    const htmlResp = await sf(sepHtmlUrl, 12000);
+    if (htmlResp && htmlResp.ok) {
+      const html = await htmlResp.text();
+      if (!html.toLowerCase().includes('page not found') && html.length > 1000) sepText = extractText(html);
+    }
+    if (sepText.length < 500) {
+      const pdfUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
+      const pdfResp = await sf(pdfUrl, 15000);
+      if (pdfResp && pdfResp.ok) {
+        const ct = pdfResp.headers.get('content-type') || '';
+        if (ct.includes('pdf')) {
+          const buf = await pdfResp.arrayBuffer();
+          const decoder = new TextDecoder('latin1');
+          const raw = decoder.decode(new Uint8Array(buf));
+          const parenRe = /\(([^)]*)\)/g; let pm;
+          while ((pm = parenRe.exec(raw)) !== null) {
+            const t = pm[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+            if (t.length > 1) sepText += t + ' ';
+          }
+          sepText = sepText.replace(/\s+/g, ' ').trim();
+        }
+      }
+    }
+    if (sepText.length < 200) continue;
+    const projections = await extractSEPProjections(sepText, item.item_date, apiKey);
+    if (!projections) continue;
+    const newDims = { ...(dims || {}), sep_projections: projections };
+    await fetch(sbUrl + '/rest/v1/sentiment_items?id=eq.' + item.id, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ policy_dimensions: newDims }),
+    });
+    item.policy_dimensions = newDims;
+    extractCount++;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  console.log('SEP projections extracted for ' + extractCount + ' items');
+
+  let updated = 0;
+  for (let i = 1; i < sepItems.length; i++) {
+    const current = sepItems[i], previous = sepItems[i - 1];
+    const currProj = current.policy_dimensions?.sep_projections;
+    const prevProj = previous.policy_dimensions?.sep_projections;
+    if (!currProj || !prevProj) continue;
+    const deltaResult = scoreSEPDelta(currProj, prevProj);
+    console.log('SEP delta ' + current.item_date + ' vs ' + previous.item_date + ': score=' + deltaResult.score + ' (' + deltaResult.label + ') — ' + deltaResult.reasons.join(', '));
+    const updateResp = await fetch(sbUrl + '/rest/v1/sentiment_items?id=eq.' + current.id, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        net_score: deltaResult.score, label: deltaResult.label,
+        hawk_pts: deltaResult.score > 0 ? Math.round(Math.abs(deltaResult.score) * 10) : 0,
+        dove_pts: deltaResult.score < 0 ? Math.round(Math.abs(deltaResult.score) * 10) : 0,
+        reasons: deltaResult.reasons.map(r => 'sep_delta:' + r),
+      }),
+    });
+    if (updateResp.ok) updated++;
+  }
+  return { updated };
+}
+
 // ── Load existing scored items from DB to skip re-scoring ──
 // Items with score=0 from press conferences/minutes are considered unscored and will be re-fetched
 async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Promise<Set<string>> {
@@ -268,10 +462,13 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     if (!resp.ok) return new Set();
     const data = await resp.json();
     // Skip items with 0 score from policy documents — they need re-scoring
+    // BUT always keep FOMC SEP as existing — they're scored by delta comparison, not AI
     const policySourceKeywords = ['minutes', 'press conf', 'statement'];
     return new Set((data || [])
       .filter((d: any) => {
         const src = (d.source || '').toLowerCase();
+        // FOMC SEP items are scored by delta, never re-score with generic AI
+        if (src.includes('fomc sep')) return true;
         const isPolicyDoc = policySourceKeywords.some(k => src.includes(k));
         // If it's a policy doc with 0 score, don't mark as existing so it gets re-fetched
         if (isPolicyDoc && Math.abs(Number(d.net_score) || 0) < 0.001) return false;
@@ -480,28 +677,49 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
       }
     }
 
-    // 4. Summary of Economic Projections (SEP) PDF
-    const sepUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
-    const sepResp = await sf(sepUrl, 15000);
-    if (sepResp && sepResp.ok) {
-      const ct = sepResp.headers.get('content-type') || '';
-      if (ct.includes('pdf')) {
-        const buf = await sepResp.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        const decoder = new TextDecoder('latin1');
-        const raw = decoder.decode(bytes);
-        let sepText = '';
-        const parenRe2 = /\(([^)]*)\)/g;
-        let pm2;
-        while ((pm2 = parenRe2.exec(raw)) !== null) {
-          const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
-          if (t.length > 1) sepText += t + ' ';
+    // 4. Summary of Economic Projections (SEP) — try HTML first, then PDF
+    // SEP is only published at projection meetings (March, June, September, December)
+    const SEP_MONTHS = ['03', '06', '09', '12'];
+    if (SEP_MONTHS.includes(m)) {
+      const sepHtmlUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl' + dateStr + '.htm';
+      const sepPdfUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
+      let sepText = '';
+      let sepFinalUrl = sepHtmlUrl;
+
+      // Try HTML page first (much better text extraction)
+      const sepHtmlResp = await sf(sepHtmlUrl, 12000);
+      if (sepHtmlResp && sepHtmlResp.ok) {
+        const html = await sepHtmlResp.text();
+        if (!html.toLowerCase().includes('page not found') && html.length > 1000) {
+          sepText = extractText(html);
         }
-        sepText = sepText.replace(/\s+/g, ' ').trim();
-        if (sepText.length > 200) {
-          console.log('FOMC SEP PDF found: ' + dateStr + ' (' + sepText.length + ' chars)');
-          foundItems.push({ title: 'FOMC Summary of Economic Projections — ' + m + '/' + day + '/' + y, text: sepText, date: y + '-' + m + '-' + day, url: sepUrl });
+      }
+
+      // Fallback to PDF if HTML failed
+      if (sepText.length < 500) {
+        const sepResp = await sf(sepPdfUrl, 15000);
+        if (sepResp && sepResp.ok) {
+          const ct = sepResp.headers.get('content-type') || '';
+          if (ct.includes('pdf')) {
+            const buf = await sepResp.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            const decoder = new TextDecoder('latin1');
+            const raw = decoder.decode(bytes);
+            const parenRe2 = /\(([^)]*)\)/g;
+            let pm2;
+            while ((pm2 = parenRe2.exec(raw)) !== null) {
+              const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+              if (t.length > 1) sepText += t + ' ';
+            }
+            sepText = sepText.replace(/\s+/g, ' ').trim();
+            sepFinalUrl = sepPdfUrl;
+          }
         }
+      }
+
+      if (sepText.length > 200) {
+        console.log('FOMC SEP found: ' + dateStr + ' (' + sepText.length + ' chars, ' + (sepFinalUrl.endsWith('.htm') ? 'HTML' : 'PDF') + ')');
+        foundItems.push({ title: 'FOMC Summary of Economic Projections — ' + m + '/' + day + '/' + y, text: sepText, date: y + '-' + m + '-' + day, url: sepFinalUrl });
       }
     }
 
@@ -1230,6 +1448,16 @@ Deno.serve(async (req) => {
       });
       result.ecb = { items: allEcbItems, score_1: s1, score_2: s2 };
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
+    }
+
+    // Run SEP delta scoring (compare projections between meetings)
+    if (aiKey) {
+      try {
+        console.log('Running SEP delta scoring...');
+        const sepResult = await runSEPDeltaScoring(sbUrl, sbKey, aiKey);
+        console.log('SEP delta scoring: updated=' + sepResult.updated);
+        result.sep_delta = sepResult;
+      } catch (e) { console.error('SEP delta scoring error:', e); }
     }
 
     // Auto-trigger topic analysis and taxonomy classification for new items
