@@ -2,35 +2,76 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
-import { mockEvents } from '@/data/mock-data';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Search, ExternalLink } from 'lucide-react';
-import type { Bank, EventType } from '@/types/central-bank';
+import { Search, ExternalLink, RefreshCw } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+
+interface EventRow {
+  id: string;
+  bank: string;
+  source: string;
+  title: string;
+  item_date: string;
+  label: string | null;
+  net_score: number | null;
+  hawk_pts: number | null;
+  dove_pts: number | null;
+  is_statistical: boolean;
+  url: string | null;
+  word_count: number | null;
+  topics: string[] | null;
+  reasons: string[] | null;
+}
 
 const Events = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filtered = useMemo(() => {
-    return mockEvents.filter(e => {
-      if (bankFilter !== 'all' && e.bank !== bankFilter) return false;
-      if (typeFilter !== 'all' && e.event_type !== typeFilter) return false;
-      if (searchQuery && !e.title.toLowerCase().includes(searchQuery.toLowerCase()) && !e.speaker?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-      return true;
-    }).sort((a, b) => new Date(b.event_ts).getTime() - new Date(a.event_ts).getTime());
-  }, [bankFilter, typeFilter, searchQuery]);
+  const { data: events = [], isLoading, isRefetching } = useQuery({
+    queryKey: ['events-explorer'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sentiment_items')
+        .select('id, bank, source, title, item_date, label, net_score, hawk_pts, dove_pts, is_statistical, url, word_count, topics, reasons')
+        .order('item_date', { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data || []) as EventRow[];
+    },
+    refetchInterval: 60_000, // auto-refresh every 60s
+  });
 
-  const eventTypes = [...new Set(mockEvents.map(e => e.event_type))];
+  const sourceTypes = useMemo(() => [...new Set(events.map(e => e.source))].sort(), [events]);
+
+  const filtered = useMemo(() => {
+    return events.filter(e => {
+      if (bankFilter !== 'all' && e.bank !== bankFilter) return false;
+      if (typeFilter !== 'all' && e.source !== typeFilter) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        if (!e.title.toLowerCase().includes(q) && !e.source.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [bankFilter, typeFilter, searchQuery, events]);
+
+  const labelVariant = (label: string | null): 'hawkish' | 'dovish' | 'neutral' | 'info' => {
+    if (!label) return 'neutral';
+    if (label.includes('hawk')) return 'hawkish';
+    if (label.includes('dov')) return 'dovish';
+    return 'neutral';
+  };
 
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold">Events Explorer</h1>
-          <TooltipInfo content="Comprehensive database of all central bank communications, speeches, interviews, and policy decisions with filtering and search capabilities." />
+          <TooltipInfo content="Live database of all scraped central bank communications, statistical releases, and policy documents." />
+          {(isLoading || isRefetching) && <RefreshCw className="w-3.5 h-3.5 text-muted-foreground animate-spin" />}
         </div>
         <span className="text-xs text-muted-foreground font-mono">{filtered.length} events</span>
       </div>
@@ -40,7 +81,7 @@ const Events = () => {
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search events, speakers..."
+            placeholder="Search events, sources..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 h-8 text-xs w-56 bg-surface"
@@ -57,13 +98,13 @@ const Events = () => {
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-44 h-8 text-xs bg-surface">
-            <SelectValue placeholder="Event Type" />
+          <SelectTrigger className="w-56 h-8 text-xs bg-surface">
+            <SelectValue placeholder="Source" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            {eventTypes.map(t => (
-              <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
+            <SelectItem value="all">All Sources</SelectItem>
+            {sourceTypes.map(t => (
+              <SelectItem key={t} value={t}>{t}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -77,49 +118,79 @@ const Events = () => {
               <tr className="border-b border-border bg-surface">
                 <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Date</th>
                 <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Bank</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Speaker</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Type</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Source</th>
                 <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Title</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Tier</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Trust</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Priority</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Label</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Topics</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Score</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Words</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((event) => (
                 <tr
-                  key={event.event_id}
-                  className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors cursor-pointer"
+                  key={event.id}
+                  className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors"
                 >
                   <td className="p-3 font-mono text-muted-foreground whitespace-nowrap">
-                    {new Date(event.event_ts).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}
+                    {new Date(event.item_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}
                   </td>
                   <td className="p-3">
                     <SignalBadge label={event.bank} variant="info" />
                   </td>
-                  <td className="p-3 font-medium">{event.speaker || '—'}</td>
                   <td className="p-3">
-                    <span className="text-muted-foreground">{event.event_type.replace(/_/g, ' ')}</span>
+                    <span className="text-muted-foreground text-[11px]">{event.source}</span>
                   </td>
                   <td className="p-3 max-w-xs">
-                    <Link to={`/events/${event.event_id}`} className="text-foreground hover:text-primary transition-colors flex items-center gap-1">
+                    {event.url ? (
+                      <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-foreground hover:text-primary transition-colors flex items-center gap-1">
+                        <span className="truncate">{event.title}</span>
+                        <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-50" />
+                      </a>
+                    ) : (
                       <span className="truncate">{event.title}</span>
-                      <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-100" />
-                    </Link>
+                    )}
                   </td>
                   <td className="p-3">
-                    <span className="text-[10px] text-muted-foreground">{event.source_tier.replace(/_/g, ' ')}</span>
+                    {event.label && (
+                      <SignalBadge label={event.label} variant={labelVariant(event.label)} />
+                    )}
                   </td>
-                  <td className="p-3 text-right font-mono">{event.trust_score.toFixed(2)}</td>
+                  <td className="p-3">
+                    {event.topics && event.topics.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {event.topics.slice(0, 2).map(t => (
+                          <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {t.replace(/_/g, ' ')}
+                          </span>
+                        ))}
+                        {event.topics.length > 2 && (
+                          <span className="text-[9px] text-muted-foreground">+{event.topics.length - 2}</span>
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-3 text-right font-mono">
                     <span className={cn(
-                      event.signal_priority_score > 0.9 ? 'text-signal-hawkish font-semibold' : 'text-muted-foreground'
+                      event.net_score && event.net_score > 0.3 ? 'text-signal-hawkish' :
+                      event.net_score && event.net_score < -0.3 ? 'text-signal-dovish' :
+                      'text-muted-foreground'
                     )}>
-                      {event.signal_priority_score.toFixed(2)}
+                      {event.net_score?.toFixed(2) ?? '—'}
                     </span>
+                  </td>
+                  <td className="p-3 text-right font-mono text-muted-foreground">
+                    {event.word_count || '—'}
                   </td>
                 </tr>
               ))}
+              {filtered.length === 0 && !isLoading && (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                    No events found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
