@@ -996,7 +996,12 @@ Deno.serve(async (req) => {
       }
       if (pressConfRaw.status === 'fulfilled') {
         for (const pc of pressConfRaw.value) {
-          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: 'FOMC Press Conf', bank: 'FED' });
+          // Assign more specific source labels
+          let src = 'FOMC Press Conf';
+          if (pc.title.includes('Statement')) src = 'FOMC Statement';
+          else if (pc.title.includes('Summary of Economic Projections')) src = 'FOMC SEP';
+          else if (pc.title.includes('Transcript')) src = 'FOMC Press Conf';
+          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: src, bank: 'FED' });
         }
       }
 
