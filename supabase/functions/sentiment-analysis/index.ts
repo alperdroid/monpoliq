@@ -406,7 +406,7 @@ async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; te
   return items;
 }
 
-// ── FOMC Press Conferences + Statements ──
+// ── FOMC Press Conference Transcript PDFs ──
 async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
   const now = new Date();
@@ -416,11 +416,10 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
     const meetDate = new Date(y, m, day);
     return meetDate >= cutoff && meetDate <= now;
   });
-  console.log('FOMC Press Conf+Statement: checking ' + relevantDates.length + ' dates');
+  console.log('FOMC Press Conf+Statement+SEP: checking ' + relevantDates.length + ' dates');
   const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
     const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
-    let text = '';
-    let url = '';
+    const foundItems: { title: string; text: string; date: string; url: string }[] = [];
 
     // 1. Try the FOMC monetary policy statement (always available day-of)
     const stmtUrl = 'https://www.federalreserve.gov/newsevents/pressreleases/monetary' + dateStr + 'a.htm';
@@ -428,33 +427,88 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
     if (stmtResp && stmtResp.ok) {
       const html = await stmtResp.text();
       if (!html.toLowerCase().includes('page not found') && html.length > 1000) {
-        text = extractText(html);
-        url = stmtUrl;
-        console.log('FOMC Statement found: ' + dateStr + ' (' + text.length + ' chars)');
-      }
-    }
-
-    // 2. Try the press conference landing page (fomcpressconf, double 's')
-    const pcUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpressconf' + dateStr + '.htm';
-    const pcResp = await sf(pcUrl, 12000);
-    if (pcResp && pcResp.ok) {
-      const pcHtml = await pcResp.text();
-      if (!pcHtml.toLowerCase().includes('page not found') && pcHtml.length > 2000) {
-        const pcText = extractText(pcHtml);
-        // If the press conference page has more substantive text, use it
-        if (pcText.length > text.length) {
-          text = pcText;
-          url = pcUrl;
-          console.log('FOMC Press Conf page found: ' + dateStr + ' (' + text.length + ' chars)');
+        const text = extractText(html);
+        if (text.length >= 200) {
+          console.log('FOMC Statement found: ' + dateStr + ' (' + text.length + ' chars)');
+          foundItems.push({ title: 'FOMC Statement — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url: stmtUrl });
         }
       }
     }
 
-    if (text.length < 200) return null;
-    return { title: 'FOMC Press Conference & Statement — ' + m + '/' + day + '/' + y, text, date: y + '-' + m + '-' + day, url };
+    // 2. Try the press conference transcript PDF
+    const pdfUrl = 'https://www.federalreserve.gov/mediacenter/files/FOMCpresconf' + dateStr + '.pdf';
+    const pdfResp = await sf(pdfUrl, 15000);
+    if (pdfResp && pdfResp.ok) {
+      const ct = pdfResp.headers.get('content-type') || '';
+      if (ct.includes('pdf')) {
+        // Extract text from PDF binary
+        const buf = await pdfResp.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        // Simple PDF text extraction: find text between BT/ET operators and parentheses
+        let pdfText = '';
+        const decoder = new TextDecoder('latin1');
+        const raw = decoder.decode(bytes);
+        const parenRe = /\(([^)]*)\)/g;
+        let pm;
+        while ((pm = parenRe.exec(raw)) !== null) {
+          const t = pm[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+          if (t.length > 1) pdfText += t + ' ';
+        }
+        pdfText = pdfText.replace(/\s+/g, ' ').trim();
+        if (pdfText.length > 500) {
+          console.log('FOMC Press Conf PDF found: ' + dateStr + ' (' + pdfText.length + ' chars)');
+          foundItems.push({ title: 'FOMC Press Conference Transcript — ' + m + '/' + day + '/' + y, text: pdfText, date: y + '-' + m + '-' + day, url: pdfUrl });
+        } else {
+          console.log('FOMC Press Conf PDF too short after extraction: ' + dateStr + ' (' + pdfText.length + ' chars)');
+        }
+      }
+    }
+
+    // 3. Try the press conference HTML page as fallback
+    if (foundItems.length < 2) {
+      const pcUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpressconf' + dateStr + '.htm';
+      const pcResp = await sf(pcUrl, 12000);
+      if (pcResp && pcResp.ok) {
+        const pcHtml = await pcResp.text();
+        if (!pcHtml.toLowerCase().includes('page not found') && pcHtml.length > 2000) {
+          const pcText = extractText(pcHtml);
+          if (pcText.length > 1000 && !foundItems.some(f => f.title.includes('Transcript'))) {
+            console.log('FOMC Press Conf HTML page found: ' + dateStr + ' (' + pcText.length + ' chars)');
+            foundItems.push({ title: 'FOMC Press Conference Transcript — ' + m + '/' + day + '/' + y, text: pcText, date: y + '-' + m + '-' + day, url: pcUrl });
+          }
+        }
+      }
+    }
+
+    // 4. Summary of Economic Projections (SEP) PDF
+    const sepUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
+    const sepResp = await sf(sepUrl, 15000);
+    if (sepResp && sepResp.ok) {
+      const ct = sepResp.headers.get('content-type') || '';
+      if (ct.includes('pdf')) {
+        const buf = await sepResp.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const decoder = new TextDecoder('latin1');
+        const raw = decoder.decode(bytes);
+        let sepText = '';
+        const parenRe2 = /\(([^)]*)\)/g;
+        let pm2;
+        while ((pm2 = parenRe2.exec(raw)) !== null) {
+          const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+          if (t.length > 1) sepText += t + ' ';
+        }
+        sepText = sepText.replace(/\s+/g, ' ').trim();
+        if (sepText.length > 200) {
+          console.log('FOMC SEP PDF found: ' + dateStr + ' (' + sepText.length + ' chars)');
+          foundItems.push({ title: 'FOMC Summary of Economic Projections — ' + m + '/' + day + '/' + y, text: sepText, date: y + '-' + m + '-' + day, url: sepUrl });
+        }
+      }
+    }
+
+    return foundItems;
   }));
   for (const r of results) {
-    if (r.status === 'fulfilled' && r.value) items.push(r.value);
+    if (r.status === 'fulfilled' && r.value) items.push(...r.value);
   }
   return items;
 }
@@ -710,6 +764,10 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
       if (f.lbl === 'Fed Press' && SKIP.has(ri.cat)) return false;
       if (bank === 'FED' && MINUTES_SKIP.test(ri.title)) return false;
       if (bank === 'FED' && PRESS_CONF_SKIP.test(ri.title)) return false; // handled separately
+      // Skip FOMC statement from Fed Monetary — already captured by Fed Press
+      if (f.lbl === 'Fed Monetary' && /FOMC\s+statement/i.test(ri.title)) return false;
+      // Skip economic projections from Fed Press — already captured by Fed Monetary (or SEP scraper)
+      if (f.lbl === 'Fed Press' && /economic\s+projections?\s+from/i.test(ri.title)) return false;
       return true;
     }).slice(0, 50);
 
@@ -938,7 +996,12 @@ Deno.serve(async (req) => {
       }
       if (pressConfRaw.status === 'fulfilled') {
         for (const pc of pressConfRaw.value) {
-          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: 'FOMC Press Conf', bank: 'FED' });
+          // Assign more specific source labels
+          let src = 'FOMC Press Conf';
+          if (pc.title.includes('Statement')) src = 'FOMC Statement';
+          else if (pc.title.includes('Summary of Economic Projections')) src = 'FOMC SEP';
+          else if (pc.title.includes('Transcript')) src = 'FOMC Press Conf';
+          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: src, bank: 'FED' });
         }
       }
 
@@ -1168,6 +1231,33 @@ Deno.serve(async (req) => {
       result.ecb = { items: allEcbItems, score_1: s1, score_2: s2 };
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
+
+    // Auto-trigger topic analysis and taxonomy classification for new items
+    console.log('Auto-triggering topic analysis and taxonomy classification...');
+    try {
+      const [topicResp, taxResp] = await Promise.allSettled([
+        fetch(sbUrl + '/functions/v1/topic-analysis', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + sbKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+        fetch(sbUrl + '/functions/v1/policy-taxonomy', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + sbKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+      ]);
+      if (topicResp.status === 'fulfilled') {
+        const td = await topicResp.value.json().catch(() => ({}));
+        console.log('Topic analysis auto-run: tagged=' + (td.tagged || 0));
+        result.topic_analysis = td;
+      }
+      if (taxResp.status === 'fulfilled') {
+        const td2 = await taxResp.value.json().catch(() => ({}));
+        console.log('Taxonomy auto-run: classified=' + (td2.classified || 0));
+        result.taxonomy = td2;
+      }
+    } catch (e) { console.error('Auto-trigger error:', e); }
 
     return new Response(JSON.stringify(result), { headers: { ...CH, 'Content-Type': 'application/json' } });
   } catch (e) {

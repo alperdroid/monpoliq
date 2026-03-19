@@ -25,13 +25,16 @@ const PAST_MEETINGS = [
   { id: 'ecb-2025-12-18', bank: 'ECB', date: '2025-12-18', label: 'ECB Dec 2025 — Hold at 2.00%' },
   { id: 'fed-2026-01-28', bank: 'FED', date: '2026-01-28', label: 'FOMC Jan 2026 — Hold at 3.25–3.50%' },
   { id: 'ecb-2026-02-05', bank: 'ECB', date: '2026-02-05', label: 'ECB Feb 2026 — Hold at 2.00%' },
+  { id: 'fed-2026-03-18', bank: 'FED', date: '2026-03-18', label: 'FOMC Mar 2026' },
 ].sort((a, b) => a.date.localeCompare(b.date));
 
 const POLICY_SOURCES = [
-  'fomc press conference', 'fomc minutes', 'fomc statement',
+  'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',
+  'fomc press conf', 'fomc summary of economic projections',
   'ecb press conference', 'ecb monetary policy statement', 'ecb monetary policy accounts',
   'fed press conference', 'fed minutes', 'fed statement',
   'press conf', 'minutes', 'statement', 'monetary policy', 'fed monetary',
+  'summary of economic projections',
 ];
 
 function isPolicyText(item: SentimentItem): boolean {
