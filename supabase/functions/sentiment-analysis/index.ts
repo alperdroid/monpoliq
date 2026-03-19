@@ -1451,7 +1451,6 @@ Deno.serve(async (req) => {
     }
 
     // Run SEP delta scoring (compare projections between meetings)
-    const aiKey = Deno.env.get('LOVABLE_API_KEY');
     if (aiKey) {
       try {
         console.log('Running SEP delta scoring...');
