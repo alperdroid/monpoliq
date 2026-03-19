@@ -1232,6 +1232,33 @@ Deno.serve(async (req) => {
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
 
+    // Auto-trigger topic analysis and taxonomy classification for new items
+    console.log('Auto-triggering topic analysis and taxonomy classification...');
+    try {
+      const [topicResp, taxResp] = await Promise.allSettled([
+        fetch(sbUrl + '/functions/v1/topic-analysis', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + sbKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+        fetch(sbUrl + '/functions/v1/policy-taxonomy', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + sbKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }),
+      ]);
+      if (topicResp.status === 'fulfilled') {
+        const td = await topicResp.value.json().catch(() => ({}));
+        console.log('Topic analysis auto-run: tagged=' + (td.tagged || 0));
+        result.topic_analysis = td;
+      }
+      if (taxResp.status === 'fulfilled') {
+        const td2 = await taxResp.value.json().catch(() => ({}));
+        console.log('Taxonomy auto-run: classified=' + (td2.classified || 0));
+        result.taxonomy = td2;
+      }
+    } catch (e) { console.error('Auto-trigger error:', e); }
+
     return new Response(JSON.stringify(result), { headers: { ...CH, 'Content-Type': 'application/json' } });
   } catch (e) {
     console.error('Err:', e);
