@@ -1447,6 +1447,17 @@ Deno.serve(async (req) => {
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
 
+    // Run SEP delta scoring (compare projections between meetings)
+    const aiKey = Deno.env.get('LOVABLE_API_KEY');
+    if (aiKey) {
+      try {
+        console.log('Running SEP delta scoring...');
+        const sepResult = await runSEPDeltaScoring(sbUrl, sbKey, aiKey);
+        console.log('SEP delta scoring: updated=' + sepResult.updated);
+        result.sep_delta = sepResult;
+      } catch (e) { console.error('SEP delta scoring error:', e); }
+    }
+
     // Auto-trigger topic analysis and taxonomy classification for new items
     console.log('Auto-triggering topic analysis and taxonomy classification...');
     try {
