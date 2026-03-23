@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.statement-generator]
 verify_jwt = false
+
+[functions.policy-reaction]
+verify_jwt = false

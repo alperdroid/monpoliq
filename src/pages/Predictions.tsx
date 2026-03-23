@@ -8,6 +8,7 @@ import { PivotProbabilityPanel } from '@/components/predictions/PivotProbability
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
+import { EmpiricalPolicyPanel } from '@/components/predictions/EmpiricalPolicyPanel';
 
 import {
   getCachedSentimentItems,
@@ -98,6 +99,9 @@ const Predictions = () => {
           <p className="text-xs text-muted-foreground">Fundamental predictions unavailable — check your connection and retry</p>
         </div>
       )}
+
+      {/* Empirical Policy Corner */}
+      <EmpiricalPolicyPanel />
 
       {/* Divergence Alert */}
       <DivergenceAlertWidget />
