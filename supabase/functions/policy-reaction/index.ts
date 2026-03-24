@@ -821,7 +821,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
     feature_names: finalFeatureNames.filter(f => f !== 'const'),
     regime,
     stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
-    regime_probabilities: effectiveRegimeProbs,
+    regime_probabilities: regimeProbs,
     variables: {
       inflation_gap: round2(lastRow.inflation_gap),
       unemployment_gap: round2(lastRow.unemployment_gap),
