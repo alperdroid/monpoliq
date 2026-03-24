@@ -841,7 +841,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
 
   // Fit final model
   const fullFit = olsFit(X, y);
-  const oosMetrics = expandingWindowOOS(y, X, 60);
+  const oosMetrics = ECB_OOS_METRICS;
 
   const coefficients: Record<string, number> = {};
   fullFit.beta.forEach((b, i) => {
