@@ -456,7 +456,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   let equity: Map<string, number>;
   try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
 
-  const rows = buildRows(months, ecbdfr, hicp, true, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  const rows = buildRows(months, ecbdfr, hicp, false, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
@@ -507,7 +507,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v7&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v8&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -528,7 +528,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v7',
+        analysis_type: 'policy_reaction_v8',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
