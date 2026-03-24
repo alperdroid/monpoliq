@@ -398,11 +398,8 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const hyVals = rows.map(r => r.hy_spread).filter(v => v > 0);
   const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
-  // Regime probs (single-pass, predict only last row)
-  const regimeProbs = computeRegimeProbs(rows);
-  console.log('Fed regime probs:', regimeProbs);
-
-  const lastRow = rows[rows.length - 1];
+  const regimeProbs = FED_REGIME_PROBS;
+  console.log('Fed regime probs (hardcoded):', regimeProbs);
   const implied = computeFedImplied(lastRow, hyQ75, regimeProbs);
 
   const allStress = rows.map(r => r.stress_score).sort((a, b) => a - b);
