@@ -110,23 +110,23 @@ function VarCell({ label, value, suffix = '' }: { label: string; value: number |
   );
 }
 
-function CoefficientsSection({ coefficients }: { coefficients: Record<string, number> }) {
+function ContributionsSection({ contributions }: { contributions: Record<string, number> }) {
   const [expanded, setExpanded] = useState(false);
-  const entries = Object.entries(coefficients).filter(([k]) => k !== 'const').sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const entries = Object.entries(contributions).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
   const shown = expanded ? entries : entries.slice(0, 5);
 
   return (
     <div className="space-y-2">
       <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground font-medium hover:text-foreground transition-colors">
         <Activity className="w-3 h-3" />
-        Coefficients ({entries.length})
+        Variable Contributions ({entries.length})
         {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
       </button>
       {shown.map(([name, val]) => (
         <div key={name} className="flex items-center justify-between text-[10px]">
           <span className="text-muted-foreground font-mono truncate max-w-[60%]">{name}</span>
           <span className={cn('font-mono font-semibold', val > 0 ? 'text-signal-hawkish' : val < 0 ? 'text-signal-dovish' : 'text-foreground')}>
-            {val > 0 ? '+' : ''}{val.toFixed(6)}
+            {val > 0 ? '+' : ''}{val.toFixed(4)}
           </span>
         </div>
       ))}
