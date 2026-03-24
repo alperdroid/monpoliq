@@ -293,63 +293,6 @@ interface RegimeProbs {
   expansionary: number; env_bias: number;
 }
 
-const CLF_FEATURES = [
-  'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
-  'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
-  'stress_score', 'rate_change_l1',
-];
-
-function computeRegimeProbs(rows: DataRow[]): RegimeProbs {
-  if (rows.length < 50) return { restrictive: 0, zlb: 0, gfc: 0, pandemic: 0, expansionary: 0, env_bias: 0 };
-
-  // Build labels
-  const rateMu: number[] = [], inflMu: number[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const start = Math.max(0, i - 59);
-    let rs = 0, is_ = 0, c = 0;
-    for (let j = start; j <= i; j++) { rs += rows[j].policy_rate_lag; is_ += rows[j].inflation_gap; c++; }
-    rateMu.push(rs / c); inflMu.push(is_ / c);
-  }
-  const rateStd: number[] = [], inflStd: number[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const start = Math.max(0, i - 59);
-    let rss = 0, iss = 0, c = 0;
-    for (let j = start; j <= i; j++) { rss += (rows[j].policy_rate_lag - rateMu[i]) ** 2; iss += (rows[j].inflation_gap - inflMu[i]) ** 2; c++; }
-    rateStd.push(Math.sqrt(rss / c) || 1); inflStd.push(Math.sqrt(iss / c) || 1);
-  }
-
-  const lblRestr: number[] = [], lblZlb: number[] = [], lblGfc: number[] = [], lblPandemic: number[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const rZ = (rows[i].policy_rate_lag - rateMu[i]) / rateStd[i];
-    const iZ = (rows[i].inflation_gap - inflMu[i]) / inflStd[i];
-    lblRestr.push((rZ >= 0.5 && iZ >= 0 && rows[i].rate_change_l1 >= 0) ? 1 : 0);
-    lblZlb.push(rows[i].policy_rate <= 0 ? 1 : 0);
-    lblGfc.push((rows[i].month >= '2008-09' && rows[i].month <= '2010-06') ? 1 : 0);
-    lblPandemic.push((rows[i].month >= '2020-03' && rows[i].month <= '2021-12') ? 1 : 0);
-  }
-
-  const X = rows.map(r => CLF_FEATURES.map(f => (r as Record<string, number>)[f] ?? 0));
-  const n = X.length;
-  const Xtr = X.slice(0, n - 1), Xte = [X[n - 1]];
-
-  // Shifted labels: predict next month
-  const predict = (lbl: number[]) => {
-    const yShifted = lbl.slice(1); // [1..n-1]
-    try { return logisticFitPredict(Xtr, yShifted, Xte)[0]; } catch { return 0; }
-  };
-
-  const pR = predict(lblRestr), pZ = predict(lblZlb), pG = predict(lblGfc), pP = predict(lblPandemic);
-  const pExp = Math.max(pZ, pG, pP);
-
-  return {
-    restrictive: Math.round(pR * 10000) / 10000,
-    zlb: Math.round(pZ * 10000) / 10000,
-    gfc: Math.round(pG * 10000) / 10000,
-    pandemic: Math.round(pP * 10000) / 10000,
-    expansionary: Math.round(pExp * 10000) / 10000,
-    env_bias: Math.round((pR - pExp) * 10000) / 10000,
-  };
-}
 
 // ─── Compute Implied Rate ──────────────────────────────────────────────────────
 
