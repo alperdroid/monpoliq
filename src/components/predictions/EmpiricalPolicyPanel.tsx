@@ -202,6 +202,110 @@ function BankReactionCard({ data }: { data: PolicyReactionResult }) {
   );
 }
 
+const REFERENCES = [
+  {
+    authors: 'González-Astudillo, M., & Tanvir, R.',
+    year: '2023',
+    title: 'Hawkish or Dovish Fed? Estimating a Time-Varying Reaction Function of the FOMC\'s Median Participant',
+    source: 'FEDS',
+    role: 'Core reaction-function backbone',
+    why: 'Main basis for the macro core. Estimates a time-varying Fed reaction function using SEP inflation and unemployment projections, showing the rule becomes more persistent and coefficients are state-dependent.',
+  },
+  {
+    authors: 'Cour-Thimann, P., & Jung, A.',
+    year: '2020',
+    title: 'Interest Rate Setting and Communication at the ECB',
+    source: 'ECB Working Paper No. 2443',
+    role: 'ECB oil & yield-curve evidence',
+    why: 'Justifies allowing oil and yield-curve information into the policy reaction function. Shows that adding risk-assessment variables improves modeling of policy decisions.',
+  },
+  {
+    authors: 'Piazzesi, M.',
+    year: '2001',
+    title: 'An Econometric Model of the Yield Curve with Macroeconomic Jump Effects',
+    source: 'NBER Working Paper 8246',
+    role: 'Yield-curve information channel',
+    why: 'Foundational reference for the idea that the Fed reacts to information in the yield curve. Conceptual basis for including the 2-year yield signal.',
+  },
+  {
+    authors: 'Kiley, M. T.',
+    year: '2024',
+    title: 'Why Have Long-term Treasury Yields Fallen Since the 1980s? Expected Short Rates and Term Premiums in (Quasi-) Real Time',
+    source: 'FEDS',
+    role: 'Term premium decomposition',
+    why: 'Supports decomposing long yields into expected short rates and term premium. Motivated separate treatment of the 2-year yield and 10-year term premium.',
+  },
+  {
+    authors: 'Filardo, A. J., Hubert, P., & Rungcharoenkitkul, P.',
+    year: '2019',
+    title: 'The Reaction Function Channel of Monetary Policy and the Financial Cycle',
+    source: 'BIS Working Paper No. 816',
+    role: 'Financial reaction-function channel',
+    why: 'Main support for central banks responding to equity, housing, and credit-market imbalances. Best modern reference for adding a financial-market adjustment block.',
+  },
+  {
+    authors: 'Board of Governors / FRED',
+    year: '',
+    title: 'Term Premium on a 10 Year Zero Coupon Bond (THREEFYTP10)',
+    source: 'FRED Series',
+    role: 'Published term premium series',
+    why: 'Provides a directly usable 10-year term premium series, replacing rough term-spread proxies with a cleaner measure.',
+  },
+];
+
+function AcademicReferences() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl border bg-card p-3 space-y-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full text-left hover:text-foreground transition-colors"
+      >
+        <BookOpen className="w-3.5 h-3.5 text-primary" />
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium flex-1">
+          Methodology & Referenced Studies
+        </span>
+        {expanded ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+      </button>
+
+      {!expanded && (
+        <p className="text-[9px] text-muted-foreground italic">
+          SEP-based time-varying Taylor-rule core (González-Astudillo & Tanvir, 2023) with ECB oil/yield-curve evidence, Piazzesi's yield-curve-information view, BIS financial reaction-function channel, and FRED 10Y term premium.
+        </p>
+      )}
+
+      {expanded && (
+        <div className="space-y-3 pt-1">
+          <p className="text-[9px] text-muted-foreground">
+            The formula combines a SEP-based time-varying Taylor-rule core, motivated by González-Astudillo and Tanvir (2023), with ECB evidence that oil and yield-curve variables can enter reaction functions, Piazzesi's yield-curve-information view of Fed behavior, BIS evidence on a financial reaction-function channel, and a separate FRED-based 10-year term-premium measure to avoid double-counting expectations.
+          </p>
+          <div className="space-y-2">
+            {REFERENCES.map((ref, idx) => (
+              <div key={idx} className="rounded-lg bg-muted/20 p-2.5 space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-semibold text-foreground leading-tight">
+                      {ref.authors} {ref.year && `(${ref.year})`}
+                    </p>
+                    <p className="text-[9px] text-muted-foreground italic leading-tight mt-0.5">
+                      "{ref.title}" — {ref.source}
+                    </p>
+                  </div>
+                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium whitespace-nowrap shrink-0">
+                    {ref.role}
+                  </span>
+                </div>
+                <p className="text-[8px] text-muted-foreground leading-relaxed">{ref.why}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EmpiricalPolicyPanel() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['policy-reaction'],
