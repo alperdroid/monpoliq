@@ -399,6 +399,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
   const regimeProbs = FED_REGIME_PROBS;
+  const lastRow = rows[rows.length - 1];
   console.log('Fed regime probs (hardcoded):', regimeProbs);
   const implied = computeFedImplied(lastRow, hyQ75, regimeProbs);
 
