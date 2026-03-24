@@ -459,9 +459,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
-  // Regime probs for display only
-  const regimeProbs = computeRegimeProbs(rows);
-  console.log('ECB regime probs:', regimeProbs);
+  const regimeProbs = ECB_REGIME_PROBS;
 
   const lastRow = rows[rows.length - 1];
   const implied = computeECBImplied(lastRow);
