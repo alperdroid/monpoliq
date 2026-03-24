@@ -429,6 +429,13 @@ interface RegimeProbs {
   env_bias: number;
 }
 
+/** Per-row regime probabilities for the policy model feature matrix */
+interface PerRowRegimeProbs {
+  restrictive: number;
+  expansionary: number;
+  env_bias: number;
+}
+
 function isPandemic(month: string): boolean {
   return month >= '2020-03' && month <= '2021-12';
 }
@@ -485,50 +492,95 @@ function computeRegimeLabels(rows: FullRow[]): {
   return { restrictive, zlb, gfc, pandemic };
 }
 
-function runRegimeClassifier(rows: FullRow[], labels: { restrictive: number[]; zlb: number[]; gfc: number[]; pandemic: number[] }): RegimeProbs | null {
-  if (rows.length < 40) return null;
+const CLF_FEATURE_NAMES = [
+  'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
+  'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
+  'stress_score', 'rate_change_l1', 'inflation_accel',
+];
 
-  const clfFeatureNames = [
-    'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
-    'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
-    'stress_score', 'rate_change_l1', 'inflation_accel',
-  ];
+/**
+ * Expanding-window one-step-ahead regime probability series.
+ * For each row t >= minTrain, trains logistic on [0..t-1] shifted labels,
+ * predicts probability for row t.
+ * Returns per-row arrays aligned with `rows` (NaN for rows before minTrain).
+ */
+function expandingRegimeProba(
+  X: number[][], yLabel: number[], minTrain: number
+): number[] {
+  const n = X.length;
+  const probs = new Array(n).fill(NaN);
+  const minEff = Math.max(minTrain, X[0].length + 8);
 
-  const X = rows.map(r => clfFeatureNames.map(f => (r as Record<string, number>)[f] ?? 0));
-  const lastIdx = rows.length - 1;
+  // yShifted[i] = yLabel[i+1] (predict next month's label)
+  // So train on X[0..t-1] with yShifted[0..t-1], predict X[t]
+  const yShifted = yLabel.slice(1); // length n-1
 
-  const probs: Record<string, number> = {};
-  for (const [name, y] of Object.entries(labels)) {
-    const yShifted = y.slice(1);
-    const Xshifted = X.slice(0, -1);
+  for (let t = minEff; t < n; t++) {
+    // Training: X[0..t-1], yShifted[0..t-1] (which is yLabel[1..t])
+    if (t > yShifted.length) break;
+    const Xtrain = X.slice(0, t);
+    const ytrain = yShifted.slice(0, t);
 
-    if (yShifted.length < 36) { probs[name] = 0; continue; }
-    if (new Set(yShifted).size < 2) { probs[name] = 0; continue; }
-
-    const Xtrain = Xshifted;
-    const ytrain = yShifted;
-    const Xtest = [X[lastIdx]];
+    if (new Set(ytrain).size < 2) { probs[t] = 0; continue; }
 
     try {
-      const p = logisticPredict(Xtrain, ytrain, Xtest, 300, 0.5);
-      probs[name] = Math.round(p[0] * 10000) / 10000;
+      const p = logisticPredict(Xtrain, ytrain, [X[t]], 300, 0.5);
+      probs[t] = p[0];
     } catch {
-      probs[name] = 0;
+      probs[t] = 0;
     }
   }
 
-  const expansionary = Math.max(probs.zlb || 0, probs.gfc || 0, probs.pandemic || 0);
-  const restrictive = probs.restrictive || 0;
-
-  return {
-    restrictive,
-    zlb: probs.zlb || 0,
-    gfc: probs.gfc || 0,
-    pandemic: probs.pandemic || 0,
-    expansionary,
-    env_bias: Math.round((restrictive - expansionary) * 10000) / 10000,
-  };
+  return probs;
 }
+
+/**
+ * Compute per-row regime probabilities using expanding-window logistic regression.
+ * Returns:
+ *   - perRow: array of PerRowRegimeProbs (one per row), NaN-filled before minTrain
+ *   - latest: the latest RegimeProbs for display
+ */
+function computeExpandingRegimeProbs(
+  rows: FullRow[],
+  labels: { restrictive: number[]; zlb: number[]; gfc: number[]; pandemic: number[] },
+  minTrain = 36,
+): { perRow: PerRowRegimeProbs[]; latest: RegimeProbs } {
+  const X = rows.map(r => CLF_FEATURE_NAMES.map(f => (r as Record<string, number>)[f] ?? 0));
+
+  const pRestr = expandingRegimeProba(X, labels.restrictive, minTrain);
+  const pZlb = expandingRegimeProba(X, labels.zlb, minTrain);
+  const pGfc = expandingRegimeProba(X, labels.gfc, minTrain);
+  const pPandemic = expandingRegimeProba(X, labels.pandemic, minTrain);
+
+  const perRow: PerRowRegimeProbs[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = isNaN(pRestr[i]) ? 0 : pRestr[i];
+    const z = isNaN(pZlb[i]) ? 0 : pZlb[i];
+    const g = isNaN(pGfc[i]) ? 0 : pGfc[i];
+    const p = isNaN(pPandemic[i]) ? 0 : pPandemic[i];
+    const exp = Math.max(z, g, p);
+    perRow.push({ restrictive: r, expansionary: exp, env_bias: r - exp });
+  }
+
+  const last = rows.length - 1;
+  const lr = isNaN(pRestr[last]) ? 0 : pRestr[last];
+  const lz = isNaN(pZlb[last]) ? 0 : pZlb[last];
+  const lg = isNaN(pGfc[last]) ? 0 : pGfc[last];
+  const lp = isNaN(pPandemic[last]) ? 0 : pPandemic[last];
+  const lExp = Math.max(lz, lg, lp);
+
+  const latest: RegimeProbs = {
+    restrictive: Math.round(lr * 10000) / 10000,
+    zlb: Math.round(lz * 10000) / 10000,
+    gfc: Math.round(lg * 10000) / 10000,
+    pandemic: Math.round(lp * 10000) / 10000,
+    expansionary: Math.round(lExp * 10000) / 10000,
+    env_bias: Math.round((lr - lExp) * 10000) / 10000,
+  };
+
+  return { perRow, latest };
+}
+
 
 // ─── Build Full Rows ───────────────────────────────────────────────────────────
 
