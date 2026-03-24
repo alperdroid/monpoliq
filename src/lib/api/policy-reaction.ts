@@ -29,6 +29,7 @@ export interface PolicyReactionResult {
   regime_probabilities: RegimeProbs | null;
   variables: Record<string, number | null>;
   coefficients: Record<string, number>;
+  contributions: Record<string, number>;
   sample_start: string;
   sample_end: string;
   sample_size: number;

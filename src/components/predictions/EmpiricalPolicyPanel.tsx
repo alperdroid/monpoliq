@@ -191,7 +191,7 @@ function BankReactionCard({ data }: { data: PolicyReactionResult }) {
       </div>
 
       {/* Coefficients */}
-      <CoefficientsSection coefficients={data.coefficients} />
+      <ContributionsSection contributions={data.contributions || {}} />
 
       {/* Footer */}
       <div className="flex items-center justify-between text-[9px] text-muted-foreground">
