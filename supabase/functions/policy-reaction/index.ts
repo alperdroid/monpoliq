@@ -730,36 +730,12 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const regimeProbs = runRegimeClassifier(rows, regimeLabels);
   console.log('Fed regime probs:', regimeProbs);
 
-  // Build feature matrix — try regime-augmented first
+  // Build feature matrix — always use regime-augmented (AutoRegime spec)
   const y = rows.map(r => r.policy_rate);
-
-  // Base model (13 features, no regime)
-  const X_base = rows.map(r => buildFedFeatureRow(r, hyQ75, null));
-  const oosBase = expandingWindowOOS(y, X_base, 60, 0.0001);
-
-  // Augmented model (18 features with regime)
-  let finalX = X_base;
-  let finalFeatureNames = ['const', ...FED_BASE_FEATURES];
-  let usedRegime = false;
-
-  if (regimeProbs) {
-    const X_aug = rows.map(r => buildFedFeatureRow(r, hyQ75, regimeProbs));
-    const oosAug = expandingWindowOOS(y, X_aug, 60, 0.0001);
-
-    if (!isNaN(oosAug.r2_vs_naive) && !isNaN(oosBase.r2_vs_naive) && oosAug.r2_vs_naive > oosBase.r2_vs_naive) {
-      finalX = X_aug;
-      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-      usedRegime = true;
-      console.log('Fed: Regime augmentation promoted');
-    } else if (!isNaN(oosAug.rmse) && !isNaN(oosBase.rmse) && oosAug.rmse < oosBase.rmse) {
-      finalX = X_aug;
-      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-      usedRegime = true;
-      console.log('Fed: Regime augmentation promoted (RMSE fallback)');
-    } else {
-      console.log('Fed: Regime augmentation did not improve OOS, using base model');
-    }
-  }
+  const effectiveRegimeProbs = regimeProbs || { restrictive: 0, zlb: 0, gfc: 0, pandemic: 0, expansionary: 0, env_bias: 0 };
+  const finalX = rows.map(r => buildFedFeatureRow(r, hyQ75, effectiveRegimeProbs));
+  const finalFeatureNames = ['const', ...FED_ALL_FEATURES];
+  console.log('Fed: Using AutoRegime specification (18 features)');
 
   // Fit final model
   const fullFit = ridgeFit(finalX, y, 0.0001);
@@ -789,12 +765,12 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
       r2_level: Math.round(oosMetrics.r2_level * 10000) / 10000,
       n_oos: oosMetrics.n_oos,
     },
-    model_name: usedRegime ? 'AutoRegime ElasticNet-Ridge (α=0.0001)' : 'ElasticNet-Derived Ridge (α=0.0001)',
+    model_name: 'AutoRegime ElasticNet-Ridge (α=0.0001)',
     n_features: finalFeatureNames.length - 1,
     feature_names: finalFeatureNames.filter(f => f !== 'const'),
     regime,
     stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
-    regime_probabilities: usedRegime ? regimeProbs : null,
+    regime_probabilities: effectiveRegimeProbs,
     variables: {
       inflation_gap: round2(lastRow.inflation_gap),
       unemployment_gap: round2(lastRow.unemployment_gap),
@@ -912,7 +888,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v3&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v4&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -933,7 +909,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v3',
+        analysis_type: 'policy_reaction_v4',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
