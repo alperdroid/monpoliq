@@ -410,6 +410,33 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
   const featureNames = Object.keys(FED_COEFFICIENTS).filter(k => k !== 'const');
 
+  // Compute contributions (coeff * x) for each term
+  const dHyContrib = lastRow.hy_spread >= hyQ75 ? 1 : 0;
+  const fedTerms: [string, number][] = [
+    ['policy_rate_lag', lastRow.policy_rate_lag],
+    ['inflation_gap', lastRow.inflation_gap],
+    ['unemployment_gap', lastRow.unemployment_gap],
+    ['slope', lastRow.slope],
+    ['r_neg_equity', lastRow.r_neg_equity],
+    ['vix', lastRow.vix],
+    ['unemployment_gap_l1', lastRow.unemployment_gap_l1],
+    ['vix_sq', lastRow.vix_sq],
+    ['unemployment_gap_l6', lastRow.unemployment_gap_l6],
+    ['y2y_l1', lastRow.y2y_l1],
+    ['credit_spread_l1', lastRow.credit_spread_l1],
+    ['slope_l6', lastRow.slope_l6],
+    ['y2y_x_d_hy_q75', lastRow.y2y * dHyContrib],
+    ['p_next_restrictive', regimeProbs.restrictive],
+    ['p_next_expansionary', regimeProbs.expansionary],
+    ['env_bias', regimeProbs.env_bias],
+    ['infl_x_p_restrictive', lastRow.inflation_gap * regimeProbs.restrictive],
+    ['unemp_x_p_expansionary', lastRow.unemployment_gap * regimeProbs.expansionary],
+  ];
+  const contributions: Record<string, number> = {};
+  for (const [name, x] of fedTerms) {
+    contributions[name] = Math.round((FED_COEFFICIENTS[name] ?? 0) * x * 1000000) / 1000000;
+  }
+
   return {
     bank: 'FED',
     actual_rate: lastRow.policy_rate,
@@ -432,6 +459,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
       fci: round3(lastRow.fci), hy_spread: round2(lastRow.hy_spread),
     },
     coefficients: FED_COEFFICIENTS,
+    contributions,
     sample_start: rows[0].month, sample_end: lastRow.month, sample_size: rows.length,
   };
 }
