@@ -943,7 +943,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v5',
+        analysis_type: 'policy_reaction_v6',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
