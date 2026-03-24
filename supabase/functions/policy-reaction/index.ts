@@ -314,6 +314,7 @@ interface ModelResult {
   regime_probabilities: RegimeProbs | null;
   variables: Record<string, number | null>;
   coefficients: Record<string, number>;
+  contributions: Record<string, number>;
   sample_start: string;
   sample_end: string;
   sample_size: number;
@@ -410,6 +411,33 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
   const featureNames = Object.keys(FED_COEFFICIENTS).filter(k => k !== 'const');
 
+  // Compute contributions (coeff * x) for each term
+  const dHyContrib = lastRow.hy_spread >= hyQ75 ? 1 : 0;
+  const fedTerms: [string, number][] = [
+    ['policy_rate_lag', lastRow.policy_rate_lag],
+    ['inflation_gap', lastRow.inflation_gap],
+    ['unemployment_gap', lastRow.unemployment_gap],
+    ['slope', lastRow.slope],
+    ['r_neg_equity', lastRow.r_neg_equity],
+    ['vix', lastRow.vix],
+    ['unemployment_gap_l1', lastRow.unemployment_gap_l1],
+    ['vix_sq', lastRow.vix_sq],
+    ['unemployment_gap_l6', lastRow.unemployment_gap_l6],
+    ['y2y_l1', lastRow.y2y_l1],
+    ['credit_spread_l1', lastRow.credit_spread_l1],
+    ['slope_l6', lastRow.slope_l6],
+    ['y2y_x_d_hy_q75', lastRow.y2y * dHyContrib],
+    ['p_next_restrictive', regimeProbs.restrictive],
+    ['p_next_expansionary', regimeProbs.expansionary],
+    ['env_bias', regimeProbs.env_bias],
+    ['infl_x_p_restrictive', lastRow.inflation_gap * regimeProbs.restrictive],
+    ['unemp_x_p_expansionary', lastRow.unemployment_gap * regimeProbs.expansionary],
+  ];
+  const contributions: Record<string, number> = {};
+  for (const [name, x] of fedTerms) {
+    contributions[name] = Math.round((FED_COEFFICIENTS[name] ?? 0) * x * 1000000) / 1000000;
+  }
+
   return {
     bank: 'FED',
     actual_rate: lastRow.policy_rate,
@@ -432,6 +460,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
       fci: round3(lastRow.fci), hy_spread: round2(lastRow.hy_spread),
     },
     coefficients: FED_COEFFICIENTS,
+    contributions,
     sample_start: rows[0].month, sample_end: lastRow.month, sample_size: rows.length,
   };
 }
@@ -472,6 +501,31 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
 
   const featureNames = Object.keys(ECB_COEFFICIENTS).filter(k => k !== 'const');
 
+  // Compute contributions
+  const dNegC = lastRow.policy_rate_lag <= 0 ? 1 : 0;
+  const dGFCC = (lastRow.month >= '2008-09' && lastRow.month <= '2010-06') ? 1 : 0;
+  const dSovC = (lastRow.month >= '2010-04' && lastRow.month <= '2012-09') ? 1 : 0;
+  const ecbTerms: [string, number][] = [
+    ['y2y', lastRow.y2y],
+    ['policy_rate_lag', lastRow.policy_rate_lag],
+    ['fci_l1', lastRow.fci_l1],
+    ['inflation_gap_l1', lastRow.inflation_gap_l1],
+    ['y2y_l3', lastRow.y2y_l3],
+    ['slope', lastRow.slope],
+    ['hy_spread', lastRow.hy_spread],
+    ['rate_change_l1', lastRow.rate_change_l1],
+    ['fci_l3', lastRow.fci_l3],
+    ['unemp_gap_x_gfc', lastRow.unemployment_gap * dGFCC],
+    ['vix', lastRow.vix],
+    ['infl_gap_x_neg_rate', lastRow.inflation_gap * dNegC],
+    ['rate_lag_x_sov_crisis', lastRow.policy_rate_lag * dSovC],
+    ['credit_spread', lastRow.credit_spread],
+  ];
+  const contributions: Record<string, number> = {};
+  for (const [name, x] of ecbTerms) {
+    contributions[name] = Math.round((ECB_COEFFICIENTS[name] ?? 0) * x * 1000000) / 1000000;
+  }
+
   return {
     bank: 'ECB',
     actual_rate: lastRow.policy_rate,
@@ -494,6 +548,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
       fci: round3(lastRow.fci), hy_spread: round2(lastRow.hy_spread),
     },
     coefficients: ECB_COEFFICIENTS,
+    contributions,
     sample_start: rows[0].month, sample_end: lastRow.month, sample_size: rows.length,
   };
 }
@@ -507,7 +562,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v8&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v9&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -528,7 +583,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v8',
+        analysis_type: 'policy_reaction_v9',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
