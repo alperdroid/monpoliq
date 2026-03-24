@@ -777,17 +777,16 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const hyVals = rows.map(r => r.hy_spread).filter(v => v > 0);
   const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
-  // Run regime classifier for Fed
+  // Run expanding-window regime classifier for Fed (per-row probabilities)
   const regimeLabels = computeRegimeLabels(rows);
-  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
-  console.log('Fed regime probs:', regimeProbs);
+  const { perRow: regimePerRow, latest: regimeProbs } = computeExpandingRegimeProbs(rows, regimeLabels, 36);
+  console.log('Fed regime probs (latest):', regimeProbs);
 
-  // Build feature matrix — always use regime-augmented (AutoRegime spec)
+  // Build feature matrix — always use regime-augmented (AutoRegime spec) with per-row probs
   const y = rows.map(r => r.policy_rate);
-  const effectiveRegimeProbs = regimeProbs || { restrictive: 0, zlb: 0, gfc: 0, pandemic: 0, expansionary: 0, env_bias: 0 };
-  const finalX = rows.map(r => buildFedFeatureRow(r, hyQ75, effectiveRegimeProbs));
+  const finalX = rows.map((r, i) => buildFedFeatureRow(r, hyQ75, regimePerRow[i]));
   const finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-  console.log('Fed: Using AutoRegime specification (18 features)');
+  console.log('Fed: Using AutoRegime specification (18 features, per-row regime probs)');
 
   // Fit final model
   const fullFit = ridgeFit(finalX, y, 0.0001);
