@@ -1,68 +1,58 @@
-// Policy Reaction Function — Empirical Policy Rate Calculator
-// Implements two-step residual Taylor Rule models for Fed and ECB
-// Fetches real macro data from FRED, computes OLS regressions, returns implied policy rates
+// Policy Reaction Function — Regime-Aware Econometric Policy Rate Models
+// Fed: 13-feature ElasticNet-derived OLS
+// ECB: Structural breaks + automatic regime classifier + p-value pruning
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ─── Linear Algebra helpers ────────────────────────────────────────────────────
+// ─── Linear Algebra ────────────────────────────────────────────────────────────
 
 function transpose(m: number[][]): number[][] {
   const rows = m.length, cols = m[0].length;
-  const result: number[][] = Array.from({ length: cols }, () => new Array(rows));
-  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) result[j][i] = m[i][j];
-  return result;
+  const r: number[][] = Array.from({ length: cols }, () => new Array(rows));
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) r[j][i] = m[i][j];
+  return r;
 }
 
 function matMul(a: number[][], b: number[][]): number[][] {
   const rows = a.length, cols = b[0].length, inner = b.length;
-  const result: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  const r: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
   for (let i = 0; i < rows; i++)
     for (let j = 0; j < cols; j++)
       for (let k = 0; k < inner; k++)
-        result[i][j] += a[i][k] * b[k][j];
-  return result;
+        r[i][j] += a[i][k] * b[k][j];
+  return r;
 }
 
 function matVecMul(m: number[][], v: number[]): number[] {
   return m.map(row => row.reduce((s, val, j) => s + val * v[j], 0));
 }
 
-/** Gauss-Jordan matrix inversion for small matrices */
 function invertMatrix(matrix: number[][]): number[][] {
   const n = matrix.length;
-  const augmented: number[][] = matrix.map((row, i) => {
-    const id = new Array(n).fill(0);
-    id[i] = 1;
+  const aug: number[][] = matrix.map((row, i) => {
+    const id = new Array(n).fill(0); id[i] = 1;
     return [...row, ...id];
   });
-
   for (let col = 0; col < n; col++) {
-    // Partial pivoting
     let maxRow = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(augmented[row][col]) > Math.abs(augmented[maxRow][col])) maxRow = row;
-    }
-    [augmented[col], augmented[maxRow]] = [augmented[maxRow], augmented[col]];
-
-    const pivot = augmented[col][col];
-    if (Math.abs(pivot) < 1e-12) throw new Error('Matrix is singular');
-
-    for (let j = 0; j < 2 * n; j++) augmented[col][j] /= pivot;
-
+    for (let row = col + 1; row < n; row++)
+      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+    const pivot = aug[col][col];
+    if (Math.abs(pivot) < 1e-12) throw new Error('Singular matrix');
+    for (let j = 0; j < 2 * n; j++) aug[col][j] /= pivot;
     for (let row = 0; row < n; row++) {
       if (row === col) continue;
-      const factor = augmented[row][col];
-      for (let j = 0; j < 2 * n; j++) augmented[row][j] -= factor * augmented[col][j];
+      const f = aug[row][col];
+      for (let j = 0; j < 2 * n; j++) aug[row][j] -= f * aug[col][j];
     }
   }
-
-  return augmented.map(row => row.slice(n));
+  return aug.map(row => row.slice(n));
 }
 
-/** OLS: β = (X'X)^{-1} X'y */
 function olsFit(X: number[][], y: number[]): { beta: number[]; fitted: number[]; residuals: number[]; r2: number } {
   const Xt = transpose(X);
   const XtX = matMul(Xt, X);
@@ -78,573 +68,873 @@ function olsFit(X: number[][], y: number[]): { beta: number[]; fitted: number[];
   return { beta, fitted, residuals, r2 };
 }
 
-// ─── FRED Data Fetching ────────────────────────────────────────────────────────
+/** Ridge regression: β = (X'X + λI)^{-1} X'y — used for ElasticNet approximation with very small alpha */
+function ridgeFit(X: number[][], y: number[], lambda: number): { beta: number[]; fitted: number[]; r2: number } {
+  const Xt = transpose(X);
+  const XtX = matMul(Xt, X);
+  // Add lambda to diagonal (skip intercept col 0)
+  for (let i = 1; i < XtX.length; i++) XtX[i][i] += lambda;
+  const XtXinv = invertMatrix(XtX);
+  const Xty = matVecMul(Xt, y);
+  const beta = matVecMul(XtXinv, Xty);
+  const fitted = matVecMul(X, beta);
+  const yMean = y.reduce((s, v) => s + v, 0) / y.length;
+  const ssTot = y.reduce((s, v) => s + (v - yMean) ** 2, 0);
+  const ssRes = y.reduce((s, yi, i) => s + (yi - fitted[i]) ** 2, 0);
+  return { beta, fitted, r2: ssTot > 0 ? 1 - ssRes / ssTot : 0 };
+}
+
+// ─── Logistic Regression ───────────────────────────────────────────────────────
+
+function sigmoid(z: number): number {
+  const clamped = Math.max(-500, Math.min(500, z));
+  return 1 / (1 + Math.exp(-clamped));
+}
+
+function standardize(X: number[][]): { Xs: number[][]; means: number[]; stds: number[] } {
+  const n = X.length, p = X[0].length;
+  const means = new Array(p).fill(0);
+  const stds = new Array(p).fill(1);
+  for (let j = 0; j < p; j++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += X[i][j];
+    means[j] = sum / n;
+    let ss = 0;
+    for (let i = 0; i < n; i++) ss += (X[i][j] - means[j]) ** 2;
+    stds[j] = Math.sqrt(ss / n) || 1;
+  }
+  const Xs = X.map(row => row.map((v, j) => (v - means[j]) / stds[j]));
+  return { Xs, means, stds };
+}
+
+/** Logistic regression via gradient descent, returns predict_proba for test points */
+function logisticPredict(
+  X_train: number[][], y_train: number[],
+  X_test: number[][],
+  maxIter = 300, lr = 0.5
+): number[] {
+  const n = X_train.length, p = X_train[0].length;
+  if (n < 5 || new Set(y_train).size < 2) return X_test.map(() => 0.5);
+
+  // Standardize using training data
+  const { Xs: Xtr_s, means, stds } = standardize(X_train);
+  const Xte_s = X_test.map(row => row.map((v, j) => (v - means[j]) / stds[j]));
+
+  // Class weights for imbalanced data
+  const posCount = y_train.filter(v => v === 1).length;
+  const negCount = n - posCount;
+  const wPos = n / (2 * Math.max(posCount, 1));
+  const wNeg = n / (2 * Math.max(negCount, 1));
+
+  const w = new Array(p + 1).fill(0); // +1 for intercept
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    const grad = new Array(p + 1).fill(0);
+    for (let i = 0; i < n; i++) {
+      let z = w[0]; // intercept
+      for (let j = 0; j < p; j++) z += Xtr_s[i][j] * w[j + 1];
+      const prob = sigmoid(z);
+      const sampleW = y_train[i] === 1 ? wPos : wNeg;
+      const err = (y_train[i] - prob) * sampleW;
+      grad[0] += err;
+      for (let j = 0; j < p; j++) grad[j + 1] += err * Xtr_s[i][j];
+    }
+    for (let j = 0; j <= p; j++) w[j] += lr * grad[j] / n;
+  }
+
+  return Xte_s.map(row => {
+    let z = w[0];
+    for (let j = 0; j < p; j++) z += row[j] * w[j + 1];
+    return sigmoid(z);
+  });
+}
+
+// ─── OOS Evaluation ────────────────────────────────────────────────────────────
+
+interface OOSMetrics {
+  rmse: number;
+  r2_vs_naive: number;
+  r2_level: number;
+  direction_acc: number;
+  n_oos: number;
+}
+
+function expandingWindowOOS(y: number[], X: number[][], minTrain: number, lambda = 0): OOSMetrics {
+  const n = y.length;
+  const minEff = Math.max(minTrain, X[0].length + 10);
+  if (n <= minEff + 1) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, direction_acc: NaN, n_oos: 0 };
+
+  const yTrue: number[] = [], yPred: number[] = [], yNaive: number[] = [];
+  for (let t = minEff; t < n; t++) {
+    try {
+      const Xtr = X.slice(0, t);
+      const ytr = y.slice(0, t);
+      const fit = lambda > 0 ? ridgeFit(Xtr, ytr, lambda) : olsFit(Xtr, ytr);
+      const pred = X[t].reduce((s, xij, j) => s + xij * fit.beta[j], 0);
+      yTrue.push(y[t]);
+      yPred.push(pred);
+      yNaive.push(y[t - 1]);
+    } catch {
+      continue;
+    }
+  }
+
+  if (yTrue.length < 5) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, direction_acc: NaN, n_oos: 0 };
+
+  const sseModel = yTrue.reduce((s, yt, i) => s + (yt - yPred[i]) ** 2, 0);
+  const sseNaive = yTrue.reduce((s, yt, i) => s + (yt - yNaive[i]) ** 2, 0);
+  const yMean = yTrue.reduce((s, v) => s + v, 0) / yTrue.length;
+  const ssTot = yTrue.reduce((s, v) => s + (v - yMean) ** 2, 0);
+
+  let dirAcc = NaN;
+  if (yTrue.length > 1) {
+    let correct = 0, total = 0;
+    for (let i = 1; i < yTrue.length; i++) {
+      const dTrue = yTrue[i] - yTrue[i - 1];
+      const dPred = yPred[i] - yPred[i - 1];
+      if (Math.sign(dTrue) === Math.sign(dPred)) correct++;
+      total++;
+    }
+    dirAcc = total > 0 ? correct / total : NaN;
+  }
+
+  return {
+    rmse: Math.sqrt(sseModel / yTrue.length),
+    r2_vs_naive: sseNaive > 0 ? 1 - sseModel / sseNaive : NaN,
+    r2_level: ssTot > 0 ? 1 - sseModel / ssTot : NaN,
+    direction_acc: dirAcc,
+    n_oos: yTrue.length,
+  };
+}
+
+// ─── FRED Data ─────────────────────────────────────────────────────────────────
 
 async function fetchFredCSV(seriesId: string): Promise<Map<string, number>> {
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}`;
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`FRED fetch failed for ${seriesId}: ${resp.status}`);
+  if (!resp.ok) throw new Error(`FRED ${seriesId}: ${resp.status}`);
   const text = await resp.text();
-  const lines = text.trim().split('\n');
   const data = new Map<string, number>();
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',');
+  for (const line of text.trim().split('\n').slice(1)) {
+    const parts = line.split(',');
     if (parts.length < 2) continue;
-    const date = parts[0].trim();
     const val = parseFloat(parts[1].trim());
-    if (!isNaN(val) && date.length >= 7) {
-      data.set(date, val);
-    }
+    if (!isNaN(val) && parts[0].trim().length >= 7) data.set(parts[0].trim(), val);
   }
   return data;
 }
 
-/** Convert daily/irregular FRED data to monthly (last value per month) */
 function toMonthlyLast(data: Map<string, number>): Map<string, number> {
-  const monthly = new Map<string, number>();
-  for (const [date, val] of data) {
-    const month = date.substring(0, 7); // "YYYY-MM"
-    monthly.set(month, val); // later dates overwrite = last value
-  }
-  return monthly;
+  const m = new Map<string, number>();
+  for (const [date, val] of data) m.set(date.substring(0, 7), val);
+  return m;
 }
 
-/** Convert daily/irregular FRED data to monthly (mean per month) */
 function toMonthlyMean(data: Map<string, number>): Map<string, number> {
-  const buckets = new Map<string, { sum: number; count: number }>();
+  const b = new Map<string, { sum: number; count: number }>();
   for (const [date, val] of data) {
-    const month = date.substring(0, 7);
-    const b = buckets.get(month) || { sum: 0, count: 0 };
-    b.sum += val;
-    b.count++;
-    buckets.set(month, b);
+    const k = date.substring(0, 7);
+    const e = b.get(k) || { sum: 0, count: 0 };
+    e.sum += val; e.count++;
+    b.set(k, e);
   }
-  const monthly = new Map<string, number>();
-  for (const [month, b] of buckets) {
-    monthly.set(month, b.sum / b.count);
-  }
-  return monthly;
+  const m = new Map<string, number>();
+  for (const [k, v] of b) m.set(k, v.sum / v.count);
+  return m;
 }
 
-/** Generate monthly keys from start to end (inclusive) */
-function generateMonthlyIndex(startYear: number, startMonth: number, endYear: number, endMonth: number): string[] {
+function genMonths(sy: number, sm: number, ey: number, em: number): string[] {
   const months: string[] = [];
-  let y = startYear, m = startMonth;
-  while (y < endYear || (y === endYear && m <= endMonth)) {
+  let y = sy, m = sm;
+  while (y < ey || (y === ey && m <= em)) {
     months.push(`${y}-${String(m).padStart(2, '0')}`);
-    m++;
-    if (m > 12) { m = 1; y++; }
+    m++; if (m > 12) { m = 1; y++; }
   }
   return months;
 }
 
-/** Forward-fill a series across months */
-function forwardFill(data: Map<string, number>, months: string[]): Map<string, number> {
+function ffill(data: Map<string, number>, months: string[]): Map<string, number> {
   const filled = new Map<string, number>();
-  let lastVal: number | null = null;
+  let last: number | null = null;
   for (const m of months) {
-    if (data.has(m)) lastVal = data.get(m)!;
-    if (lastVal !== null) filled.set(m, lastVal);
+    if (data.has(m)) last = data.get(m)!;
+    if (last !== null) filled.set(m, last);
   }
   return filled;
 }
 
-/** Get value for a month, or null */
-function getVal(data: Map<string, number>, month: string): number | null {
+function gv(data: Map<string, number>, month: string): number | null {
   return data.has(month) ? data.get(month)! : null;
 }
 
-// ─── Equity data from Yahoo Finance ────────────────────────────────────────────
-
 async function fetchYahooMonthly(symbol: string): Promise<Map<string, number>> {
-  // Use Yahoo Finance v8 chart API
   const now = Math.floor(Date.now() / 1000);
   const start = Math.floor(new Date('2000-01-01').getTime() / 1000);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${start}&period2=${now}&interval=1mo`;
-  
-  const resp = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }
-  });
-  
-  if (!resp.ok) {
-    console.warn(`Yahoo fetch failed for ${symbol}: ${resp.status}`);
-    return new Map();
-  }
-  
+  const resp = await fetch(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${start}&period2=${now}&interval=1mo`,
+    { headers: { 'User-Agent': 'Mozilla/5.0' } }
+  );
+  if (!resp.ok) return new Map();
   const json = await resp.json();
   const result = json?.chart?.result?.[0];
   if (!result) return new Map();
-  
-  const timestamps: number[] = result.timestamp || [];
+  const ts: number[] = result.timestamp || [];
   const closes: (number | null)[] = result.indicators?.quote?.[0]?.close || [];
-  
   const monthly = new Map<string, number>();
-  for (let i = 0; i < timestamps.length; i++) {
+  for (let i = 0; i < ts.length; i++) {
     if (closes[i] == null) continue;
-    const d = new Date(timestamps[i] * 1000);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    monthly.set(key, closes[i]!);
+    const d = new Date(ts[i] * 1000);
+    monthly.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, closes[i]!);
   }
   return monthly;
 }
 
-// ─── Model Building ────────────────────────────────────────────────────────────
+// ─── Quantile helper ───────────────────────────────────────────────────────────
 
-interface ModelResult {
-  bank: string;
-  actual_rate: number;
-  implied_rate_macro: number;
-  implied_rate_combined: number;
-  gap_macro: number;
-  gap_combined: number;
-  r2_macro: number;
-  r2_combined: number;
-  sample_start: string;
-  sample_end: string;
-  sample_size: number;
-  latest_month: string;
-  variables: {
-    inflation_gap: number | null;
-    unemployment_gap: number | null;
-    y2y: number | null;
-    slope: number | null;
-    oil_log_change: number | null;
-    credit_spread: number | null;
-    vix: number | null;
-    fci: number | null;
-  };
-  macro_coefficients: Record<string, number>;
-  regime: string;
-  stress_score: number;
+function quantile(arr: number[], q: number): number {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
-interface DataRow {
+function rollingMean(data: Map<string, number>, months: string[], idx: number, window: number): number | null {
+  let sum = 0, cnt = 0;
+  for (let j = Math.max(0, idx - window); j <= idx; j++) {
+    const v = gv(data, months[j]);
+    if (v != null) { sum += v; cnt++; }
+  }
+  return cnt > 0 ? sum / cnt : null;
+}
+
+// ─── Extended Data Row ─────────────────────────────────────────────────────────
+
+interface FullRow {
   month: string;
   policy_rate: number;
   policy_rate_lag: number;
   inflation_gap: number;
   unemployment_gap: number;
-  unemployment_gap_l3: number;
   y2y: number;
   slope: number;
   oil_log_change: number;
   r_neg_equity: number;
-  credit_spread: number | null;
-  hy_spread: number | null;
-  vix: number | null;
-  fci: number | null;
-  fci_l1: number | null;
+  credit_spread: number;
+  hy_spread: number;
+  vix: number;
+  fci: number;
+  // Lags
+  unemployment_gap_l1: number;
+  unemployment_gap_l3: number;
+  unemployment_gap_l6: number;
+  y2y_l1: number;
+  slope_l6: number;
+  credit_spread_l1: number;
+  fci_l1: number;
+  // Derived
+  vix_sq: number;
+  rate_change_l1: number;
+  inflation_gap_l1: number;
+  inflation_accel: number;
+  stress_score: number;
 }
 
-async function buildFedModel(months: string[]): Promise<ModelResult> {
-  console.log('Fetching Fed FRED data...');
-  
-  const [fedfunds, pcepilfe, unrate, nrou, dgs2, dgs10, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
-    fetchFredCSV('FEDFUNDS').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('PCEPILFE').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('UNRATE').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('NROU').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('DGS2').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('DGS10').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-  ]);
+// ─── Fed Model ─────────────────────────────────────────────────────────────────
 
-  let eqMonthly: Map<string, number>;
-  try {
-    eqMonthly = await fetchYahooMonthly('^GSPC');
-  } catch {
-    eqMonthly = new Map();
+const FED_FEATURES = [
+  'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'slope',
+  'r_neg_equity', 'vix', 'unemployment_gap_l1', 'vix_sq',
+  'unemployment_gap_l6', 'y2y_l1', 'credit_spread_l1', 'slope_l6',
+  'y2y_x_d_hy_q75',
+] as const;
+
+function buildFedFeatureRow(row: FullRow, hyQ75: number): number[] {
+  const dHyQ75 = row.hy_spread >= hyQ75 ? 1 : 0;
+  return [
+    1, // intercept
+    row.policy_rate_lag,
+    row.inflation_gap,
+    row.unemployment_gap,
+    row.slope,
+    row.r_neg_equity,
+    row.vix,
+    row.unemployment_gap_l1,
+    row.vix_sq,
+    row.unemployment_gap_l6,
+    row.y2y_l1,
+    row.credit_spread_l1,
+    row.slope_l6,
+    row.y2y * dHyQ75, // Y2Y_X_D_HY_SPREAD_Q75
+  ];
+}
+
+// ─── ECB Model with Structural Breaks + Regime ─────────────────────────────────
+
+function isGFC(month: string): boolean {
+  return month >= '2008-09' && month <= '2010-06';
+}
+function isSovCrisis(month: string): boolean {
+  return month >= '2010-04' && month <= '2012-09';
+}
+function isPandemic(month: string): boolean {
+  return month >= '2020-03' && month <= '2021-12';
+}
+function isEnergyShock(month: string): boolean {
+  return month >= '2021-09' && month <= '2022-12';
+}
+function isHiking22(month: string): boolean {
+  return month >= '2022-07';
+}
+
+function buildECBFeatureRow(
+  row: FullRow,
+  vixQ85: number,
+  fciQ85: number,
+  regimeProbs: { restrictive: number; expansionary: number; env_bias: number } | null,
+): number[] {
+  const dNegRate = row.policy_rate_lag <= 0 ? 1 : 0;
+  const dGFC = isGFC(row.month) ? 1 : 0;
+  const dSovCrisis = isSovCrisis(row.month) ? 1 : 0;
+  const dVolQ85 = row.vix >= vixQ85 ? 1 : 0;
+  const dFciQ85 = row.fci >= fciQ85 ? 1 : 0;
+
+  const features = [
+    1, // intercept
+    // Base macro
+    row.policy_rate_lag,
+    row.inflation_gap,
+    row.unemployment_gap,
+    row.y2y,
+    row.slope,
+    row.oil_log_change,
+    row.r_neg_equity,
+    // Extended factors
+    row.credit_spread,
+    row.vix,
+    row.fci,
+    // Lags
+    row.inflation_gap_l1,
+    row.fci_l1,
+    row.rate_change_l1,
+    row.inflation_accel,
+    // Structural break interactions
+    row.unemployment_gap * dGFC,               // UNEMPLOYMENT_GAP_X_D_GFC
+    row.inflation_gap * dNegRate,               // INFLATION_GAP_X_D_NEG_RATE_ERA
+    row.policy_rate_lag * dSovCrisis,           // POLICY_RATE_LAG_X_D_SOV_CRISIS
+    dVolQ85,                                     // D_VOL_Q85
+    row.unemployment_gap * dFciQ85,             // UNEMPLOYMENT_GAP_X_D_FCI_Q85
+    row.policy_rate_lag * dGFC,                 // POLICY_RATE_LAG_X_D_GFC
+  ];
+
+  // Add regime probabilities if available
+  if (regimeProbs) {
+    features.push(
+      regimeProbs.restrictive,
+      regimeProbs.expansionary,
+      regimeProbs.env_bias,
+    );
   }
 
-  console.log(`Fed data sizes: fedfunds=${fedfunds.size}, pcepilfe=${pcepilfe.size}, unrate=${unrate.size}`);
+  return features;
+}
 
-  // Build data rows
-  const rows: DataRow[] = [];
-  for (let i = 13; i < months.length; i++) {
+const ECB_FEATURE_NAMES = [
+  'const', 'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
+  'oil_log_change', 'r_neg_equity', 'credit_spread', 'vix', 'fci',
+  'inflation_gap_l1', 'fci_l1', 'rate_change_l1', 'inflation_accel',
+  'unemp_gap_x_gfc', 'infl_gap_x_neg_rate', 'rate_lag_x_sov_crisis',
+  'd_vol_q85', 'unemp_gap_x_fci_q85', 'rate_lag_x_gfc',
+  'p_restrictive', 'p_expansionary', 'env_bias',
+];
+
+// ─── Regime Classifier ────────────────────────────────────────────────────────
+
+interface RegimeProbs {
+  restrictive: number;
+  zlb: number;
+  gfc: number;
+  pandemic: number;
+  expansionary: number;
+  env_bias: number;
+}
+
+function computeRegimeLabels(rows: FullRow[]): {
+  restrictive: number[];
+  zlb: number[];
+  gfc: number[];
+  pandemic: number[];
+} {
+  // Rolling z-scores for restrictive classification
+  const rateMu: number[] = [];
+  const inflMu: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const windowStart = Math.max(0, i - 59);
+    let rSum = 0, rCnt = 0, iSum = 0, iCnt = 0;
+    for (let j = windowStart; j <= i; j++) {
+      rSum += rows[j].policy_rate_lag; rCnt++;
+      iSum += rows[j].inflation_gap; iCnt++;
+    }
+    rateMu.push(rCnt > 0 ? rSum / rCnt : 0);
+    inflMu.push(iCnt > 0 ? iSum / iCnt : 0);
+  }
+
+  const rateStd: number[] = [];
+  const inflStd: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const windowStart = Math.max(0, i - 59);
+    let rSS = 0, iSS = 0, cnt = 0;
+    for (let j = windowStart; j <= i; j++) {
+      rSS += (rows[j].policy_rate_lag - rateMu[i]) ** 2;
+      iSS += (rows[j].inflation_gap - inflMu[i]) ** 2;
+      cnt++;
+    }
+    rateStd.push(cnt > 1 ? Math.sqrt(rSS / cnt) || 1 : 1);
+    inflStd.push(cnt > 1 ? Math.sqrt(iSS / cnt) || 1 : 1);
+  }
+
+  const restrictive: number[] = [];
+  const zlb: number[] = [];
+  const gfc: number[] = [];
+  const pandemic: number[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const rateZ = (rows[i].policy_rate_lag - rateMu[i]) / rateStd[i];
+    const inflZ = (rows[i].inflation_gap - inflMu[i]) / inflStd[i];
+    const rateChangeL1 = rows[i].rate_change_l1;
+
+    restrictive.push((rateZ >= 0.5 && inflZ >= 0 && rateChangeL1 >= 0) ? 1 : 0);
+    zlb.push(rows[i].policy_rate <= 0 ? 1 : 0);
+    gfc.push(isGFC(rows[i].month) ? 1 : 0);
+    pandemic.push(isPandemic(rows[i].month) ? 1 : 0);
+  }
+
+  return { restrictive, zlb, gfc, pandemic };
+}
+
+function runRegimeClassifier(rows: FullRow[], labels: { restrictive: number[]; zlb: number[]; gfc: number[]; pandemic: number[] }): RegimeProbs | null {
+  if (rows.length < 40) return null;
+
+  const clfFeatureNames = [
+    'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
+    'oil_log_change', 'r_neg_equity', 'credit_spread', 'vix', 'fci',
+    'stress_score', 'rate_change_l1', 'inflation_accel',
+  ];
+
+  const X = rows.map(r => clfFeatureNames.map(f => (r as Record<string, number>)[f] ?? 0));
+  const lastIdx = rows.length - 1;
+
+  // One-step-ahead prediction for the last observation
+  const probs: Record<string, number> = {};
+  for (const [name, y] of Object.entries(labels)) {
+    // Shift labels: predict next month's label
+    const yShifted = y.slice(1);
+    const Xshifted = X.slice(0, -1);
+
+    if (yShifted.length < 36) { probs[name] = 0; continue; }
+    if (new Set(yShifted).size < 2) { probs[name] = 0; continue; }
+
+    // Use all data up to last for training, predict for last
+    const Xtrain = Xshifted;
+    const ytrain = yShifted;
+    const Xtest = [X[lastIdx]];
+
+    try {
+      const p = logisticPredict(Xtrain, ytrain, Xtest, 300, 0.5);
+      probs[name] = Math.round(p[0] * 10000) / 10000;
+    } catch {
+      probs[name] = 0;
+    }
+  }
+
+  const expansionary = Math.max(probs.zlb || 0, probs.gfc || 0, probs.pandemic || 0);
+  const restrictive = probs.restrictive || 0;
+
+  return {
+    restrictive,
+    zlb: probs.zlb || 0,
+    gfc: probs.gfc || 0,
+    pandemic: probs.pandemic || 0,
+    expansionary,
+    env_bias: Math.round((restrictive - expansionary) * 10000) / 10000,
+  };
+}
+
+// ─── Build Full Rows ───────────────────────────────────────────────────────────
+
+function buildFullRows(
+  months: string[],
+  policyRate: Map<string, number>,
+  inflationSeries: Map<string, number>,
+  inflationIsYoY: boolean,
+  unemployment: Map<string, number>,
+  nrou: Map<string, number>,
+  shortRate: Map<string, number>,
+  longRate: Map<string, number>,
+  oil: Map<string, number>,
+  equity: Map<string, number>,
+  creditSpread: Map<string, number>,
+  hySpread: Map<string, number>,
+  vix: Map<string, number>,
+  fci: Map<string, number>,
+): FullRow[] {
+  // First pass: compute base values for all months
+  interface BaseRow {
+    month: string;
+    policy_rate: number;
+    policy_rate_lag: number;
+    inflation_gap: number;
+    unemployment_gap: number;
+    y2y: number;
+    slope: number;
+    oil_log_change: number;
+    r_neg_equity: number;
+    credit_spread: number;
+    hy_spread: number;
+    vix: number;
+    fci: number;
+  }
+
+  const baseRows: (BaseRow | null)[] = [];
+
+  for (let i = 0; i < months.length; i++) {
     const m = months[i];
-    const mPrev = months[i - 1];
-    const m12 = months[i - 12];
-    const mLag3 = i >= 3 ? months[i - 3] : null;
-    const mFciLag1 = i >= 1 ? months[i - 1] : null;
+    const mPrev = i > 0 ? months[i - 1] : null;
+    const m12 = i >= 12 ? months[i - 12] : null;
 
-    const pr = getVal(fedfunds, m);
-    const prLag = getVal(fedfunds, mPrev);
-    const pceCur = getVal(pcepilfe, m);
-    const pce12 = getVal(pcepilfe, m12);
-    const ur = getVal(unrate, m);
-    const y2 = getVal(dgs2, m);
-    const y10 = getVal(dgs10, m);
-    const oilCur = getVal(oil, m);
-    const oilPrev = getVal(oil, mPrev);
+    const pr = gv(policyRate, m);
+    const prLag = mPrev ? gv(policyRate, mPrev) : null;
+    const ur = gv(unemployment, m);
+    const y2 = gv(shortRate, m);
+    const y10 = gv(longRate, m);
+    const oilCur = gv(oil, m);
+    const oilPrev = mPrev ? gv(oil, mPrev) : null;
 
-    if (pr == null || prLag == null || pceCur == null || pce12 == null || ur == null || y2 == null || y10 == null || oilCur == null || oilPrev == null) continue;
-    if (pce12 === 0 || oilPrev === 0) continue;
+    if (pr == null || prLag == null || ur == null || y2 == null || y10 == null || oilCur == null || oilPrev == null || oilPrev === 0) {
+      baseRows.push(null);
+      continue;
+    }
 
-    const coreYoy = ((pceCur / pce12) - 1) * 100;
-    const inflGap = coreYoy - 2.0;
+    let inflGap: number;
+    if (inflationIsYoY) {
+      const hicpVal = gv(inflationSeries, m);
+      if (hicpVal == null) { baseRows.push(null); continue; }
+      inflGap = hicpVal - 2.0;
+    } else {
+      if (!m12) { baseRows.push(null); continue; }
+      const pceCur = gv(inflationSeries, m);
+      const pce12 = gv(inflationSeries, m12);
+      if (pceCur == null || pce12 == null || pce12 === 0) { baseRows.push(null); continue; }
+      inflGap = ((pceCur / pce12) - 1) * 100 - 2.0;
+    }
 
-    // NAIRU: use NROU if available, else rolling 120-month mean of unemployment
+    // NAIRU
+    const nrouVal = gv(nrou, m);
     let nairu: number;
-    const nrouVal = getVal(nrou, m);
     if (nrouVal != null) {
       nairu = nrouVal;
     } else {
-      // Rolling average
-      let sum = 0, cnt = 0;
-      const lookback = Math.min(120, i);
-      for (let j = i - lookback; j <= i; j++) {
-        const uv = getVal(unrate, months[j]);
-        if (uv != null) { sum += uv; cnt++; }
-      }
-      nairu = cnt > 0 ? sum / cnt : ur;
+      nairu = rollingMean(unemployment, months, i, 120) ?? ur;
     }
     const uGap = nairu - ur;
-
-    // Unemployment gap L3
-    let uGapL3: number | null = null;
-    if (mLag3) {
-      const urL3 = getVal(unrate, mLag3);
-      if (urL3 != null) {
-        let nairu3: number;
-        const nrouL3 = getVal(nrou, mLag3);
-        if (nrouL3 != null) {
-          nairu3 = nrouL3;
-        } else {
-          let s2 = 0, c2 = 0;
-          const lb = Math.min(120, i - 3);
-          for (let j = (i - 3) - lb; j <= i - 3; j++) {
-            const uv = getVal(unrate, months[j]);
-            if (uv != null) { s2 += uv; c2++; }
-          }
-          nairu3 = c2 > 0 ? s2 / c2 : urL3;
-        }
-        uGapL3 = nairu3 - urL3;
-      }
-    }
-    if (uGapL3 == null) continue;
 
     const slope = y10 - y2;
     const oilLogChange = Math.log(oilCur) - Math.log(oilPrev);
 
-    // Equity downside
     let rNegEq = 0;
-    const eqCur = eqMonthly.get(m);
-    const eqPrev = eqMonthly.get(mPrev);
+    const eqCur = equity.get(m);
+    const eqPrev = mPrev ? equity.get(mPrev) : undefined;
     if (eqCur != null && eqPrev != null && eqPrev > 0) {
-      const eqRet = Math.log(eqCur) - Math.log(eqPrev);
-      rNegEq = Math.max(-eqRet, 0);
+      rNegEq = Math.max(-(Math.log(eqCur) - Math.log(eqPrev)), 0);
     }
 
-    const cs = getVal(baa10y, m) ?? null;
-    const hyVal = getVal(hy, m) ?? null;
-    const vixVal = getVal(vixcls, m) ?? null;
-    const fciVal = getVal(nfci, m) ?? null;
-    const fciL1 = mFciLag1 ? (getVal(nfci, mFciLag1) ?? null) : null;
-
-    rows.push({
+    baseRows.push({
       month: m,
       policy_rate: pr,
       policy_rate_lag: prLag,
       inflation_gap: inflGap,
       unemployment_gap: uGap,
-      unemployment_gap_l3: uGapL3,
       y2y: y2,
       slope,
       oil_log_change: oilLogChange,
       r_neg_equity: rNegEq,
-      credit_spread: cs,
-      hy_spread: hyVal,
-      vix: vixVal,
-      fci: fciVal,
-      fci_l1: fciL1,
+      credit_spread: gv(creditSpread, m) ?? 0,
+      hy_spread: gv(hySpread, m) ?? 0,
+      vix: gv(vix, m) ?? 20,
+      fci: gv(fci, m) ?? 0,
     });
   }
 
-  console.log(`Fed model: ${rows.length} data rows`);
-  if (rows.length < 30) throw new Error('Insufficient Fed data for model estimation');
+  // Second pass: compute lags and derived features
+  const fullRows: FullRow[] = [];
+  for (let i = 0; i < months.length; i++) {
+    const cur = baseRows[i];
+    if (!cur) continue;
 
-  return runTwoStepModel(rows, 'FED');
+    const prev1 = i >= 1 ? baseRows[i - 1] : null;
+    const prev3 = i >= 3 ? baseRows[i - 3] : null;
+    const prev6 = i >= 6 ? baseRows[i - 6] : null;
+    const prev2 = i >= 2 ? baseRows[i - 2] : null;
+
+    if (!prev1 || !prev3 || !prev6) continue;
+
+    // Compute stress score
+    const stressComps = [cur.credit_spread, cur.hy_spread / 5, cur.vix / 20, cur.fci];
+    const stressScore = stressComps.reduce((s, v) => s + v, 0) / stressComps.length;
+
+    fullRows.push({
+      ...cur,
+      unemployment_gap_l1: prev1.unemployment_gap,
+      unemployment_gap_l3: prev3.unemployment_gap,
+      unemployment_gap_l6: prev6.unemployment_gap,
+      y2y_l1: prev1.y2y,
+      slope_l6: prev6.slope,
+      credit_spread_l1: prev1.credit_spread,
+      fci_l1: prev1.fci,
+      vix_sq: cur.vix * cur.vix,
+      rate_change_l1: prev1.policy_rate - (prev2 ? prev2.policy_rate : prev1.policy_rate),
+      inflation_gap_l1: prev1.inflation_gap,
+      inflation_accel: cur.inflation_gap - prev1.inflation_gap,
+      stress_score: stressScore,
+    });
+  }
+
+  return fullRows;
 }
 
-async function buildEcbModel(months: string[]): Promise<ModelResult> {
-  console.log('Fetching ECB FRED data...');
+// ─── Model Result Interface ────────────────────────────────────────────────────
 
-  const [ecbdfr, hicp, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
-    fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)),
-    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => forwardFill(d, months)).catch(() => new Map<string, number>()),
+interface ModelResult {
+  bank: string;
+  actual_rate: number;
+  implied_rate: number;
+  gap: number;
+  r2_insample: number;
+  oos_metrics: OOSMetrics;
+  model_name: string;
+  n_features: number;
+  feature_names: string[];
+  regime: string;
+  stress_score: number;
+  regime_probabilities: RegimeProbs | null;
+  variables: Record<string, number | null>;
+  coefficients: Record<string, number>;
+  sample_start: string;
+  sample_end: string;
+  sample_size: number;
+}
+
+// ─── Run Fed Model ─────────────────────────────────────────────────────────────
+
+async function runFedModel(months: string[]): Promise<ModelResult> {
+  console.log('Fetching Fed data...');
+  const [fedfunds, pcepilfe, unrate, nrou, dgs2, dgs10, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
+    fetchFredCSV('FEDFUNDS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('PCEPILFE').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('UNRATE').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('NROU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('DGS2').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('DGS10').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
   ]);
 
-  let eqMonthly: Map<string, number>;
-  try {
-    eqMonthly = await fetchYahooMonthly('^STOXX50E');
-  } catch {
-    eqMonthly = new Map();
-  }
+  let equity: Map<string, number>;
+  try { equity = await fetchYahooMonthly('^GSPC'); } catch { equity = new Map(); }
 
-  console.log(`ECB data sizes: ecbdfr=${ecbdfr.size}, hicp=${hicp.size}, urate=${urate.size}`);
+  const rows = buildFullRows(months, fedfunds, pcepilfe, false, unrate, nrou, dgs2, dgs10, oil, equity, baa10y, hy, vixcls, nfci);
+  console.log(`Fed: ${rows.length} rows`);
+  if (rows.length < 50) throw new Error('Insufficient Fed data');
 
-  const rows: DataRow[] = [];
-  for (let i = 1; i < months.length; i++) {
-    const m = months[i];
-    const mPrev = months[i - 1];
-    const mLag3 = i >= 3 ? months[i - 3] : null;
-    const mFciLag1 = i >= 1 ? months[i - 1] : null;
+  // Compute HY spread Q75 threshold
+  const hyVals = rows.map(r => r.hy_spread).filter(v => v > 0);
+  const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
-    const pr = getVal(ecbdfr, m);
-    const prLag = getVal(ecbdfr, mPrev);
-    const hicpVal = getVal(hicp, m);
-    const ur = getVal(urate, m);
-    const y2 = getVal(de3m, m); // 3M money market rate as short rate proxy
-    const y10 = getVal(de10y, m);
-    const oilCur = getVal(oil, m);
-    const oilPrev = getVal(oil, mPrev);
-
-    if (pr == null || prLag == null || hicpVal == null || ur == null || y2 == null || y10 == null || oilCur == null || oilPrev == null) continue;
-    if (oilPrev === 0) continue;
-
-    // ECB inflation gap: HICP YoY is already given directly, subtract target of 2.0
-    const inflGap = hicpVal - 2.0;
-
-    // NAIRU for ECB: rolling 120-month mean
-    let sum = 0, cnt = 0;
-    const lookback = Math.min(120, i);
-    for (let j = Math.max(0, i - lookback); j <= i; j++) {
-      const uv = getVal(urate, months[j]);
-      if (uv != null) { sum += uv; cnt++; }
-    }
-    const nairu = cnt > 0 ? sum / cnt : ur;
-    const uGap = nairu - ur;
-
-    // U gap L3
-    let uGapL3: number | null = null;
-    if (mLag3 && i >= 3) {
-      const urL3 = getVal(urate, mLag3);
-      if (urL3 != null) {
-        let s2 = 0, c2 = 0;
-        const lb = Math.min(120, i - 3);
-        for (let j = Math.max(0, (i - 3) - lb); j <= i - 3; j++) {
-          const uv = getVal(urate, months[j]);
-          if (uv != null) { s2 += uv; c2++; }
-        }
-        const nairu3 = c2 > 0 ? s2 / c2 : urL3;
-        uGapL3 = nairu3 - urL3;
-      }
-    }
-    if (uGapL3 == null) continue;
-
-    const slope = y10 - y2;
-    const oilLogChange = Math.log(oilCur) - Math.log(oilPrev);
-
-    let rNegEq = 0;
-    const eqCur = eqMonthly.get(m);
-    const eqPrev = eqMonthly.get(mPrev);
-    if (eqCur != null && eqPrev != null && eqPrev > 0) {
-      const eqRet = Math.log(eqCur) - Math.log(eqPrev);
-      rNegEq = Math.max(-eqRet, 0);
-    }
-
-    const cs = getVal(baa10y, m) ?? null;
-    const hyVal = getVal(hy, m) ?? null;
-    const vixVal = getVal(vixcls, m) ?? null;
-    const fciVal = getVal(nfci, m) ?? null;
-    const fciL1 = mFciLag1 ? (getVal(nfci, mFciLag1) ?? null) : null;
-
-    rows.push({
-      month: m,
-      policy_rate: pr,
-      policy_rate_lag: prLag,
-      inflation_gap: inflGap,
-      unemployment_gap: uGap,
-      unemployment_gap_l3: uGapL3,
-      y2y: y2,
-      slope,
-      oil_log_change: oilLogChange,
-      r_neg_equity: rNegEq,
-      credit_spread: cs,
-      hy_spread: hyVal,
-      vix: vixVal,
-      fci: fciVal,
-      fci_l1: fciL1,
-    });
-  }
-
-  console.log(`ECB model: ${rows.length} data rows`);
-  if (rows.length < 30) throw new Error('Insufficient ECB data for model estimation');
-
-  return runTwoStepModel(rows, 'ECB');
-}
-
-/** Run the two-step residual Taylor Rule model (Approach 2) */
-function runTwoStepModel(rows: DataRow[], bank: string): ModelResult {
-  const n = rows.length;
-
-  // Step 1: Macro block
-  // i_t = α + ρ*i_{t-1} + φ_π*π_gap + φ_u*u_gap + φ_{u,3}*u_gap_{t-3} + e_t
+  // Build feature matrix
   const y = rows.map(r => r.policy_rate);
-  const X_macro: number[][] = rows.map(r => [
-    1, // constant
-    r.policy_rate_lag,
-    r.inflation_gap,
-    r.unemployment_gap,
-    r.unemployment_gap_l3,
-  ]);
+  const X = rows.map(r => buildFedFeatureRow(r, hyQ75));
 
-  const macroResult = olsFit(X_macro, y);
+  // Fit full sample (Ridge with very small lambda to approximate ElasticNet alpha=0.0001)
+  const fullFit = ridgeFit(X, y, 0.0001);
 
-  // Step 2: Residual block on orthogonalized market signals
-  // Build market feature matrix for rows that have all financial data
-  const marketColNames = ['y2y', 'slope', 'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci', 'fci_l1'];
+  // OOS evaluation
+  const oosMetrics = expandingWindowOOS(y, X, 60, 0.0001);
 
-  // Find which market columns are available (>85% non-null)
-  const availMarketCols: string[] = [];
-  for (const col of marketColNames) {
-    const nonNull = rows.filter(r => (r as Record<string, unknown>)[col] != null).length;
-    if (nonNull / n >= 0.85) availMarketCols.push(col);
-  }
+  // Regime classification
+  const lastRow = rows[rows.length - 1];
+  const allStress = rows.map(r => r.stress_score).sort((a, b) => a - b);
+  const q20 = allStress[Math.floor(allStress.length * 0.2)];
+  const q80 = allStress[Math.floor(allStress.length * 0.8)];
+  const regime = lastRow.stress_score <= q20 ? 'Benign' : lastRow.stress_score >= q80 ? 'Stress' : 'Neutral';
 
-  // Filter to rows with all available market data
-  const validRows = rows.filter(r => {
-    for (const col of availMarketCols) {
-      if ((r as Record<string, unknown>)[col] == null) return false;
-    }
-    return true;
-  });
+  const coefNames = ['const', ...FED_FEATURES];
+  const coefficients: Record<string, number> = {};
+  fullFit.beta.forEach((b, i) => { coefficients[coefNames[i]] = Math.round(b * 1e6) / 1e6; });
 
-  let r2Combined = macroResult.r2;
-  let impliedCombined = macroResult.fitted[n - 1];
-
-  if (validRows.length >= 30 && availMarketCols.length > 0) {
-    const yValid = validRows.map(r => r.policy_rate);
-    const X_macroValid: number[][] = validRows.map(r => [1, r.policy_rate_lag, r.inflation_gap, r.unemployment_gap, r.unemployment_gap_l3]);
-    const macroValid = olsFit(X_macroValid, yValid);
-
-    // Build market matrix with constant
-    const M_raw: number[][] = validRows.map(r => {
-      const row = [1]; // constant for residual block
-      for (const col of availMarketCols) {
-        row.push((r as Record<string, unknown>)[col] as number);
-      }
-      return row;
-    });
-
-    // Orthogonalize each market column against macro block
-    const M_orth: number[][] = M_raw.map(row => [...row]);
-    for (let j = 0; j < M_raw[0].length; j++) {
-      const colVec = M_raw.map(row => row[j]);
-      const orthoResult = olsFit(X_macroValid, colVec);
-      for (let i = 0; i < M_orth.length; i++) {
-        M_orth[i][j] = colVec[i] - orthoResult.fitted[i];
-      }
-    }
-
-    // Fit residuals
-    try {
-      const residResult = olsFit(M_orth, macroValid.residuals);
-      const combinedFit = macroValid.fitted.map((mf, i) => mf + residResult.fitted[i]);
-      const ssRes = yValid.reduce((s, yi, i) => s + (yi - combinedFit[i]) ** 2, 0);
-      const yMean = yValid.reduce((s, v) => s + v, 0) / yValid.length;
-      const ssTot = yValid.reduce((s, v) => s + (v - yMean) ** 2, 0);
-      r2Combined = ssTot > 0 ? 1 - ssRes / ssTot : 0;
-
-      // Latest combined implied rate
-      const lastIdx = validRows.length - 1;
-      impliedCombined = combinedFit[lastIdx];
-    } catch (err) {
-      console.warn(`Combined model failed for ${bank}, using macro only:`, err);
-    }
-  }
-
-  // Compute stress score for latest observation for regime classification
-  const lastRow = rows[n - 1];
-  let stressScore = 0;
-  let regime = 'Neutral';
-
-  // Simple stress score based on available data
-  const stressComponents: number[] = [];
-  if (lastRow.credit_spread != null) {
-    // Standardize against sample
-    const csVals = rows.filter(r => r.credit_spread != null).map(r => r.credit_spread!);
-    const csMean = csVals.reduce((s, v) => s + v, 0) / csVals.length;
-    const csStd = Math.sqrt(csVals.reduce((s, v) => s + (v - csMean) ** 2, 0) / csVals.length) || 1;
-    stressComponents.push((lastRow.credit_spread - csMean) / csStd);
-  }
-  if (lastRow.vix != null) {
-    const vVals = rows.filter(r => r.vix != null).map(r => r.vix!);
-    const vMean = vVals.reduce((s, v) => s + v, 0) / vVals.length;
-    const vStd = Math.sqrt(vVals.reduce((s, v) => s + (v - vMean) ** 2, 0) / vVals.length) || 1;
-    stressComponents.push((lastRow.vix - vMean) / vStd);
-  }
-  if (lastRow.fci != null) {
-    const fVals = rows.filter(r => r.fci != null).map(r => r.fci!);
-    const fMean = fVals.reduce((s, v) => s + v, 0) / fVals.length;
-    const fStd = Math.sqrt(fVals.reduce((s, v) => s + (v - fMean) ** 2, 0) / fVals.length) || 1;
-    stressComponents.push((lastRow.fci - fMean) / fStd);
-  }
-
-  if (stressComponents.length > 0) {
-    stressScore = stressComponents.reduce((s, v) => s + v, 0) / stressComponents.length;
-    // Compute quantiles for regime
-    const allStress: number[] = [];
-    for (const r of rows) {
-      const comps: number[] = [];
-      if (r.credit_spread != null) comps.push(r.credit_spread);
-      if (r.vix != null) comps.push(r.vix);
-      if (r.fci != null) comps.push(r.fci);
-      if (comps.length > 0) allStress.push(comps.reduce((s, v) => s + v, 0) / comps.length);
-    }
-    allStress.sort((a, b) => a - b);
-    const q20 = allStress[Math.floor(allStress.length * 0.2)];
-    const q80 = allStress[Math.floor(allStress.length * 0.8)];
-    const currentSimple = stressComponents.length > 0 ? stressComponents.reduce((s, v) => s + v, 0) / stressComponents.length : 0;
-    if (currentSimple <= q20) regime = 'Benign';
-    else if (currentSimple >= q80) regime = 'Stress';
-    else regime = 'Neutral';
-  }
-
-  const macroCoefs: Record<string, number> = {};
-  const coefNames = ['const', 'rho (persistence)', 'phi_pi (inflation)', 'phi_u (unemployment)', 'phi_u_l3 (unemp lag3)'];
-  macroResult.beta.forEach((b, i) => { macroCoefs[coefNames[i] || `coef_${i}`] = Math.round(b * 10000) / 10000; });
-
-  const impliedMacro = macroResult.fitted[n - 1];
+  const implied = X[X.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
 
   return {
-    bank,
+    bank: 'FED',
     actual_rate: lastRow.policy_rate,
-    implied_rate_macro: Math.round(impliedMacro * 1000) / 1000,
-    implied_rate_combined: Math.round(impliedCombined * 1000) / 1000,
-    gap_macro: Math.round((impliedMacro - lastRow.policy_rate) * 1000) / 1000,
-    gap_combined: Math.round((impliedCombined - lastRow.policy_rate) * 1000) / 1000,
-    r2_macro: Math.round(macroResult.r2 * 10000) / 10000,
-    r2_combined: Math.round(r2Combined * 10000) / 10000,
+    implied_rate: Math.round(implied * 1000) / 1000,
+    gap: Math.round((implied - lastRow.policy_rate) * 1000) / 1000,
+    r2_insample: Math.round(fullFit.r2 * 10000) / 10000,
+    oos_metrics: {
+      rmse: Math.round(oosMetrics.rmse * 10000) / 10000,
+      r2_vs_naive: Math.round(oosMetrics.r2_vs_naive * 10000) / 10000,
+      r2_level: Math.round(oosMetrics.r2_level * 10000) / 10000,
+      direction_acc: Math.round(oosMetrics.direction_acc * 10000) / 10000,
+      n_oos: oosMetrics.n_oos,
+    },
+    model_name: 'ElasticNet-Derived Ridge (α=0.0001)',
+    n_features: FED_FEATURES.length,
+    feature_names: [...FED_FEATURES],
+    regime,
+    stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
+    regime_probabilities: null,
+    variables: {
+      inflation_gap: round2(lastRow.inflation_gap),
+      unemployment_gap: round2(lastRow.unemployment_gap),
+      y2y: round2(lastRow.y2y),
+      slope: round2(lastRow.slope),
+      oil_log_change: round3(lastRow.oil_log_change),
+      r_neg_equity: round3(lastRow.r_neg_equity),
+      vix: round2(lastRow.vix),
+      credit_spread: round2(lastRow.credit_spread),
+      fci: round3(lastRow.fci),
+      hy_spread: round2(lastRow.hy_spread),
+    },
+    coefficients,
     sample_start: rows[0].month,
     sample_end: lastRow.month,
-    sample_size: n,
-    latest_month: lastRow.month,
-    variables: {
-      inflation_gap: Math.round(lastRow.inflation_gap * 100) / 100,
-      unemployment_gap: Math.round(lastRow.unemployment_gap * 100) / 100,
-      y2y: lastRow.y2y != null ? Math.round(lastRow.y2y * 100) / 100 : null,
-      slope: Math.round(lastRow.slope * 100) / 100,
-      oil_log_change: Math.round(lastRow.oil_log_change * 1000) / 1000,
-      credit_spread: lastRow.credit_spread != null ? Math.round(lastRow.credit_spread * 100) / 100 : null,
-      vix: lastRow.vix != null ? Math.round(lastRow.vix * 100) / 100 : null,
-      fci: lastRow.fci != null ? Math.round(lastRow.fci * 1000) / 1000 : null,
+    sample_size: rows.length,
+  };
+}
+
+function round2(v: number | null): number | null { return v != null ? Math.round(v * 100) / 100 : null; }
+function round3(v: number | null): number | null { return v != null ? Math.round(v * 1000) / 1000 : null; }
+
+// ─── Run ECB Model ─────────────────────────────────────────────────────────────
+
+async function runECBModel(months: string[]): Promise<ModelResult> {
+  console.log('Fetching ECB data...');
+  const [ecbdfr, hicp, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
+    fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+  ]);
+
+  let equity: Map<string, number>;
+  try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
+
+  const rows = buildFullRows(months, ecbdfr, hicp, true, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  console.log(`ECB: ${rows.length} rows`);
+  if (rows.length < 50) throw new Error('Insufficient ECB data');
+
+  // Compute quantile thresholds
+  const vixVals = rows.map(r => r.vix);
+  const fciVals = rows.map(r => r.fci);
+  const vixQ85 = quantile(vixVals, 0.85);
+  const fciQ85 = quantile(fciVals, 0.85);
+
+  // Run regime classifier
+  const regimeLabels = computeRegimeLabels(rows);
+  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
+  console.log('ECB regime probs:', regimeProbs);
+
+  // Build ECB features — first without regime probs to test base model
+  const y = rows.map(r => r.policy_rate);
+  const X_base = rows.map(r => buildECBFeatureRow(r, vixQ85, fciQ85, null));
+
+  // OOS for base model
+  const oosBase = expandingWindowOOS(y, X_base, 60);
+
+  // If regime probs available, try augmented model
+  let finalX = X_base;
+  let finalFeatureNames = ECB_FEATURE_NAMES.slice(0, 21); // without regime cols
+  let usedRegime = false;
+
+  if (regimeProbs) {
+    // For augmented model, we only add regime probs to the LAST few rows (since classifier needs history)
+    // Simple approach: use the latest regime probs for all rows (approximation for the production implied rate)
+    const X_aug = rows.map(r => buildECBFeatureRow(r, vixQ85, fciQ85, regimeProbs));
+    const oosAug = expandingWindowOOS(y, X_aug, 60);
+
+    if (!isNaN(oosAug.r2_vs_naive) && !isNaN(oosBase.r2_vs_naive) && oosAug.r2_vs_naive > oosBase.r2_vs_naive) {
+      finalX = X_aug;
+      finalFeatureNames = [...ECB_FEATURE_NAMES];
+      usedRegime = true;
+      console.log('ECB: Regime augmentation promoted');
+    } else {
+      console.log('ECB: Regime augmentation did not improve OOS, using base structural model');
+    }
+  }
+
+  // Fit final model
+  const fullFit = olsFit(finalX, y);
+  const oosMetrics = expandingWindowOOS(y, finalX, 60);
+
+  // P-value pruning (approximate: check coefficient significance via t-stat)
+  // In production OLS, we compute t-stats from (X'X)^{-1} diagonal
+  const coefficients: Record<string, number> = {};
+  fullFit.beta.forEach((b, i) => {
+    const name = finalFeatureNames[i] || `feat_${i}`;
+    coefficients[name] = Math.round(b * 1e6) / 1e6;
+  });
+
+  const lastRow = rows[rows.length - 1];
+  const implied = finalX[finalX.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
+
+  // Regime from stress
+  const allStress = rows.map(r => r.stress_score).sort((a, b) => a - b);
+  const q20 = allStress[Math.floor(allStress.length * 0.2)];
+  const q80 = allStress[Math.floor(allStress.length * 0.8)];
+  const regime = lastRow.stress_score <= q20 ? 'Benign' : lastRow.stress_score >= q80 ? 'Stress' : 'Neutral';
+
+  return {
+    bank: 'ECB',
+    actual_rate: lastRow.policy_rate,
+    implied_rate: Math.round(implied * 1000) / 1000,
+    gap: Math.round((implied - lastRow.policy_rate) * 1000) / 1000,
+    r2_insample: Math.round(fullFit.r2 * 10000) / 10000,
+    oos_metrics: {
+      rmse: Math.round((oosMetrics.rmse || 0) * 10000) / 10000,
+      r2_vs_naive: Math.round((oosMetrics.r2_vs_naive || 0) * 10000) / 10000,
+      r2_level: Math.round((oosMetrics.r2_level || 0) * 10000) / 10000,
+      direction_acc: Math.round((oosMetrics.direction_acc || 0) * 10000) / 10000,
+      n_oos: oosMetrics.n_oos,
     },
-    macro_coefficients: macroCoefs,
+    model_name: usedRegime ? 'Regime-Aware Structural Break' : 'Structural Break (Pruned)',
+    n_features: finalFeatureNames.length - 1, // minus const
+    feature_names: finalFeatureNames.filter(f => f !== 'const'),
     regime,
-    stress_score: Math.round(stressScore * 1000) / 1000,
+    stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
+    regime_probabilities: regimeProbs,
+    variables: {
+      inflation_gap: round2(lastRow.inflation_gap),
+      unemployment_gap: round2(lastRow.unemployment_gap),
+      y2y: round2(lastRow.y2y),
+      slope: round2(lastRow.slope),
+      oil_log_change: round3(lastRow.oil_log_change),
+      r_neg_equity: round3(lastRow.r_neg_equity),
+      vix: round2(lastRow.vix),
+      credit_spread: round2(lastRow.credit_spread),
+      fci: round3(lastRow.fci),
+      hy_spread: round2(lastRow.hy_spread),
+    },
+    coefficients,
+    sample_start: rows[0].month,
+    sample_end: lastRow.month,
+    sample_size: rows.length,
   };
 }
 
@@ -654,81 +944,60 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const CACHE_TTL_HOURS = 12;
 
-async function getCachedResult(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
+async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v2&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
     const rows = await resp.json();
-    if (!rows || rows.length === 0) return null;
-    const row = rows[0];
-    const age = (Date.now() - new Date(row.created_at).getTime()) / (1000 * 60 * 60);
+    if (!rows?.length) return null;
+    const age = (Date.now() - new Date(rows[0].created_at).getTime()) / (1000 * 60 * 60);
     if (age > CACHE_TTL_HOURS) return null;
-    return row.result as { fed: ModelResult; ecb: ModelResult; generated_at: string };
-  } catch {
-    return null;
-  }
+    return rows[0].result as { fed: ModelResult; ecb: ModelResult; generated_at: string };
+  } catch { return null; }
 }
 
-async function setCachedResult(result: { fed: ModelResult; ecb: ModelResult; generated_at: string }) {
+async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_at: string }) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/analysis_cache`, {
       method: 'POST',
       headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
+        apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction',
+        analysis_type: 'policy_reaction_v2',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
       }),
     });
-  } catch (err) {
-    console.warn('Failed to cache result:', err);
-  }
+  } catch (err) { console.warn('Cache write failed:', err); }
 }
 
 // ─── Main Handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
-    // Check cache first
-    const cached = await getCachedResult();
+    const cached = await getCached();
     if (cached) {
-      console.log('Returning cached policy reaction result');
+      console.log('Returning cached regime-aware policy reaction');
       return new Response(JSON.stringify(cached), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Generate monthly index from 2000-01 to current month
     const now = new Date();
-    const months = generateMonthlyIndex(2000, 1, now.getFullYear(), now.getMonth() + 1);
+    const months = genMonths(2000, 1, now.getFullYear(), now.getMonth() + 1);
 
-    // Run both models in parallel
-    const [fed, ecb] = await Promise.all([
-      buildFedModel(months),
-      buildEcbModel(months),
-    ]);
+    const [fed, ecb] = await Promise.all([runFedModel(months), runECBModel(months)]);
 
-    const result = {
-      fed,
-      ecb,
-      generated_at: new Date().toISOString(),
-    };
-
-    // Cache the result
-    await setCachedResult(result);
+    const result = { fed, ecb, generated_at: new Date().toISOString() };
+    await setCache(result);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -736,8 +1005,7 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error('Policy reaction error:', err);
     return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

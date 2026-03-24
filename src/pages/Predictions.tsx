@@ -8,7 +8,7 @@ import { PivotProbabilityPanel } from '@/components/predictions/PivotProbability
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
-import { EmpiricalPolicyPanel } from '@/components/predictions/EmpiricalPolicyPanel';
+
 
 import {
   getCachedSentimentItems,
@@ -100,8 +100,6 @@ const Predictions = () => {
         </div>
       )}
 
-      {/* Empirical Policy Corner */}
-      <EmpiricalPolicyPanel />
 
       {/* Divergence Alert */}
       <DivergenceAlertWidget />

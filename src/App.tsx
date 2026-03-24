@@ -11,6 +11,7 @@ import EventDetail from "./pages/EventDetail";
 import Speakers from "./pages/Speakers";
 import MeetingCycles from "./pages/MeetingCycles";
 import Predictions from "./pages/Predictions";
+import EmpiricalPolicy from "./pages/EmpiricalPolicy";
 import StatisticalData from "./pages/StatisticalData";
 import Communications from "./pages/Communications";
 import Committee from "./pages/Committee";
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/stats" element={<StatisticalData />} />
             <Route path="/comms" element={<Communications />} />
             <Route path="/predictions" element={<Predictions />} />
+            <Route path="/empirical" element={<EmpiricalPolicy />} />
             <Route path="/committee" element={<Committee />} />
             
             <Route path="/topics" element={<TopicHeatmaps />} />

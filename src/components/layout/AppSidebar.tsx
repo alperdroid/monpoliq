@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare, Shield, Grid3X3, Layers, Crosshair } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare, Shield, Grid3X3, Layers, Crosshair, FlaskConical } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import { MonPolLogo } from '@/components/brand/MonPolLogo';
@@ -24,6 +24,7 @@ const mainNav = [
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
   { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
+  { title: 'Empirical Policy', url: '/empirical', icon: FlaskConical },
   { title: 'Topic Heatmaps', url: '/topics', icon: Grid3X3 },
   { title: 'Policy Taxonomy', url: '/taxonomy', icon: Layers },
   { title: 'Policy Radar', url: '/radar', icon: Crosshair },
