@@ -1,29 +1,38 @@
+export interface OOSMetrics {
+  rmse: number;
+  r2_vs_naive: number;
+  r2_level: number;
+  direction_acc: number;
+  n_oos: number;
+}
+
+export interface RegimeProbs {
+  restrictive: number;
+  zlb: number;
+  gfc: number;
+  pandemic: number;
+  expansionary: number;
+  env_bias: number;
+}
+
 export interface PolicyReactionResult {
   bank: string;
   actual_rate: number;
-  implied_rate_macro: number;
-  implied_rate_combined: number;
-  gap_macro: number;
-  gap_combined: number;
-  r2_macro: number;
-  r2_combined: number;
+  implied_rate: number;
+  gap: number;
+  r2_insample: number;
+  oos_metrics: OOSMetrics;
+  model_name: string;
+  n_features: number;
+  feature_names: string[];
+  regime: string;
+  stress_score: number;
+  regime_probabilities: RegimeProbs | null;
+  variables: Record<string, number | null>;
+  coefficients: Record<string, number>;
   sample_start: string;
   sample_end: string;
   sample_size: number;
-  latest_month: string;
-  variables: {
-    inflation_gap: number | null;
-    unemployment_gap: number | null;
-    y2y: number | null;
-    slope: number | null;
-    oil_log_change: number | null;
-    credit_spread: number | null;
-    vix: number | null;
-    fci: number | null;
-  };
-  macro_coefficients: Record<string, number>;
-  regime: string;
-  stress_score: number;
 }
 
 export interface PolicyReactionResponse {
