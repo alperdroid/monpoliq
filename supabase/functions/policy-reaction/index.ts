@@ -341,7 +341,7 @@ const FED_ALL_FEATURES = [...FED_BASE_FEATURES, ...FED_REGIME_FEATURES];
 function buildFedFeatureRow(
   row: FullRow,
   hyQ75: number,
-  regimeProbs: { restrictive: number; expansionary: number; env_bias: number } | null,
+  rp: PerRowRegimeProbs | null,
 ): number[] {
   const dHyQ75 = row.hy_spread >= hyQ75 ? 1 : 0;
   const features = [
@@ -361,14 +361,14 @@ function buildFedFeatureRow(
     row.y2y * dHyQ75, // Y2Y_X_D_HY_SPREAD_Q75
   ];
 
-  // Regime probability features
-  if (regimeProbs) {
+  // Regime probability features (per-row expanding-window values)
+  if (rp) {
     features.push(
-      regimeProbs.restrictive,
-      regimeProbs.expansionary,
-      regimeProbs.env_bias,
-      row.inflation_gap * regimeProbs.restrictive,    // INFL_X_P_RESTRICTIVE
-      row.unemployment_gap * regimeProbs.expansionary, // UNEMP_X_P_EXPANSIONARY
+      rp.restrictive,
+      rp.expansionary,
+      rp.env_bias,
+      row.inflation_gap * rp.restrictive,    // INFL_X_P_RESTRICTIVE
+      row.unemployment_gap * rp.expansionary, // UNEMP_X_P_EXPANSIONARY
     );
   }
 
