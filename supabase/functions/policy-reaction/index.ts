@@ -500,6 +500,31 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
 
   const featureNames = Object.keys(ECB_COEFFICIENTS).filter(k => k !== 'const');
 
+  // Compute contributions
+  const dNegC = lastRow.policy_rate_lag <= 0 ? 1 : 0;
+  const dGFCC = (lastRow.month >= '2008-09' && lastRow.month <= '2010-06') ? 1 : 0;
+  const dSovC = (lastRow.month >= '2010-04' && lastRow.month <= '2012-09') ? 1 : 0;
+  const ecbTerms: [string, number][] = [
+    ['y2y', lastRow.y2y],
+    ['policy_rate_lag', lastRow.policy_rate_lag],
+    ['fci_l1', lastRow.fci_l1],
+    ['inflation_gap_l1', lastRow.inflation_gap_l1],
+    ['y2y_l3', lastRow.y2y_l3],
+    ['slope', lastRow.slope],
+    ['hy_spread', lastRow.hy_spread],
+    ['rate_change_l1', lastRow.rate_change_l1],
+    ['fci_l3', lastRow.fci_l3],
+    ['unemp_gap_x_gfc', lastRow.unemployment_gap * dGFCC],
+    ['vix', lastRow.vix],
+    ['infl_gap_x_neg_rate', lastRow.inflation_gap * dNegC],
+    ['rate_lag_x_sov_crisis', lastRow.policy_rate_lag * dSovC],
+    ['credit_spread', lastRow.credit_spread],
+  ];
+  const contributions: Record<string, number> = {};
+  for (const [name, x] of ecbTerms) {
+    contributions[name] = Math.round((ECB_COEFFICIENTS[name] ?? 0) * x * 1000000) / 1000000;
+  }
+
   return {
     bank: 'ECB',
     actual_rate: lastRow.policy_rate,
@@ -522,6 +547,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
       fci: round3(lastRow.fci), hy_spread: round2(lastRow.hy_spread),
     },
     coefficients: ECB_COEFFICIENTS,
+    contributions,
     sample_start: rows[0].month, sample_end: lastRow.month, sample_size: rows.length,
   };
 }
