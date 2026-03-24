@@ -2,7 +2,6 @@ export interface OOSMetrics {
   rmse: number;
   r2_vs_naive: number;
   r2_level: number;
-  direction_acc: number;
   n_oos: number;
 }
 
