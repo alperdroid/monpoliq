@@ -156,52 +156,16 @@ function rollingMean(data: Map<string, number>, months: string[], idx: number, w
 
 // ─── Logistic Regression (lightweight, single-pass for regime probs) ──────────
 
-function sigmoid(z: number): number {
-  return 1 / (1 + Math.exp(-Math.max(-500, Math.min(500, z))));
-}
+// Pre-computed regime probabilities from notebook (update periodically offline)
+const FED_REGIME_PROBS: RegimeProbs = {
+  restrictive: 0.1345, zlb: 0, gfc: 0.0014, pandemic: 0.011,
+  expansionary: 0.011, env_bias: 0.1236,
+};
 
-function logisticFitPredict(
-  X_train: number[][], y_train: number[],
-  X_test: number[][],
-): number[] {
-  const n = X_train.length, p = X_train[0].length;
-  if (n < 10 || new Set(y_train).size < 2) return X_test.map(() => 0);
-
-  // Standardize
-  const means = new Array(p).fill(0), stds = new Array(p).fill(1);
-  for (let j = 0; j < p; j++) {
-    let sum = 0;
-    for (let i = 0; i < n; i++) sum += X_train[i][j];
-    means[j] = sum / n;
-    let ss = 0;
-    for (let i = 0; i < n; i++) ss += (X_train[i][j] - means[j]) ** 2;
-    stds[j] = Math.sqrt(ss / n) || 1;
-  }
-
-  const Xs = X_train.map(row => row.map((v, j) => (v - means[j]) / stds[j]));
-  const posCount = y_train.filter(v => v === 1).length;
-  const wPos = n / (2 * Math.max(posCount, 1));
-  const wNeg = n / (2 * Math.max(n - posCount, 1));
-
-  const w = new Array(p + 1).fill(0);
-  for (let iter = 0; iter < 200; iter++) {
-    const grad = new Array(p + 1).fill(0);
-    for (let i = 0; i < n; i++) {
-      let z = w[0];
-      for (let j = 0; j < p; j++) z += Xs[i][j] * w[j + 1];
-      const err = (y_train[i] - sigmoid(z)) * (y_train[i] === 1 ? wPos : wNeg);
-      grad[0] += err;
-      for (let j = 0; j < p; j++) grad[j + 1] += err * Xs[i][j];
-    }
-    for (let j = 0; j <= p; j++) w[j] += 0.5 * grad[j] / n;
-  }
-
-  return X_test.map(row => {
-    let z = w[0];
-    for (let j = 0; j < p; j++) z += ((row[j] - means[j]) / stds[j]) * w[j + 1];
-    return sigmoid(z);
-  });
-}
+const ECB_REGIME_PROBS: RegimeProbs = {
+  restrictive: 0.0767, zlb: 0.0104, gfc: 0.0041, pandemic: 0.1223,
+  expansionary: 0.1223, env_bias: -0.0456,
+};
 
 // ─── Data Row ──────────────────────────────────────────────────────────────────
 
