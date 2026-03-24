@@ -24,6 +24,7 @@ const mainNav = [
   { title: 'Statistical Data', url: '/stats', icon: BarChart3 },
   { title: 'Communications', url: '/comms', icon: MessageSquare },
   { title: 'Predictions', url: '/predictions', icon: TrendingUp },
+  { title: 'Empirical Policy', url: '/empirical', icon: FlaskConical },
   { title: 'Topic Heatmaps', url: '/topics', icon: Grid3X3 },
   { title: 'Policy Taxonomy', url: '/taxonomy', icon: Layers },
   { title: 'Policy Radar', url: '/radar', icon: Crosshair },

@@ -40,6 +40,7 @@ const App = () => (
             <Route path="/stats" element={<StatisticalData />} />
             <Route path="/comms" element={<Communications />} />
             <Route path="/predictions" element={<Predictions />} />
+            <Route path="/empirical" element={<EmpiricalPolicy />} />
             <Route path="/committee" element={<Committee />} />
             
             <Route path="/topics" element={<TopicHeatmaps />} />

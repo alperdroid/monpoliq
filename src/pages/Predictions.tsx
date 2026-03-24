@@ -100,8 +100,6 @@ const Predictions = () => {
         </div>
       )}
 
-      {/* Empirical Policy Corner */}
-      <EmpiricalPolicyPanel />
 
       {/* Divergence Alert */}
       <DivergenceAlertWidget />
