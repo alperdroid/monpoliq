@@ -341,7 +341,7 @@ const FED_ALL_FEATURES = [...FED_BASE_FEATURES, ...FED_REGIME_FEATURES];
 function buildFedFeatureRow(
   row: FullRow,
   hyQ75: number,
-  regimeProbs: { restrictive: number; expansionary: number; env_bias: number } | null,
+  rp: PerRowRegimeProbs | null,
 ): number[] {
   const dHyQ75 = row.hy_spread >= hyQ75 ? 1 : 0;
   const features = [
@@ -361,14 +361,14 @@ function buildFedFeatureRow(
     row.y2y * dHyQ75, // Y2Y_X_D_HY_SPREAD_Q75
   ];
 
-  // Regime probability features
-  if (regimeProbs) {
+  // Regime probability features (per-row expanding-window values)
+  if (rp) {
     features.push(
-      regimeProbs.restrictive,
-      regimeProbs.expansionary,
-      regimeProbs.env_bias,
-      row.inflation_gap * regimeProbs.restrictive,    // INFL_X_P_RESTRICTIVE
-      row.unemployment_gap * regimeProbs.expansionary, // UNEMP_X_P_EXPANSIONARY
+      rp.restrictive,
+      rp.expansionary,
+      rp.env_bias,
+      row.inflation_gap * rp.restrictive,    // INFL_X_P_RESTRICTIVE
+      row.unemployment_gap * rp.expansionary, // UNEMP_X_P_EXPANSIONARY
     );
   }
 
@@ -429,6 +429,13 @@ interface RegimeProbs {
   env_bias: number;
 }
 
+/** Per-row regime probabilities for the policy model feature matrix */
+interface PerRowRegimeProbs {
+  restrictive: number;
+  expansionary: number;
+  env_bias: number;
+}
+
 function isPandemic(month: string): boolean {
   return month >= '2020-03' && month <= '2021-12';
 }
@@ -485,50 +492,95 @@ function computeRegimeLabels(rows: FullRow[]): {
   return { restrictive, zlb, gfc, pandemic };
 }
 
-function runRegimeClassifier(rows: FullRow[], labels: { restrictive: number[]; zlb: number[]; gfc: number[]; pandemic: number[] }): RegimeProbs | null {
-  if (rows.length < 40) return null;
+const CLF_FEATURE_NAMES = [
+  'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
+  'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
+  'stress_score', 'rate_change_l1', 'inflation_accel',
+];
 
-  const clfFeatureNames = [
-    'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
-    'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
-    'stress_score', 'rate_change_l1', 'inflation_accel',
-  ];
+/**
+ * Expanding-window one-step-ahead regime probability series.
+ * For each row t >= minTrain, trains logistic on [0..t-1] shifted labels,
+ * predicts probability for row t.
+ * Returns per-row arrays aligned with `rows` (NaN for rows before minTrain).
+ */
+function expandingRegimeProba(
+  X: number[][], yLabel: number[], minTrain: number
+): number[] {
+  const n = X.length;
+  const probs = new Array(n).fill(NaN);
+  const minEff = Math.max(minTrain, X[0].length + 8);
 
-  const X = rows.map(r => clfFeatureNames.map(f => (r as Record<string, number>)[f] ?? 0));
-  const lastIdx = rows.length - 1;
+  // yShifted[i] = yLabel[i+1] (predict next month's label)
+  // So train on X[0..t-1] with yShifted[0..t-1], predict X[t]
+  const yShifted = yLabel.slice(1); // length n-1
 
-  const probs: Record<string, number> = {};
-  for (const [name, y] of Object.entries(labels)) {
-    const yShifted = y.slice(1);
-    const Xshifted = X.slice(0, -1);
+  for (let t = minEff; t < n; t++) {
+    // Training: X[0..t-1], yShifted[0..t-1] (which is yLabel[1..t])
+    if (t > yShifted.length) break;
+    const Xtrain = X.slice(0, t);
+    const ytrain = yShifted.slice(0, t);
 
-    if (yShifted.length < 36) { probs[name] = 0; continue; }
-    if (new Set(yShifted).size < 2) { probs[name] = 0; continue; }
-
-    const Xtrain = Xshifted;
-    const ytrain = yShifted;
-    const Xtest = [X[lastIdx]];
+    if (new Set(ytrain).size < 2) { probs[t] = 0; continue; }
 
     try {
-      const p = logisticPredict(Xtrain, ytrain, Xtest, 300, 0.5);
-      probs[name] = Math.round(p[0] * 10000) / 10000;
+      const p = logisticPredict(Xtrain, ytrain, [X[t]], 300, 0.5);
+      probs[t] = p[0];
     } catch {
-      probs[name] = 0;
+      probs[t] = 0;
     }
   }
 
-  const expansionary = Math.max(probs.zlb || 0, probs.gfc || 0, probs.pandemic || 0);
-  const restrictive = probs.restrictive || 0;
-
-  return {
-    restrictive,
-    zlb: probs.zlb || 0,
-    gfc: probs.gfc || 0,
-    pandemic: probs.pandemic || 0,
-    expansionary,
-    env_bias: Math.round((restrictive - expansionary) * 10000) / 10000,
-  };
+  return probs;
 }
+
+/**
+ * Compute per-row regime probabilities using expanding-window logistic regression.
+ * Returns:
+ *   - perRow: array of PerRowRegimeProbs (one per row), NaN-filled before minTrain
+ *   - latest: the latest RegimeProbs for display
+ */
+function computeExpandingRegimeProbs(
+  rows: FullRow[],
+  labels: { restrictive: number[]; zlb: number[]; gfc: number[]; pandemic: number[] },
+  minTrain = 36,
+): { perRow: PerRowRegimeProbs[]; latest: RegimeProbs } {
+  const X = rows.map(r => CLF_FEATURE_NAMES.map(f => (r as Record<string, number>)[f] ?? 0));
+
+  const pRestr = expandingRegimeProba(X, labels.restrictive, minTrain);
+  const pZlb = expandingRegimeProba(X, labels.zlb, minTrain);
+  const pGfc = expandingRegimeProba(X, labels.gfc, minTrain);
+  const pPandemic = expandingRegimeProba(X, labels.pandemic, minTrain);
+
+  const perRow: PerRowRegimeProbs[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = isNaN(pRestr[i]) ? 0 : pRestr[i];
+    const z = isNaN(pZlb[i]) ? 0 : pZlb[i];
+    const g = isNaN(pGfc[i]) ? 0 : pGfc[i];
+    const p = isNaN(pPandemic[i]) ? 0 : pPandemic[i];
+    const exp = Math.max(z, g, p);
+    perRow.push({ restrictive: r, expansionary: exp, env_bias: r - exp });
+  }
+
+  const last = rows.length - 1;
+  const lr = isNaN(pRestr[last]) ? 0 : pRestr[last];
+  const lz = isNaN(pZlb[last]) ? 0 : pZlb[last];
+  const lg = isNaN(pGfc[last]) ? 0 : pGfc[last];
+  const lp = isNaN(pPandemic[last]) ? 0 : pPandemic[last];
+  const lExp = Math.max(lz, lg, lp);
+
+  const latest: RegimeProbs = {
+    restrictive: Math.round(lr * 10000) / 10000,
+    zlb: Math.round(lz * 10000) / 10000,
+    gfc: Math.round(lg * 10000) / 10000,
+    pandemic: Math.round(lp * 10000) / 10000,
+    expansionary: Math.round(lExp * 10000) / 10000,
+    env_bias: Math.round((lr - lExp) * 10000) / 10000,
+  };
+
+  return { perRow, latest };
+}
+
 
 // ─── Build Full Rows ───────────────────────────────────────────────────────────
 
@@ -725,17 +777,16 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const hyVals = rows.map(r => r.hy_spread).filter(v => v > 0);
   const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
-  // Run regime classifier for Fed
+  // Run expanding-window regime classifier for Fed (per-row probabilities)
   const regimeLabels = computeRegimeLabels(rows);
-  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
-  console.log('Fed regime probs:', regimeProbs);
+  const { perRow: regimePerRow, latest: regimeProbs } = computeExpandingRegimeProbs(rows, regimeLabels, 36);
+  console.log('Fed regime probs (latest):', regimeProbs);
 
-  // Build feature matrix — always use regime-augmented (AutoRegime spec)
+  // Build feature matrix — always use regime-augmented (AutoRegime spec) with per-row probs
   const y = rows.map(r => r.policy_rate);
-  const effectiveRegimeProbs = regimeProbs || { restrictive: 0, zlb: 0, gfc: 0, pandemic: 0, expansionary: 0, env_bias: 0 };
-  const finalX = rows.map(r => buildFedFeatureRow(r, hyQ75, effectiveRegimeProbs));
+  const finalX = rows.map((r, i) => buildFedFeatureRow(r, hyQ75, regimePerRow[i]));
   const finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-  console.log('Fed: Using AutoRegime specification (18 features)');
+  console.log('Fed: Using AutoRegime specification (18 features, per-row regime probs)');
 
   // Fit final model
   const fullFit = ridgeFit(finalX, y, 0.0001);
@@ -770,7 +821,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
     feature_names: finalFeatureNames.filter(f => f !== 'const'),
     regime,
     stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
-    regime_probabilities: effectiveRegimeProbs,
+    regime_probabilities: regimeProbs,
     variables: {
       inflation_gap: round2(lastRow.inflation_gap),
       unemployment_gap: round2(lastRow.unemployment_gap),
@@ -814,9 +865,9 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
-  // Run regime classifier (for regime probs display only, not in ECB feature set after pruning)
+  // Run expanding-window regime classifier (for display only, not in ECB feature set after pruning)
   const regimeLabels = computeRegimeLabels(rows);
-  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
+  const { latest: regimeProbs } = computeExpandingRegimeProbs(rows, regimeLabels, 36);
   console.log('ECB regime probs:', regimeProbs);
 
   // Build ECB features — 14-feature pruned model
@@ -888,7 +939,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v4&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v5&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -909,7 +960,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v4',
+        analysis_type: 'policy_reaction_v5',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
