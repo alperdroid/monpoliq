@@ -5,7 +5,7 @@ import { MetricCard } from '@/components/analytics/MetricCard';
 import { fetchPolicyReaction, type PolicyReactionResult, type RegimeProbs } from '@/lib/api/policy-reaction';
 import {
   FlaskConical, TrendingUp, TrendingDown, Minus, AlertTriangle,
-  CheckCircle, Shield, Activity, BarChart3, Brain, ChevronDown, ChevronUp,
+  CheckCircle, Shield, Activity, BarChart3, Brain, ChevronDown, ChevronUp, BookOpen,
 } from 'lucide-react';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { useState } from 'react';
