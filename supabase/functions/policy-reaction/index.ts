@@ -730,36 +730,12 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   const regimeProbs = runRegimeClassifier(rows, regimeLabels);
   console.log('Fed regime probs:', regimeProbs);
 
-  // Build feature matrix — try regime-augmented first
+  // Build feature matrix — always use regime-augmented (AutoRegime spec)
   const y = rows.map(r => r.policy_rate);
-
-  // Base model (13 features, no regime)
-  const X_base = rows.map(r => buildFedFeatureRow(r, hyQ75, null));
-  const oosBase = expandingWindowOOS(y, X_base, 60, 0.0001);
-
-  // Augmented model (18 features with regime)
-  let finalX = X_base;
-  let finalFeatureNames = ['const', ...FED_BASE_FEATURES];
-  let usedRegime = false;
-
-  if (regimeProbs) {
-    const X_aug = rows.map(r => buildFedFeatureRow(r, hyQ75, regimeProbs));
-    const oosAug = expandingWindowOOS(y, X_aug, 60, 0.0001);
-
-    if (!isNaN(oosAug.r2_vs_naive) && !isNaN(oosBase.r2_vs_naive) && oosAug.r2_vs_naive > oosBase.r2_vs_naive) {
-      finalX = X_aug;
-      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-      usedRegime = true;
-      console.log('Fed: Regime augmentation promoted');
-    } else if (!isNaN(oosAug.rmse) && !isNaN(oosBase.rmse) && oosAug.rmse < oosBase.rmse) {
-      finalX = X_aug;
-      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
-      usedRegime = true;
-      console.log('Fed: Regime augmentation promoted (RMSE fallback)');
-    } else {
-      console.log('Fed: Regime augmentation did not improve OOS, using base model');
-    }
-  }
+  const effectiveRegimeProbs = regimeProbs || { restrictive: 0, zlb: 0, gfc: 0, pandemic: 0, expansionary: 0, env_bias: 0 };
+  const finalX = rows.map(r => buildFedFeatureRow(r, hyQ75, effectiveRegimeProbs));
+  const finalFeatureNames = ['const', ...FED_ALL_FEATURES];
+  console.log('Fed: Using AutoRegime specification (18 features)');
 
   // Fit final model
   const fullFit = ridgeFit(finalX, y, 0.0001);
