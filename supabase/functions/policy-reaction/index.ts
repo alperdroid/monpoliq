@@ -499,46 +499,38 @@ const CLF_FEATURE_NAMES = [
 ];
 
 /**
- * Expanding-window one-step-ahead regime probability series.
- * For each row t >= minTrain, trains logistic on [0..t-1] shifted labels,
- * predicts probability for row t.
- * Returns per-row arrays aligned with `rows` (NaN for rows before minTrain).
+ * Single full-sample logistic regression for regime probabilities.
+ * Trains on [0..n-2] shifted labels, predicts fitted values for all rows.
+ * Much faster than expanding-window (~4 fits vs ~1000).
  */
-function expandingRegimeProba(
+function singlePassRegimeProba(
   X: number[][], yLabel: number[], minTrain: number
 ): number[] {
   const n = X.length;
-  const probs = new Array(n).fill(NaN);
-  const minEff = Math.max(minTrain, X[0].length + 8);
+  const probs = new Array(n).fill(0);
+  if (n < minTrain + 5) return probs;
 
   // yShifted[i] = yLabel[i+1] (predict next month's label)
-  // So train on X[0..t-1] with yShifted[0..t-1], predict X[t]
   const yShifted = yLabel.slice(1); // length n-1
 
-  for (let t = minEff; t < n; t++) {
-    // Training: X[0..t-1], yShifted[0..t-1] (which is yLabel[1..t])
-    if (t > yShifted.length) break;
-    const Xtrain = X.slice(0, t);
-    const ytrain = yShifted.slice(0, t);
+  // Train on all rows except last, predict all rows
+  const Xtrain = X.slice(0, n - 1);
+  const ytrain = yShifted.slice(0, n - 1);
 
-    if (new Set(ytrain).size < 2) { probs[t] = 0; continue; }
+  if (new Set(ytrain).size < 2) return probs;
 
-    try {
-      const p = logisticPredict(Xtrain, ytrain, [X[t]], 300, 0.5);
-      probs[t] = p[0];
-    } catch {
-      probs[t] = 0;
-    }
+  try {
+    const allProbs = logisticPredict(Xtrain, ytrain, X, 300, 0.5);
+    for (let i = 0; i < n; i++) probs[i] = allProbs[i];
+  } catch {
+    // keep zeros
   }
 
   return probs;
 }
 
 /**
- * Compute per-row regime probabilities using expanding-window logistic regression.
- * Returns:
- *   - perRow: array of PerRowRegimeProbs (one per row), NaN-filled before minTrain
- *   - latest: the latest RegimeProbs for display
+ * Compute per-row regime probabilities using single-pass logistic regression.
  */
 function computeExpandingRegimeProbs(
   rows: FullRow[],
@@ -547,35 +539,26 @@ function computeExpandingRegimeProbs(
 ): { perRow: PerRowRegimeProbs[]; latest: RegimeProbs } {
   const X = rows.map(r => CLF_FEATURE_NAMES.map(f => (r as Record<string, number>)[f] ?? 0));
 
-  const pRestr = expandingRegimeProba(X, labels.restrictive, minTrain);
-  const pZlb = expandingRegimeProba(X, labels.zlb, minTrain);
-  const pGfc = expandingRegimeProba(X, labels.gfc, minTrain);
-  const pPandemic = expandingRegimeProba(X, labels.pandemic, minTrain);
+  const pRestr = singlePassRegimeProba(X, labels.restrictive, minTrain);
+  const pZlb = singlePassRegimeProba(X, labels.zlb, minTrain);
+  const pGfc = singlePassRegimeProba(X, labels.gfc, minTrain);
+  const pPandemic = singlePassRegimeProba(X, labels.pandemic, minTrain);
 
   const perRow: PerRowRegimeProbs[] = [];
   for (let i = 0; i < rows.length; i++) {
-    const r = isNaN(pRestr[i]) ? 0 : pRestr[i];
-    const z = isNaN(pZlb[i]) ? 0 : pZlb[i];
-    const g = isNaN(pGfc[i]) ? 0 : pGfc[i];
-    const p = isNaN(pPandemic[i]) ? 0 : pPandemic[i];
-    const exp = Math.max(z, g, p);
+    const r = pRestr[i];
+    const exp = Math.max(pZlb[i], pGfc[i], pPandemic[i]);
     perRow.push({ restrictive: r, expansionary: exp, env_bias: r - exp });
   }
 
   const last = rows.length - 1;
-  const lr = isNaN(pRestr[last]) ? 0 : pRestr[last];
-  const lz = isNaN(pZlb[last]) ? 0 : pZlb[last];
-  const lg = isNaN(pGfc[last]) ? 0 : pGfc[last];
-  const lp = isNaN(pPandemic[last]) ? 0 : pPandemic[last];
-  const lExp = Math.max(lz, lg, lp);
-
   const latest: RegimeProbs = {
-    restrictive: Math.round(lr * 10000) / 10000,
-    zlb: Math.round(lz * 10000) / 10000,
-    gfc: Math.round(lg * 10000) / 10000,
-    pandemic: Math.round(lp * 10000) / 10000,
-    expansionary: Math.round(lExp * 10000) / 10000,
-    env_bias: Math.round((lr - lExp) * 10000) / 10000,
+    restrictive: Math.round(pRestr[last] * 10000) / 10000,
+    zlb: Math.round(pZlb[last] * 10000) / 10000,
+    gfc: Math.round(pGfc[last] * 10000) / 10000,
+    pandemic: Math.round(pPandemic[last] * 10000) / 10000,
+    expansionary: Math.round(Math.max(pZlb[last], pGfc[last], pPandemic[last]) * 10000) / 10000,
+    env_bias: Math.round((pRestr[last] - Math.max(pZlb[last], pGfc[last], pPandemic[last])) * 10000) / 10000,
   };
 
   return { perRow, latest };
