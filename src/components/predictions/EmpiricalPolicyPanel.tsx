@@ -251,6 +251,7 @@ export function EmpiricalPolicyPanel() {
           <p className="text-[9px] text-muted-foreground text-right">
             Generated: {new Date(data.generated_at).toLocaleString()}
           </p>
+          <AcademicReferences />
         </>
       )}
     </div>
