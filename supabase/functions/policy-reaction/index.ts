@@ -865,9 +865,9 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
-  // Run regime classifier (for regime probs display only, not in ECB feature set after pruning)
+  // Run expanding-window regime classifier (for display only, not in ECB feature set after pruning)
   const regimeLabels = computeRegimeLabels(rows);
-  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
+  const { latest: regimeProbs } = computeExpandingRegimeProbs(rows, regimeLabels, 36);
   console.log('ECB regime probs:', regimeProbs);
 
   // Build ECB features — 14-feature pruned model
