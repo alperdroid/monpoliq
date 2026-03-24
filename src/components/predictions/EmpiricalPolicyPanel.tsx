@@ -11,8 +11,8 @@ import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { useState } from 'react';
 
 function GapIndicator({ gap }: { gap: number }) {
-  const isPos = gap > 0.05;
-  const isNeg = gap < -0.05;
+  const isPos = gap > 0.15;
+  const isNeg = gap < -0.15;
   const color = isPos ? 'text-signal-hawkish' : isNeg ? 'text-signal-dovish' : 'text-signal-neutral';
   const Icon = isPos ? TrendingUp : isNeg ? TrendingDown : Minus;
   const meaning = isPos ? 'Rate Too Low' : isNeg ? 'Rate Too High' : 'Near Fair Value';
