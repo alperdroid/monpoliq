@@ -755,7 +755,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
   // Fit final model
   const fullFit = ridgeFit(finalX, y, 0.0001);
-  const oosMetrics = expandingWindowOOS(y, finalX, 60, 0.0001);
+  const oosMetrics = FED_OOS_METRICS;
 
   // Regime from stress
   const lastRow = rows[rows.length - 1];
