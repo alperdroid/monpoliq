@@ -1,6 +1,6 @@
 // Policy Reaction Function — Regime-Aware Econometric Policy Rate Models
-// Fed: 13-feature ElasticNet-derived OLS
-// ECB: Structural breaks + automatic regime classifier + p-value pruning
+// Fed: 18-feature AutoRegime ElasticNet-derived (13 base + 5 regime)
+// ECB: 14-feature p-value pruned structural break + automatic regime classifier
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,11 +68,9 @@ function olsFit(X: number[][], y: number[]): { beta: number[]; fitted: number[];
   return { beta, fitted, residuals, r2 };
 }
 
-/** Ridge regression: β = (X'X + λI)^{-1} X'y — used for ElasticNet approximation with very small alpha */
 function ridgeFit(X: number[][], y: number[], lambda: number): { beta: number[]; fitted: number[]; r2: number } {
   const Xt = transpose(X);
   const XtX = matMul(Xt, X);
-  // Add lambda to diagonal (skip intercept col 0)
   for (let i = 1; i < XtX.length; i++) XtX[i][i] += lambda;
   const XtXinv = invertMatrix(XtX);
   const Xty = matVecMul(Xt, y);
@@ -107,7 +105,6 @@ function standardize(X: number[][]): { Xs: number[][]; means: number[]; stds: nu
   return { Xs, means, stds };
 }
 
-/** Logistic regression via gradient descent, returns predict_proba for test points */
 function logisticPredict(
   X_train: number[][], y_train: number[],
   X_test: number[][],
@@ -116,22 +113,20 @@ function logisticPredict(
   const n = X_train.length, p = X_train[0].length;
   if (n < 5 || new Set(y_train).size < 2) return X_test.map(() => 0.5);
 
-  // Standardize using training data
   const { Xs: Xtr_s, means, stds } = standardize(X_train);
   const Xte_s = X_test.map(row => row.map((v, j) => (v - means[j]) / stds[j]));
 
-  // Class weights for imbalanced data
   const posCount = y_train.filter(v => v === 1).length;
   const negCount = n - posCount;
   const wPos = n / (2 * Math.max(posCount, 1));
   const wNeg = n / (2 * Math.max(negCount, 1));
 
-  const w = new Array(p + 1).fill(0); // +1 for intercept
+  const w = new Array(p + 1).fill(0);
 
   for (let iter = 0; iter < maxIter; iter++) {
     const grad = new Array(p + 1).fill(0);
     for (let i = 0; i < n; i++) {
-      let z = w[0]; // intercept
+      let z = w[0];
       for (let j = 0; j < p; j++) z += Xtr_s[i][j] * w[j + 1];
       const prob = sigmoid(z);
       const sampleW = y_train[i] === 1 ? wPos : wNeg;
@@ -155,14 +150,13 @@ interface OOSMetrics {
   rmse: number;
   r2_vs_naive: number;
   r2_level: number;
-  direction_acc: number;
   n_oos: number;
 }
 
 function expandingWindowOOS(y: number[], X: number[][], minTrain: number, lambda = 0): OOSMetrics {
   const n = y.length;
   const minEff = Math.max(minTrain, X[0].length + 10);
-  if (n <= minEff + 1) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, direction_acc: NaN, n_oos: 0 };
+  if (n <= minEff + 1) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, n_oos: 0 };
 
   const yTrue: number[] = [], yPred: number[] = [], yNaive: number[] = [];
   for (let t = minEff; t < n; t++) {
@@ -179,30 +173,17 @@ function expandingWindowOOS(y: number[], X: number[][], minTrain: number, lambda
     }
   }
 
-  if (yTrue.length < 5) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, direction_acc: NaN, n_oos: 0 };
+  if (yTrue.length < 5) return { rmse: NaN, r2_vs_naive: NaN, r2_level: NaN, n_oos: 0 };
 
   const sseModel = yTrue.reduce((s, yt, i) => s + (yt - yPred[i]) ** 2, 0);
   const sseNaive = yTrue.reduce((s, yt, i) => s + (yt - yNaive[i]) ** 2, 0);
   const yMean = yTrue.reduce((s, v) => s + v, 0) / yTrue.length;
   const ssTot = yTrue.reduce((s, v) => s + (v - yMean) ** 2, 0);
 
-  let dirAcc = NaN;
-  if (yTrue.length > 1) {
-    let correct = 0, total = 0;
-    for (let i = 1; i < yTrue.length; i++) {
-      const dTrue = yTrue[i] - yTrue[i - 1];
-      const dPred = yPred[i] - yPred[i - 1];
-      if (Math.sign(dTrue) === Math.sign(dPred)) correct++;
-      total++;
-    }
-    dirAcc = total > 0 ? correct / total : NaN;
-  }
-
   return {
     rmse: Math.sqrt(sseModel / yTrue.length),
     r2_vs_naive: sseNaive > 0 ? 1 - sseModel / sseNaive : NaN,
     r2_level: ssTot > 0 ? 1 - sseModel / ssTot : NaN,
-    direction_acc: dirAcc,
     n_oos: yTrue.length,
   };
 }
@@ -328,9 +309,11 @@ interface FullRow {
   unemployment_gap_l3: number;
   unemployment_gap_l6: number;
   y2y_l1: number;
+  y2y_l3: number;
   slope_l6: number;
   credit_spread_l1: number;
   fci_l1: number;
+  fci_l3: number;
   // Derived
   vix_sq: number;
   rate_change_l1: number;
@@ -339,18 +322,29 @@ interface FullRow {
   stress_score: number;
 }
 
-// ─── Fed Model ─────────────────────────────────────────────────────────────────
+// ─── Fed Model (AutoRegime: 13 base + 5 regime = 18 features) ─────────────────
 
-const FED_FEATURES = [
+const FED_BASE_FEATURES = [
   'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'slope',
   'r_neg_equity', 'vix', 'unemployment_gap_l1', 'vix_sq',
   'unemployment_gap_l6', 'y2y_l1', 'credit_spread_l1', 'slope_l6',
   'y2y_x_d_hy_q75',
 ] as const;
 
-function buildFedFeatureRow(row: FullRow, hyQ75: number): number[] {
+const FED_REGIME_FEATURES = [
+  'p_next_restrictive', 'p_next_expansionary', 'env_bias',
+  'infl_x_p_restrictive', 'unemp_x_p_expansionary',
+] as const;
+
+const FED_ALL_FEATURES = [...FED_BASE_FEATURES, ...FED_REGIME_FEATURES];
+
+function buildFedFeatureRow(
+  row: FullRow,
+  hyQ75: number,
+  regimeProbs: { restrictive: number; expansionary: number; env_bias: number } | null,
+): number[] {
   const dHyQ75 = row.hy_spread >= hyQ75 ? 1 : 0;
-  return [
+  const features = [
     1, // intercept
     row.policy_rate_lag,
     row.inflation_gap,
@@ -366,9 +360,26 @@ function buildFedFeatureRow(row: FullRow, hyQ75: number): number[] {
     row.slope_l6,
     row.y2y * dHyQ75, // Y2Y_X_D_HY_SPREAD_Q75
   ];
+
+  // Regime probability features
+  if (regimeProbs) {
+    features.push(
+      regimeProbs.restrictive,
+      regimeProbs.expansionary,
+      regimeProbs.env_bias,
+      row.inflation_gap * regimeProbs.restrictive,    // INFL_X_P_RESTRICTIVE
+      row.unemployment_gap * regimeProbs.expansionary, // UNEMP_X_P_EXPANSIONARY
+    );
+  }
+
+  return features;
 }
 
-// ─── ECB Model with Structural Breaks + Regime ─────────────────────────────────
+// ─── ECB Model: 14 p-value pruned features ─────────────────────────────────────
+// Correct specification after backward elimination (p <= 0.10):
+// Y2Y, POLICY_RATE_LAG, FCI_L1, INFLATION_GAP_L1, Y2Y_L3, SLOPE, HY_SPREAD,
+// RATE_CHANGE_L1, FCI_L3, UNEMPLOYMENT_GAP_X_D_GFC, VOL (=VIX),
+// INFLATION_GAP_X_D_NEG_RATE_ERA, POLICY_RATE_LAG_X_D_SOV_CRISIS, CREDIT_SPREAD
 
 function isGFC(month: string): boolean {
   return month >= '2008-09' && month <= '2010-06';
@@ -376,78 +387,38 @@ function isGFC(month: string): boolean {
 function isSovCrisis(month: string): boolean {
   return month >= '2010-04' && month <= '2012-09';
 }
-function isPandemic(month: string): boolean {
-  return month >= '2020-03' && month <= '2021-12';
-}
-function isEnergyShock(month: string): boolean {
-  return month >= '2021-09' && month <= '2022-12';
-}
-function isHiking22(month: string): boolean {
-  return month >= '2022-07';
-}
 
-function buildECBFeatureRow(
-  row: FullRow,
-  vixQ85: number,
-  fciQ85: number,
-  regimeProbs: { restrictive: number; expansionary: number; env_bias: number } | null,
-): number[] {
+const ECB_FEATURE_NAMES = [
+  'const', 'y2y', 'policy_rate_lag', 'fci_l1', 'inflation_gap_l1', 'y2y_l3',
+  'slope', 'hy_spread', 'rate_change_l1', 'fci_l3', 'unemp_gap_x_gfc',
+  'vix', 'infl_gap_x_neg_rate', 'rate_lag_x_sov_crisis', 'credit_spread',
+];
+
+function buildECBFeatureRow(row: FullRow): number[] {
   const dNegRate = row.policy_rate_lag <= 0 ? 1 : 0;
   const dGFC = isGFC(row.month) ? 1 : 0;
   const dSovCrisis = isSovCrisis(row.month) ? 1 : 0;
-  const dVolQ85 = row.vix >= vixQ85 ? 1 : 0;
-  const dFciQ85 = row.fci >= fciQ85 ? 1 : 0;
 
-  const features = [
+  return [
     1, // intercept
-    // Base macro
-    row.policy_rate_lag,
-    row.inflation_gap,
-    row.unemployment_gap,
     row.y2y,
-    row.slope,
-    row.oil_log_change,
-    row.r_neg_equity,
-    // Extended factors
-    row.credit_spread,
-    row.vix,
-    row.fci,
-    // Lags
-    row.inflation_gap_l1,
+    row.policy_rate_lag,
     row.fci_l1,
+    row.inflation_gap_l1,
+    row.y2y_l3,
+    row.slope,
+    row.hy_spread,
     row.rate_change_l1,
-    row.inflation_accel,
-    // Structural break interactions
-    row.unemployment_gap * dGFC,               // UNEMPLOYMENT_GAP_X_D_GFC
-    row.inflation_gap * dNegRate,               // INFLATION_GAP_X_D_NEG_RATE_ERA
-    row.policy_rate_lag * dSovCrisis,           // POLICY_RATE_LAG_X_D_SOV_CRISIS
-    dVolQ85,                                     // D_VOL_Q85
-    row.unemployment_gap * dFciQ85,             // UNEMPLOYMENT_GAP_X_D_FCI_Q85
-    row.policy_rate_lag * dGFC,                 // POLICY_RATE_LAG_X_D_GFC
+    row.fci_l3,
+    row.unemployment_gap * dGFC,      // UNEMPLOYMENT_GAP_X_D_GFC
+    row.vix,                           // VOL in the notebook = VIX
+    row.inflation_gap * dNegRate,      // INFLATION_GAP_X_D_NEG_RATE_ERA
+    row.policy_rate_lag * dSovCrisis,  // POLICY_RATE_LAG_X_D_SOV_CRISIS
+    row.credit_spread,
   ];
-
-  // Add regime probabilities if available
-  if (regimeProbs) {
-    features.push(
-      regimeProbs.restrictive,
-      regimeProbs.expansionary,
-      regimeProbs.env_bias,
-    );
-  }
-
-  return features;
 }
 
-const ECB_FEATURE_NAMES = [
-  'const', 'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
-  'oil_log_change', 'r_neg_equity', 'credit_spread', 'vix', 'fci',
-  'inflation_gap_l1', 'fci_l1', 'rate_change_l1', 'inflation_accel',
-  'unemp_gap_x_gfc', 'infl_gap_x_neg_rate', 'rate_lag_x_sov_crisis',
-  'd_vol_q85', 'unemp_gap_x_fci_q85', 'rate_lag_x_gfc',
-  'p_restrictive', 'p_expansionary', 'env_bias',
-];
-
-// ─── Regime Classifier ────────────────────────────────────────────────────────
+// ─── Regime Classifier (shared for both Fed and ECB) ──────────────────────────
 
 interface RegimeProbs {
   restrictive: number;
@@ -458,13 +429,16 @@ interface RegimeProbs {
   env_bias: number;
 }
 
+function isPandemic(month: string): boolean {
+  return month >= '2020-03' && month <= '2021-12';
+}
+
 function computeRegimeLabels(rows: FullRow[]): {
   restrictive: number[];
   zlb: number[];
   gfc: number[];
   pandemic: number[];
 } {
-  // Rolling z-scores for restrictive classification
   const rateMu: number[] = [];
   const inflMu: number[] = [];
   for (let i = 0; i < rows.length; i++) {
@@ -516,24 +490,21 @@ function runRegimeClassifier(rows: FullRow[], labels: { restrictive: number[]; z
 
   const clfFeatureNames = [
     'policy_rate_lag', 'inflation_gap', 'unemployment_gap', 'y2y', 'slope',
-    'oil_log_change', 'r_neg_equity', 'credit_spread', 'vix', 'fci',
+    'oil_log_change', 'r_neg_equity', 'credit_spread', 'hy_spread', 'vix', 'fci',
     'stress_score', 'rate_change_l1', 'inflation_accel',
   ];
 
   const X = rows.map(r => clfFeatureNames.map(f => (r as Record<string, number>)[f] ?? 0));
   const lastIdx = rows.length - 1;
 
-  // One-step-ahead prediction for the last observation
   const probs: Record<string, number> = {};
   for (const [name, y] of Object.entries(labels)) {
-    // Shift labels: predict next month's label
     const yShifted = y.slice(1);
     const Xshifted = X.slice(0, -1);
 
     if (yShifted.length < 36) { probs[name] = 0; continue; }
     if (new Set(yShifted).size < 2) { probs[name] = 0; continue; }
 
-    // Use all data up to last for training, predict for last
     const Xtrain = Xshifted;
     const ytrain = yShifted;
     const Xtest = [X[lastIdx]];
@@ -577,7 +548,6 @@ function buildFullRows(
   vix: Map<string, number>,
   fci: Map<string, number>,
 ): FullRow[] {
-  // First pass: compute base values for all months
   interface BaseRow {
     month: string;
     policy_rate: number;
@@ -627,7 +597,6 @@ function buildFullRows(
       inflGap = ((pceCur / pce12) - 1) * 100 - 2.0;
     }
 
-    // NAIRU
     const nrouVal = gv(nrou, m);
     let nairu: number;
     if (nrouVal != null) {
@@ -671,13 +640,12 @@ function buildFullRows(
     if (!cur) continue;
 
     const prev1 = i >= 1 ? baseRows[i - 1] : null;
+    const prev2 = i >= 2 ? baseRows[i - 2] : null;
     const prev3 = i >= 3 ? baseRows[i - 3] : null;
     const prev6 = i >= 6 ? baseRows[i - 6] : null;
-    const prev2 = i >= 2 ? baseRows[i - 2] : null;
 
     if (!prev1 || !prev3 || !prev6) continue;
 
-    // Compute stress score
     const stressComps = [cur.credit_spread, cur.hy_spread / 5, cur.vix / 20, cur.fci];
     const stressScore = stressComps.reduce((s, v) => s + v, 0) / stressComps.length;
 
@@ -687,9 +655,11 @@ function buildFullRows(
       unemployment_gap_l3: prev3.unemployment_gap,
       unemployment_gap_l6: prev6.unemployment_gap,
       y2y_l1: prev1.y2y,
+      y2y_l3: prev3.y2y,
       slope_l6: prev6.slope,
       credit_spread_l1: prev1.credit_spread,
       fci_l1: prev1.fci,
+      fci_l3: prev3.fci,
       vix_sq: cur.vix * cur.vix,
       rate_change_l1: prev1.policy_rate - (prev2 ? prev2.policy_rate : prev1.policy_rate),
       inflation_gap_l1: prev1.inflation_gap,
@@ -723,7 +693,10 @@ interface ModelResult {
   sample_size: number;
 }
 
-// ─── Run Fed Model ─────────────────────────────────────────────────────────────
+function round2(v: number | null): number | null { return v != null ? Math.round(v * 100) / 100 : null; }
+function round3(v: number | null): number | null { return v != null ? Math.round(v * 1000) / 1000 : null; }
+
+// ─── Run Fed Model (AutoRegime) ────────────────────────────────────────────────
 
 async function runFedModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching Fed data...');
@@ -748,32 +721,61 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   console.log(`Fed: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient Fed data');
 
-  // Compute HY spread Q75 threshold
+  // HY spread Q75 threshold
   const hyVals = rows.map(r => r.hy_spread).filter(v => v > 0);
   const hyQ75 = hyVals.length > 0 ? quantile(hyVals, 0.75) : 6;
 
-  // Build feature matrix
+  // Run regime classifier for Fed
+  const regimeLabels = computeRegimeLabels(rows);
+  const regimeProbs = runRegimeClassifier(rows, regimeLabels);
+  console.log('Fed regime probs:', regimeProbs);
+
+  // Build feature matrix — try regime-augmented first
   const y = rows.map(r => r.policy_rate);
-  const X = rows.map(r => buildFedFeatureRow(r, hyQ75));
 
-  // Fit full sample (Ridge with very small lambda to approximate ElasticNet alpha=0.0001)
-  const fullFit = ridgeFit(X, y, 0.0001);
+  // Base model (13 features, no regime)
+  const X_base = rows.map(r => buildFedFeatureRow(r, hyQ75, null));
+  const oosBase = expandingWindowOOS(y, X_base, 60, 0.0001);
 
-  // OOS evaluation
-  const oosMetrics = expandingWindowOOS(y, X, 60, 0.0001);
+  // Augmented model (18 features with regime)
+  let finalX = X_base;
+  let finalFeatureNames = ['const', ...FED_BASE_FEATURES];
+  let usedRegime = false;
 
-  // Regime classification
+  if (regimeProbs) {
+    const X_aug = rows.map(r => buildFedFeatureRow(r, hyQ75, regimeProbs));
+    const oosAug = expandingWindowOOS(y, X_aug, 60, 0.0001);
+
+    if (!isNaN(oosAug.r2_vs_naive) && !isNaN(oosBase.r2_vs_naive) && oosAug.r2_vs_naive > oosBase.r2_vs_naive) {
+      finalX = X_aug;
+      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
+      usedRegime = true;
+      console.log('Fed: Regime augmentation promoted');
+    } else if (!isNaN(oosAug.rmse) && !isNaN(oosBase.rmse) && oosAug.rmse < oosBase.rmse) {
+      finalX = X_aug;
+      finalFeatureNames = ['const', ...FED_ALL_FEATURES];
+      usedRegime = true;
+      console.log('Fed: Regime augmentation promoted (RMSE fallback)');
+    } else {
+      console.log('Fed: Regime augmentation did not improve OOS, using base model');
+    }
+  }
+
+  // Fit final model
+  const fullFit = ridgeFit(finalX, y, 0.0001);
+  const oosMetrics = expandingWindowOOS(y, finalX, 60, 0.0001);
+
+  // Regime from stress
   const lastRow = rows[rows.length - 1];
   const allStress = rows.map(r => r.stress_score).sort((a, b) => a - b);
   const q20 = allStress[Math.floor(allStress.length * 0.2)];
   const q80 = allStress[Math.floor(allStress.length * 0.8)];
   const regime = lastRow.stress_score <= q20 ? 'Benign' : lastRow.stress_score >= q80 ? 'Stress' : 'Neutral';
 
-  const coefNames = ['const', ...FED_FEATURES];
   const coefficients: Record<string, number> = {};
-  fullFit.beta.forEach((b, i) => { coefficients[coefNames[i]] = Math.round(b * 1e6) / 1e6; });
+  fullFit.beta.forEach((b, i) => { coefficients[finalFeatureNames[i]] = Math.round(b * 1e6) / 1e6; });
 
-  const implied = X[X.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
+  const implied = finalX[finalX.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
 
   return {
     bank: 'FED',
@@ -785,15 +787,14 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
       rmse: Math.round(oosMetrics.rmse * 10000) / 10000,
       r2_vs_naive: Math.round(oosMetrics.r2_vs_naive * 10000) / 10000,
       r2_level: Math.round(oosMetrics.r2_level * 10000) / 10000,
-      direction_acc: Math.round(oosMetrics.direction_acc * 10000) / 10000,
       n_oos: oosMetrics.n_oos,
     },
-    model_name: 'ElasticNet-Derived Ridge (α=0.0001)',
-    n_features: FED_FEATURES.length,
-    feature_names: [...FED_FEATURES],
+    model_name: usedRegime ? 'AutoRegime ElasticNet-Ridge (α=0.0001)' : 'ElasticNet-Derived Ridge (α=0.0001)',
+    n_features: finalFeatureNames.length - 1,
+    feature_names: finalFeatureNames.filter(f => f !== 'const'),
     regime,
     stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
-    regime_probabilities: null,
+    regime_probabilities: usedRegime ? regimeProbs : null,
     variables: {
       inflation_gap: round2(lastRow.inflation_gap),
       unemployment_gap: round2(lastRow.unemployment_gap),
@@ -813,10 +814,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
   };
 }
 
-function round2(v: number | null): number | null { return v != null ? Math.round(v * 100) / 100 : null; }
-function round3(v: number | null): number | null { return v != null ? Math.round(v * 1000) / 1000 : null; }
-
-// ─── Run ECB Model ─────────────────────────────────────────────────────────────
+// ─── Run ECB Model (14-feature pruned structural break) ────────────────────────
 
 async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
@@ -840,59 +838,27 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
-  // Compute quantile thresholds
-  const vixVals = rows.map(r => r.vix);
-  const fciVals = rows.map(r => r.fci);
-  const vixQ85 = quantile(vixVals, 0.85);
-  const fciQ85 = quantile(fciVals, 0.85);
-
-  // Run regime classifier
+  // Run regime classifier (for regime probs display only, not in ECB feature set after pruning)
   const regimeLabels = computeRegimeLabels(rows);
   const regimeProbs = runRegimeClassifier(rows, regimeLabels);
   console.log('ECB regime probs:', regimeProbs);
 
-  // Build ECB features — first without regime probs to test base model
+  // Build ECB features — 14-feature pruned model
   const y = rows.map(r => r.policy_rate);
-  const X_base = rows.map(r => buildECBFeatureRow(r, vixQ85, fciQ85, null));
-
-  // OOS for base model
-  const oosBase = expandingWindowOOS(y, X_base, 60);
-
-  // If regime probs available, try augmented model
-  let finalX = X_base;
-  let finalFeatureNames = ECB_FEATURE_NAMES.slice(0, 21); // without regime cols
-  let usedRegime = false;
-
-  if (regimeProbs) {
-    // For augmented model, we only add regime probs to the LAST few rows (since classifier needs history)
-    // Simple approach: use the latest regime probs for all rows (approximation for the production implied rate)
-    const X_aug = rows.map(r => buildECBFeatureRow(r, vixQ85, fciQ85, regimeProbs));
-    const oosAug = expandingWindowOOS(y, X_aug, 60);
-
-    if (!isNaN(oosAug.r2_vs_naive) && !isNaN(oosBase.r2_vs_naive) && oosAug.r2_vs_naive > oosBase.r2_vs_naive) {
-      finalX = X_aug;
-      finalFeatureNames = [...ECB_FEATURE_NAMES];
-      usedRegime = true;
-      console.log('ECB: Regime augmentation promoted');
-    } else {
-      console.log('ECB: Regime augmentation did not improve OOS, using base structural model');
-    }
-  }
+  const X = rows.map(r => buildECBFeatureRow(r));
 
   // Fit final model
-  const fullFit = olsFit(finalX, y);
-  const oosMetrics = expandingWindowOOS(y, finalX, 60);
+  const fullFit = olsFit(X, y);
+  const oosMetrics = expandingWindowOOS(y, X, 60);
 
-  // P-value pruning (approximate: check coefficient significance via t-stat)
-  // In production OLS, we compute t-stats from (X'X)^{-1} diagonal
   const coefficients: Record<string, number> = {};
   fullFit.beta.forEach((b, i) => {
-    const name = finalFeatureNames[i] || `feat_${i}`;
+    const name = ECB_FEATURE_NAMES[i] || `feat_${i}`;
     coefficients[name] = Math.round(b * 1e6) / 1e6;
   });
 
   const lastRow = rows[rows.length - 1];
-  const implied = finalX[finalX.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
+  const implied = X[X.length - 1].reduce((s, x, j) => s + x * fullFit.beta[j], 0);
 
   // Regime from stress
   const allStress = rows.map(r => r.stress_score).sort((a, b) => a - b);
@@ -910,12 +876,11 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
       rmse: Math.round((oosMetrics.rmse || 0) * 10000) / 10000,
       r2_vs_naive: Math.round((oosMetrics.r2_vs_naive || 0) * 10000) / 10000,
       r2_level: Math.round((oosMetrics.r2_level || 0) * 10000) / 10000,
-      direction_acc: Math.round((oosMetrics.direction_acc || 0) * 10000) / 10000,
       n_oos: oosMetrics.n_oos,
     },
-    model_name: usedRegime ? 'Regime-Aware Structural Break' : 'Structural Break (Pruned)',
-    n_features: finalFeatureNames.length - 1, // minus const
-    feature_names: finalFeatureNames.filter(f => f !== 'const'),
+    model_name: 'Structural Break OLS (p≤0.10 pruned)',
+    n_features: ECB_FEATURE_NAMES.length - 1,
+    feature_names: ECB_FEATURE_NAMES.filter(f => f !== 'const'),
     regime,
     stress_score: Math.round(lastRow.stress_score * 1000) / 1000,
     regime_probabilities: regimeProbs,
@@ -947,7 +912,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v2&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v3&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -968,7 +933,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v2',
+        analysis_type: 'policy_reaction_v3',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
@@ -985,7 +950,7 @@ Deno.serve(async (req: Request) => {
   try {
     const cached = await getCached();
     if (cached) {
-      console.log('Returning cached regime-aware policy reaction');
+      console.log('Returning cached regime-aware policy reaction v3');
       return new Response(JSON.stringify(cached), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

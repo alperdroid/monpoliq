@@ -89,11 +89,10 @@ function OOSCard({ metrics }: { metrics: PolicyReactionResult['oos_metrics'] }) 
         <BarChart3 className="w-3 h-3 text-primary" />
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Out-of-Sample Performance</span>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <MetricCard label="RMSE" value={metrics.rmse.toFixed(4)} />
         <MetricCard label="R² vs Naïve" value={metrics.r2_vs_naive.toFixed(4)} variant="primary" />
         <MetricCard label="R² Level" value={metrics.r2_level.toFixed(4)} />
-        <MetricCard label="Dir. Acc." value={`${(metrics.direction_acc * 100).toFixed(1)}%`} />
       </div>
       <p className="text-[8px] text-muted-foreground text-right">{metrics.n_oos} expanding-window forecasts</p>
     </div>
@@ -173,7 +172,7 @@ function BankReactionCard({ data }: { data: PolicyReactionResult }) {
       {/* OOS Performance */}
       <OOSCard metrics={data.oos_metrics} />
 
-      {/* Regime Probabilities (ECB only typically) */}
+      {/* Regime Probabilities */}
       {data.regime_probabilities && <RegimePanel probs={data.regime_probabilities} />}
 
       {/* Current Variables */}
@@ -216,10 +215,10 @@ export function EmpiricalPolicyPanel() {
       <div className="flex items-center gap-2">
         <FlaskConical className="w-5 h-5 text-primary" />
         <h2 className="text-lg font-bold">Empirical Policy Corner</h2>
-        <TooltipInfo content="Regime-aware econometric models estimate implied policy rates using structural-break augmented specifications. Fed: 13-feature ElasticNet-derived model. ECB: Structural break model with automatic regime classifier. All evaluated via expanding-window one-step-ahead OOS forecasts." />
+        <TooltipInfo content="Regime-aware econometric models estimate implied policy rates. Fed: 18-feature AutoRegime ElasticNet-Ridge with regime probability interactions. ECB: 14-feature p-value pruned structural break OLS with GFC, sovereign crisis, and negative-rate era interactions. Both evaluated via expanding-window one-step-ahead OOS forecasts." />
       </div>
       <p className="text-[10px] text-muted-foreground -mt-2">
-        Fed: ElasticNet-derived OLS (lags, interactions, VIX²) · ECB: Structural breaks + regime classifier (GFC, ZLB, pandemic, restrictive) · Real FRED + market data
+        Fed: AutoRegime ElasticNet-Ridge (lags, VIX², regime probs) · ECB: Structural break OLS (p≤0.10 pruned, GFC/sov crisis/neg-rate interactions) · Real FRED + market data
       </p>
 
       {isLoading && (
