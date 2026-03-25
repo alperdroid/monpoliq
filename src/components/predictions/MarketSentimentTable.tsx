@@ -239,7 +239,7 @@ export function MarketSentimentTable() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
             <Clock className="w-4 h-4 text-primary animate-pulse" />
-            Market vs AI Expectations
+            Market Expectations & Pricing
           </CardTitle>
         </CardHeader>
         <CardContent>
