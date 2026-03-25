@@ -70,11 +70,11 @@ export function AlertRulesPanel() {
     queryKey: ['alert-rules', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('alert_rules')
+        .from('alert_rules' as any)
         .select('*')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data as AlertRule[];
+      return (data || []) as unknown as AlertRule[];
     },
     enabled: !!user,
   });
