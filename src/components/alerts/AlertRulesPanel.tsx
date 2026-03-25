@@ -112,7 +112,7 @@ export function AlertRulesPanel() {
 
   const toggleRule = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase.from('alert_rules').update({ is_active }).eq('id', id);
+      const { error } = await (supabase.from('alert_rules' as any) as any).update({ is_active }).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
