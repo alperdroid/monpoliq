@@ -257,11 +257,23 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
     for (const bank of ["fed", "ecb"]) {
       const p = prediction[bank];
       if (!p) throw new Error(`Missing ${bank} prediction`);
+      
+      // Post-hoc: enforce realistic Fed expectations (no cuts priced in 2026)
+      if (bank === "fed") {
+        // Fed hold probability should dominate — dovish tone ≠ imminent cut
+        p.hold_probability = Math.max(p.hold_probability || 0, 0.60);
+        p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
+        p.hike_probability = Math.min(p.hike_probability || 0, 0.10);
+        if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
+          p.next_decision = "hold";
+        }
+      }
+      
       const sum = (p.hike_probability || 0) + (p.hold_probability || 0) + (p.cut_probability || 0);
-      if (sum > 0 && Math.abs(sum - 1) > 0.05) {
-        p.hike_probability = (p.hike_probability || 0) / sum;
-        p.hold_probability = (p.hold_probability || 0) / sum;
-        p.cut_probability = (p.cut_probability || 0) / sum;
+      if (sum > 0 && Math.abs(sum - 1) > 0.01) {
+        p.hike_probability = Math.round(((p.hike_probability || 0) / sum) * 100) / 100;
+        p.hold_probability = Math.round(((p.hold_probability || 0) / sum) * 100) / 100;
+        p.cut_probability = Math.round(((p.cut_probability || 0) / sum) * 100) / 100;
       }
     }
 
