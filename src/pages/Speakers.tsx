@@ -77,6 +77,7 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
 const Speakers = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const queryClient = useQueryClient();
 
   const { data: commItems = [], isLoading } = useQuery({
     queryKey: ['comm-items-all'],
