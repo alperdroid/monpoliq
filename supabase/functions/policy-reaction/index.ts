@@ -473,7 +473,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 async function fetchEurostatHICP(): Promise<Map<string, number>> {
   // Try Eurostat JSON API for latest HICP annual rate of change (prc_hicp_manr, CP00, EA)
   try {
-    const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A&sinceTimePeriod=2000M01';
+    const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A';
     const resp = await fetch(url);
     if (!resp.ok) {
       console.warn('Eurostat API failed:', resp.status);
@@ -610,7 +610,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v13&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v14&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -631,7 +631,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v13',
+        analysis_type: 'policy_reaction_v14',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
