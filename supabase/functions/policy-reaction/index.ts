@@ -540,7 +540,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
     gap: Math.round((implied - lastRow.policy_rate) * 1000) / 1000,
     r2_insample: ECB_R2,
     oos_metrics: ECB_OOS,
-    model_name: 'Structural Break OLS (p≤0.10 pruned)',
+    model_name: 'P-Value Pruned OLS (threshold=0.10, BAMLC0A0CMEY)',
     n_features: featureNames.length,
     feature_names: featureNames,
     regime,
