@@ -102,7 +102,7 @@ export function PredictionPanel({
             </div>
           </div>
           {eurusdReasoning && (
-            <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{eurusdReasoning}</p>
+            <p className="text-[13px] text-foreground/85 mt-2 leading-relaxed font-medium">{eurusdReasoning}</p>
           )}
         </div>
 
