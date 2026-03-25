@@ -182,7 +182,7 @@ serve(async (req) => {
     }));
 
     // Take last 60 months for display
-    const displaySeries = resultTimeSeries.slice(-60);
+    const displaySeries = resultTimeSeries.filter(d => d.date >= "2021-01");
 
     const latestImplied = displaySeries[displaySeries.length - 1]?.implied_rate ?? 0;
     const latestActual = displaySeries[displaySeries.length - 1]?.actual_rate ?? 0;
