@@ -186,21 +186,51 @@ serve(async (req) => {
       throw new Error("Insufficient data for regression");
     }
 
-    // Run OLS: rate = a + b*inflationGap + c*outputGap
-    const X = timeSeries.map(d => [1, d.inflationGap, d.outputGap]);
-    const y = timeSeries.map(d => d.rate);
+    // Two-regime Taylor Rule: separate ZLB (rate < 0.5%) from normal periods
+    const zlbThreshold = 0.5;
+    const normalObs = timeSeries.filter(d => d.rate >= zlbThreshold);
+    const zlbObs = timeSeries.filter(d => d.rate < zlbThreshold);
 
-    const { coefficients, rSquared } = olsRegression(X, y);
+    // Estimate coefficients from normal regime only (avoids ZLB censoring bias)
+    const Xnormal = normalObs.map(d => [1, d.inflationGap, d.outputGap]);
+    const yNormal = normalObs.map(d => d.rate);
 
-    const resultTimeSeries = timeSeries.map(d => ({
-      date: d.date,
-      actual_rate: d.rate,
-      implied_rate: Math.round((coefficients[0] + coefficients[1] * d.inflationGap + coefficients[2] * d.outputGap) * 1000) / 1000,
-      inflation: d.inflation,
-      unemployment: d.unemployment,
-    }));
+    let normalCoeffs: { coefficients: number[]; rSquared: number };
+    let zlbCoeffs: { coefficients: number[]; rSquared: number } | null = null;
 
-    // Take last 60 months for display
+    if (normalObs.length < 12) {
+      // Fallback: use all data if not enough normal observations
+      const Xall = timeSeries.map(d => [1, d.inflationGap, d.outputGap]);
+      const yAll = timeSeries.map(d => d.rate);
+      normalCoeffs = olsRegression(Xall, yAll);
+    } else {
+      normalCoeffs = olsRegression(Xnormal, yNormal);
+    }
+
+    // Estimate ZLB regime if enough observations
+    if (zlbObs.length >= 12) {
+      const Xzlb = zlbObs.map(d => [1, d.inflationGap, d.outputGap]);
+      const yZlb = zlbObs.map(d => d.rate);
+      zlbCoeffs = olsRegression(Xzlb, yZlb);
+    }
+
+    // For implied rate: use normal-regime coefficients (uncensored reaction function)
+    const nc = normalCoeffs.coefficients;
+
+    const resultTimeSeries = timeSeries.map(d => {
+      const isZlb = d.rate < zlbThreshold;
+      const implied = nc[0] + nc[1] * d.inflationGap + nc[2] * d.outputGap;
+      return {
+        date: d.date,
+        actual_rate: d.rate,
+        implied_rate: Math.round(implied * 1000) / 1000,
+        inflation: d.inflation,
+        unemployment: d.unemployment,
+        regime: isZlb ? "ZLB" : "normal",
+      };
+    });
+
+    // Display from 2021
     const displaySeries = resultTimeSeries.filter(d => d.date >= "2021-01");
 
     const latestImplied = displaySeries[displaySeries.length - 1]?.implied_rate ?? 0;
@@ -208,12 +238,32 @@ serve(async (req) => {
 
     const result = {
       bank,
-      coefficients: {
-        intercept: Math.round(coefficients[0] * 10000) / 10000,
-        inflation_gap: Math.round(coefficients[1] * 10000) / 10000,
-        output_gap: Math.round(coefficients[2] * 10000) / 10000,
+      regime_model: "two-regime",
+      normal_regime: {
+        coefficients: {
+          intercept: Math.round(nc[0] * 10000) / 10000,
+          inflation_gap: Math.round(nc[1] * 10000) / 10000,
+          output_gap: Math.round(nc[2] * 10000) / 10000,
+        },
+        r_squared: Math.round(normalCoeffs.rSquared * 10000) / 10000,
+        sample_size: normalObs.length,
       },
-      r_squared: Math.round(rSquared * 10000) / 10000,
+      zlb_regime: zlbCoeffs ? {
+        coefficients: {
+          intercept: Math.round(zlbCoeffs.coefficients[0] * 10000) / 10000,
+          inflation_gap: Math.round(zlbCoeffs.coefficients[1] * 10000) / 10000,
+          output_gap: Math.round(zlbCoeffs.coefficients[2] * 10000) / 10000,
+        },
+        r_squared: Math.round(zlbCoeffs.rSquared * 10000) / 10000,
+        sample_size: zlbObs.length,
+      } : null,
+      // Keep legacy fields for backward compatibility
+      coefficients: {
+        intercept: Math.round(nc[0] * 10000) / 10000,
+        inflation_gap: Math.round(nc[1] * 10000) / 10000,
+        output_gap: Math.round(nc[2] * 10000) / 10000,
+      },
+      r_squared: Math.round(normalCoeffs.rSquared * 10000) / 10000,
       sample_size: timeSeries.length,
       sample_start: timeSeries[0].date,
       sample_end: timeSeries[timeSeries.length - 1].date,
