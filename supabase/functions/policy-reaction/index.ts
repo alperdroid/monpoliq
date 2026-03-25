@@ -474,8 +474,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
   const [ecbdfr, hicp, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
     fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    // Direct YoY HICP rate (less lag than index series CP0000EZ19M086NEST)
-    fetchFredCSV('CPALTT01EZM659N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
