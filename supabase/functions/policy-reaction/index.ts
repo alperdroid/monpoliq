@@ -490,7 +490,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   let equity: Map<string, number>;
   try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
 
-  const rows = buildRows(months, ecbdfr, hicp, true, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  const rows = buildRows(months, ecbdfr, hicp, false, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
