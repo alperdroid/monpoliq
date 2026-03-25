@@ -54,13 +54,38 @@ const REAL_MEETINGS = [
     meeting_id: 'ecb-2026-03-05',
     bank: 'ECB' as const,
     meeting_date: '2026-03-05',
-    decision: null, // upcoming
+    decision: 'Cut 25bps — Deposit Facility Rate to 1.75%',
   },
   {
     meeting_id: 'fed-2026-03-19',
     bank: 'FED' as const,
     meeting_date: '2026-03-19',
-    decision: null, // upcoming
+    decision: 'Hold — Fed Funds Rate at 3.50–3.75%',
+  },
+  // Upcoming meetings
+  {
+    meeting_id: 'ecb-2026-04-17',
+    bank: 'ECB' as const,
+    meeting_date: '2026-04-17',
+    decision: null,
+  },
+  {
+    meeting_id: 'fed-2026-05-07',
+    bank: 'FED' as const,
+    meeting_date: '2026-05-07',
+    decision: null,
+  },
+  {
+    meeting_id: 'ecb-2026-06-05',
+    bank: 'ECB' as const,
+    meeting_date: '2026-06-05',
+    decision: null,
+  },
+  {
+    meeting_id: 'fed-2026-06-17',
+    bank: 'FED' as const,
+    meeting_date: '2026-06-17',
+    decision: null,
   },
 ];
 
