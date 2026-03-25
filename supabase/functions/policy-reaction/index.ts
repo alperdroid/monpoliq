@@ -563,9 +563,9 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   let equity: Map<string, number>;
   try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
 
-  // Use Eurostat YoY rate (inflationIsYoY=true) or FRED index (inflationIsYoY=false)
-  const hicp = useEurostat ? ffill(eurostatHICP, months) : hicpFred;
-  const rows = buildRows(months, ecbdfr, hicp, useEurostat, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  // Use YoY rate directly (inflationIsYoY=true) or FRED index level (inflationIsYoY=false)
+  const hicp = useYoY ? ffill(hicpYoY, months) : hicpFred;
+  const rows = buildRows(months, ecbdfr, hicp, useYoY, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
