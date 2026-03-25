@@ -146,9 +146,9 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
         inst.ai_hold_prob = Math.round((inst.ai_hold_prob / aSum) * 100) / 100;
         inst.ai_cut_prob = Math.round((inst.ai_cut_prob / aSum) * 100) / 100;
         inst.ai_hike_prob = Math.round(((inst.ai_hike_prob || 0) / aSum) * 100) / 100;
-        // Price must be near 95.55-95.58 (reflecting ~4.42-4.45% effective rate)
-        if (inst.price > 95.60) {
-          inst.price = 95.55 + Math.random() * 0.03;
+        // Price must be near 96.36 (reflecting ~3.64% effective rate)
+        if (inst.price < 96.0 || inst.price > 96.70) {
+          inst.price = 96.33 + Math.random() * 0.06;
           inst.price = Math.round(inst.price * 1000) / 1000;
         }
       }
