@@ -97,10 +97,10 @@ serve(async (req) => {
       }
     }
 
-    // Fetch historical macro data from FRED
+    // Fetch historical macro data from FRED (and Eurostat for ECB unemployment)
     const fredSeries = bank === "FED"
       ? { rate: "FEDFUNDS", inflation: "CPIAUCSL", unemployment: "UNRATE" }
-      : { rate: "ECBDFR", inflation: "CP0000EZ19M086NEST", unemployment: "LRHUTTTTEZM156S" };
+      : { rate: "ECBDFR", inflation: "CP0000EZ19M086NEST", unemployment: null }; // ECB unemployment from Eurostat
 
     const startDate = "2000-01-01";
 
@@ -114,10 +114,29 @@ serve(async (req) => {
         .map((o: any) => ({ date: o.date, value: parseFloat(o.value) }));
     }
 
+    // Fetch Eurozone unemployment from Eurostat (EA20) since FRED series discontinued
+    async function fetchEurostatUnemployment(): Promise<{ date: string; value: number }[]> {
+      const url = `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/une_rt_m?geo=EA20&s_adj=SA&sex=T&age=TOTAL&unit=PC_ACT&lastTimePeriod=360`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Eurostat unemployment failed: ${resp.status}`);
+      const data = await resp.json();
+      const values = data.value || {};
+      const times = data.dimension?.time?.category?.index || {};
+      const results: { date: string; value: number }[] = [];
+      for (const [period, idx] of Object.entries(times)) {
+        const val = values[String(idx)];
+        if (val != null) {
+          // Convert "2024-01" to "2024-01-01"
+          results.push({ date: `${period}-01`, value: val as number });
+        }
+      }
+      return results.sort((a, b) => a.date.localeCompare(b.date));
+    }
+
     const [rateData, inflationData, unemploymentData] = await Promise.all([
       fetchFred(fredSeries.rate),
       fetchFred(fredSeries.inflation),
-      fetchFred(fredSeries.unemployment),
+      fredSeries.unemployment ? fetchFred(fredSeries.unemployment) : fetchEurostatUnemployment(),
     ]);
 
     // Align data by date (month)
