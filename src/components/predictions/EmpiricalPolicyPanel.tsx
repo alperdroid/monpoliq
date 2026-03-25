@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, ReferenceLine } from 'recharts';
 
 function GapIndicator({ gap }: { gap: number }) {
   const isPos = gap > 0.15;
