@@ -95,7 +95,7 @@ export function AlertRulesPanel() {
 
   const createRule = useMutation({
     mutationFn: async (rule: Partial<AlertRule>) => {
-      const { error } = await supabase.from('alert_rules').insert({
+      const { error } = await (supabase.from('alert_rules' as any) as any).insert({
         ...rule,
         user_id: user!.id,
       });
