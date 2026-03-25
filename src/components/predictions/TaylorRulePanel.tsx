@@ -7,14 +7,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, Area, ReferenceLine, CartesianGrid } from 'recharts';
 import { FlaskConical, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
+interface RegimeInfo {
+  coefficients: { intercept: number; inflation_gap: number; output_gap: number };
+  r_squared: number;
+  sample_size: number;
+}
+
 interface TaylorRuleResult {
   bank: string;
+  regime_model?: string;
+  normal_regime?: RegimeInfo;
+  zlb_regime?: RegimeInfo | null;
   coefficients: { intercept: number; inflation_gap: number; output_gap: number };
   r_squared: number;
   sample_size: number;
   sample_start: string;
   sample_end: string;
-  time_series: { date: string; actual_rate: number; implied_rate: number; inflation: number; unemployment: number }[];
+  time_series: { date: string; actual_rate: number; implied_rate: number; inflation: number; unemployment: number; regime?: string }[];
   latest_gap: number;
   latest_implied: number;
   latest_actual: number;
