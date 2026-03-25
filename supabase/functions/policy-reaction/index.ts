@@ -476,8 +476,12 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    // Use European credit spread (EA AAA-rated bond spread) instead of US BAA10Y
+    fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(
+      () => fetchFredCSV('BAMLC0A4CBBBEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>())
+    ),
+    // European HY spread
+    fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
   ]);

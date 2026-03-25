@@ -106,7 +106,7 @@ export function CrossBankSpread({ allItems }: CrossBankSpreadProps) {
           <span className="text-[9px] uppercase tracking-wider text-muted-foreground">FX Bias</span>
           <p className={cn(
             'text-sm font-semibold',
-            fxBias.includes('USD') ? 'text-signal-hawkish' : fxBias.includes('EUR') ? 'text-signal-dovish' : 'text-foreground',
+            fxBias.includes('USD') ? 'text-signal-hawkish' : fxBias.includes('Euro') ? 'text-signal-dovish' : 'text-foreground',
           )}>
             {fxBias}
           </p>
