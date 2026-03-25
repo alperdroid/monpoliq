@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, User } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
-import { toast } from 'sonner';
 
 /** Known speaker reference data — metrics computed from real items */
 const SPEAKER_REFS = [
