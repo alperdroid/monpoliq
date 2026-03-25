@@ -88,7 +88,7 @@ export function PredictionPanel({
             ]}
           />
           {ecbReasoning && (
-            <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{ecbReasoning}</p>
+            <p className="text-[13px] text-foreground/85 mt-2 leading-relaxed font-medium">{ecbReasoning}</p>
           )}
         </div>
 
