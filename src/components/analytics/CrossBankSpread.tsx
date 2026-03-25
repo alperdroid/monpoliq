@@ -46,7 +46,7 @@ export function CrossBankSpread({ allItems }: CrossBankSpreadProps) {
     const trend = prev ? spread - prev.spread : 0;
 
     // FX bias: positive spread (Fed more hawkish) → USD strength → EUR/USD bearish
-    const bias = spread > 0.05 ? 'USD Bullish (EUR/USD ↓)' : spread < -0.05 ? 'EUR Bullish (EUR/USD ↑)' : 'Neutral';
+    const bias = spread > 0.05 ? 'USD Bullish (EUR/USD ↓)' : spread < -0.05 ? 'Upward Pressure for Euro' : 'Neutral';
 
     // Guidance gap from policy_dimensions (approximate)
     const recent = allItems.filter(i => {
