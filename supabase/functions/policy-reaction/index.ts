@@ -476,8 +476,12 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    fetchFredCSV('BAA10Y').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
-    fetchFredCSV('BAMLH0A0HYM2').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    // Use European credit spread (EA AAA-rated bond spread) instead of US BAA10Y
+    fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(
+      () => fetchFredCSV('BAMLC0A4CBBBEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>())
+    ),
+    // European HY spread
+    fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
   ]);
@@ -562,7 +566,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v9&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v10&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -583,7 +587,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v9',
+        analysis_type: 'policy_reaction_v10',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,

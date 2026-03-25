@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, ReferenceLine } from 'recharts';
 
 function GapIndicator({ gap }: { gap: number }) {
   const isPos = gap > 0.15;
@@ -113,7 +114,10 @@ function VarCell({ label, value, suffix = '' }: { label: string; value: number |
 function ContributionsSection({ contributions }: { contributions: Record<string, number> }) {
   const [expanded, setExpanded] = useState(false);
   const entries = Object.entries(contributions).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
-  const shown = expanded ? entries : entries.slice(0, 5);
+  const shown = expanded ? entries : entries.slice(0, 8);
+
+  const chartData = shown.map(([name, val]) => ({ name, value: Math.round(val * 10000) / 10000 }));
+  const maxAbs = Math.max(...chartData.map(d => Math.abs(d.value)), 0.01);
 
   return (
     <div className="space-y-2">
@@ -122,14 +126,22 @@ function ContributionsSection({ contributions }: { contributions: Record<string,
         Variable Contributions ({entries.length})
         {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
       </button>
-      {shown.map(([name, val]) => (
-        <div key={name} className="flex items-center justify-between text-[10px]">
-          <span className="text-muted-foreground font-mono truncate max-w-[60%]">{name}</span>
-          <span className={cn('font-mono font-semibold', val > 0 ? 'text-signal-hawkish' : val < 0 ? 'text-signal-dovish' : 'text-foreground')}>
-            {val > 0 ? '+' : ''}{val.toFixed(4)}
-          </span>
-        </div>
-      ))}
+      <ResponsiveContainer width="100%" height={shown.length * 28 + 10}>
+        <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 10, top: 0, bottom: 0 }}>
+          <XAxis type="number" domain={[-maxAbs * 1.1, maxAbs * 1.1]} tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" />
+          <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} stroke="none" />
+          <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" opacity={0.5} />
+          <Tooltip
+            contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px', fontSize: '10px' }}
+            formatter={(value: number) => [value > 0 ? `+${value.toFixed(4)}` : value.toFixed(4), 'Contribution']}
+          />
+          <Bar dataKey="value" radius={[2, 2, 2, 2]} maxBarSize={16}>
+            {chartData.map((entry, idx) => (
+              <Cell key={idx} fill={entry.value > 0 ? 'hsl(var(--signal-hawkish))' : entry.value < 0 ? 'hsl(var(--signal-dovish))' : 'hsl(var(--muted-foreground))'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
