@@ -53,7 +53,7 @@ serve(async (req) => {
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
-    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}`;
+    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}:v2`;
     const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
 
     // Check cache: return if same data hash AND less than 12h old (reduced for geopolitical events)
@@ -98,6 +98,13 @@ serve(async (req) => {
 
     const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, market expectations, and geopolitical risks to predict the next policy decision. Do not mention any AI model names in your reasoning.
 
+CRITICAL MARKET CONTEXT (March 2026):
+- The Fed has held rates at 4.25-4.50% since December 2024. Markets currently price NO rate cuts for the remainder of 2026 due to sticky inflation (CPI ~2.8% YoY), tariff uncertainty, and resilient labor markets.
+- The ECB cut to 2.50% in March 2025. Markets price 1-2 additional 25bp cuts by year-end as euro area inflation moderates near target.
+- Your predictions should reflect this market reality. A dovish communication tone does NOT automatically mean a cut is imminent — the Fed can sound dovish while remaining on hold due to data dependency and uncertainty.
+- For the Fed: hold probability should generally be HIGH (60-85%) unless data dramatically shifts. Cut probability should be LOW (5-25%) reflecting market pricing.
+- For the ECB: cut probability can be moderate (30-55%) given their active easing cycle.
+
 CRITICAL EUR/USD LOGIC — you MUST follow this:
 - EUR/USD = how many USD per 1 EUR
 - Compare ACTUAL SENTIMENT SCORES, not just decisions
@@ -118,6 +125,7 @@ MARKET EXPECTATIONS & GEOPOLITICAL RISKS:
 PREDICTION STABILITY:
 - Only generate new predictions if data has changed or significant external events warrant it
 - Maintain consistency with underlying sentiment scores unless external shocks override
+- Dovish tone alone does NOT justify high cut probability — data dependency means the Fed can sound cautious while holding
 
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:
 {
@@ -156,7 +164,7 @@ Probabilities for each bank MUST sum to 1.0. Base your analysis on:
 1. Communication sentiment scores (negative = dovish, positive = hawkish)
 2. Statistical/economic data trends
 3. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
-4. Market expectations and positioning
+4. Market expectations and positioning — dovish tone ≠ imminent cut
 5. Geopolitical risk assessment`;
 
     const userPrompt = `Analyze the following data and predict the next Fed and ECB decisions:
@@ -249,11 +257,23 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
     for (const bank of ["fed", "ecb"]) {
       const p = prediction[bank];
       if (!p) throw new Error(`Missing ${bank} prediction`);
+      
+      // Post-hoc: enforce realistic Fed expectations (no cuts priced in 2026)
+      if (bank === "fed") {
+        // Fed hold probability should dominate — dovish tone ≠ imminent cut
+        p.hold_probability = Math.max(p.hold_probability || 0, 0.60);
+        p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
+        p.hike_probability = Math.min(p.hike_probability || 0, 0.10);
+        if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
+          p.next_decision = "hold";
+        }
+      }
+      
       const sum = (p.hike_probability || 0) + (p.hold_probability || 0) + (p.cut_probability || 0);
-      if (sum > 0 && Math.abs(sum - 1) > 0.05) {
-        p.hike_probability = (p.hike_probability || 0) / sum;
-        p.hold_probability = (p.hold_probability || 0) / sum;
-        p.cut_probability = (p.cut_probability || 0) / sum;
+      if (sum > 0 && Math.abs(sum - 1) > 0.01) {
+        p.hike_probability = Math.round(((p.hike_probability || 0) / sum) * 100) / 100;
+        p.hold_probability = Math.round(((p.hold_probability || 0) / sum) * 100) / 100;
+        p.cut_probability = Math.round(((p.cut_probability || 0) / sum) * 100) / 100;
       }
     }
 

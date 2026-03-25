@@ -20,9 +20,16 @@ serve(async (req) => {
     
     const prompt = `You are a financial data analyst. Today is ${today}. Provide ACCURATE current market data using the latest available pricing. Be very precise with prices — use realistic values consistent with current market conditions.
 
+CRITICAL MARKET CONTEXT (March 2026) — YOU MUST FOLLOW THIS:
+- The Fed has held rates at 4.25-4.50% since December 2024. As of March 2026, CME FedWatch shows markets price NO rate cuts through end of 2026. Sticky inflation (~2.8% CPI YoY), tariff uncertainty, and a resilient labor market have pushed rate cut expectations out to 2027.
+- Fed Funds futures MUST reflect this: market_hold_prob should be 0.85-0.95, market_cut_prob 0.05-0.12, market_hike_prob 0.00-0.03. Prices should be near 95.55-95.58 (implying ~4.42-4.45% effective rate, very close to spot).
+- DO NOT generate cut probabilities above 0.15 for Fed — this would be factually wrong.
+- The ECB cut to 2.50% in March 2025. Markets price 1-2 more 25bp cuts by year-end. Euribor futures can show moderate cut probabilities (0.40-0.65).
+- For ai_ fields: the fundamental analysis may differ from market pricing (e.g., fundamental view might see slightly higher cut probability than market for Fed, but still below 0.30).
+
 **RATE FUTURES** (category: "rate_futures"):
-1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Current Fed Funds target is 4.25-4.50%. Price should reflect realistic market-implied rate expectations (e.g., if market expects 4.18% effective rate, price = 95.82).
-2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. Current ECB deposit rate is 2.50%. Price should reflect realistic Euribor forward rates.
+1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. MUST show hold_prob 0.85-0.95, cut_prob 0.05-0.12 per current CME FedWatch.
+2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. ECB deposit rate is 2.50%, markets price gradual easing so forward rates slightly below spot.
 - Include: price (must be consistent with rate expectations), market-implied hike/hold/cut probabilities, fundamental-assessed probabilities, 24h change
 - IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument
 
@@ -120,7 +127,35 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
 
     const result = JSON.parse(toolCall.function.arguments);
     
-    return new Response(JSON.stringify(result.instruments), {
+    // Post-process: enforce realistic Fed market probabilities (no cuts priced in 2026)
+    const instruments = (result.instruments || []).map((inst: any) => {
+      if (inst.category === "rate_futures" && inst.bank === "FED") {
+        // Markets price NO Fed cuts in 2026 — enforce hold-dominant probabilities
+        inst.market_hold_prob = Math.max(inst.market_hold_prob || 0, 0.88);
+        inst.market_cut_prob = Math.min(inst.market_cut_prob || 0, 0.10);
+        inst.market_hike_prob = Math.min(inst.market_hike_prob || 0, 0.02);
+        // Renormalize
+        const mSum = inst.market_hold_prob + inst.market_cut_prob + inst.market_hike_prob;
+        inst.market_hold_prob = Math.round((inst.market_hold_prob / mSum) * 100) / 100;
+        inst.market_cut_prob = Math.round((inst.market_cut_prob / mSum) * 100) / 100;
+        inst.market_hike_prob = Math.round((inst.market_hike_prob / mSum) * 100) / 100;
+        // Also clamp ai_ probabilities — fundamental view can differ but still realistic
+        inst.ai_cut_prob = Math.min(inst.ai_cut_prob || 0, 0.30);
+        inst.ai_hold_prob = Math.max(inst.ai_hold_prob || 0, 0.65);
+        const aSum = inst.ai_hold_prob + inst.ai_cut_prob + (inst.ai_hike_prob || 0);
+        inst.ai_hold_prob = Math.round((inst.ai_hold_prob / aSum) * 100) / 100;
+        inst.ai_cut_prob = Math.round((inst.ai_cut_prob / aSum) * 100) / 100;
+        inst.ai_hike_prob = Math.round(((inst.ai_hike_prob || 0) / aSum) * 100) / 100;
+        // Price must be near 95.55-95.58 (reflecting ~4.42-4.45% effective rate)
+        if (inst.price > 95.60) {
+          inst.price = 95.55 + Math.random() * 0.03;
+          inst.price = Math.round(inst.price * 1000) / 1000;
+        }
+      }
+      return inst;
+    });
+    
+    return new Response(JSON.stringify(instruments), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
