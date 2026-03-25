@@ -36,7 +36,6 @@ function parseDate(t: string): string | null {
   } catch { return null; }
 }
 
-// RSS XML helpers
 function cdataContent(xml: string, tag: string): string {
   const m = xml.match(new RegExp("<" + tag + "[^>]*>\\s*(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?\\s*</" + tag + ">", "i"));
   return m ? m[1].trim() : "";
@@ -56,7 +55,6 @@ function parseRSSItems(xml: string) {
   return items;
 }
 
-// AI scoring
 async function scoreWithAI(title: string, text: string, bank: string, apiKey: string) {
   const truncated = text.length <= 6000 ? text : (
     text.slice(0, 3000) + "\n...[truncated]...\n" +
@@ -121,9 +119,9 @@ serve(async (req) => {
     const apiKey = Deno.env.get("LOVABLE_API_KEY")!;
     const sb = createClient(supabaseUrl, supabaseKey);
 
-    const { speakers = ["powell", "lagarde"], maxItems = 30 } = await req.json().catch(() => ({}));
+    const { speakers = ["powell", "lagarde"], maxItems = 50 } = await req.json().catch(() => ({}));
 
-    // Get existing titles to avoid duplicates
+    // Get existing titles/urls to avoid duplicates
     const { data: existingItems } = await sb
       .from("sentiment_items")
       .select("title, url")
@@ -134,11 +132,11 @@ serve(async (req) => {
     const newItems: any[] = [];
     const results: Record<string, number> = {};
 
-    // ── POWELL: Scrape Fed speeches RSS ──
+    // ── POWELL: Scrape Fed speeches across MULTIPLE YEARS ──
     if (speakers.includes("powell")) {
-      console.log("Scraping Powell speeches...");
+      console.log("Scraping Powell speeches across multiple years...");
 
-      // Fed speeches RSS
+      // 1) RSS feed
       const fedRSS = await safeFetch("https://www.federalreserve.gov/feeds/speeches.xml");
       if (fedRSS?.ok) {
         const xml = await fedRSS.text();
@@ -147,203 +145,174 @@ serve(async (req) => {
           i.title.toLowerCase().includes("powell") ||
           i.link.toLowerCase().includes("powell")
         );
-        console.log(`Found ${powellItems.length} Powell items in RSS`);
+        console.log(`RSS: ${powellItems.length} Powell items`);
 
         for (const item of powellItems.slice(0, maxItems)) {
-          if (existingTitles.has(item.title.toLowerCase())) continue;
-          if (existingUrls.has(item.link)) continue;
-
+          if (existingTitles.has(item.title.toLowerCase()) || existingUrls.has(item.link)) continue;
           const date = parseDate(item.pubDate);
           if (!date) continue;
 
-          // Fetch full text
           let text = "";
           const pageResp = await safeFetch(item.link, 12000);
-          if (pageResp?.ok) {
-            const html = await pageResp.text();
-            text = extractText(html);
-          }
+          if (pageResp?.ok) text = extractText(await pageResp.text());
 
           const ai = await scoreWithAI(item.title, text || item.title, "FED", apiKey);
-
           newItems.push({
-            bank: "FED",
-            source: "fed_speech",
-            item_date: date,
-            title: item.title,
-            url: item.link,
-            is_statistical: false,
+            bank: "FED", source: "fed_speech", item_date: date, title: item.title,
+            url: item.link, is_statistical: false,
             hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
             dove_pts: ai.score < 0 ? Math.round(Math.abs(ai.score) * 10) : 0,
-            net_score: ai.score,
-            label: ai.label,
+            net_score: ai.score, label: ai.label,
             word_count: (text || item.title).split(/\s+/).length,
-            reasons: [ai.reasoning],
-            stat_metric: null,
-            stat_value: null,
-            stat_weight: 0,
-            topics: ai.topics,
-            policy_dimensions: { forward_guidance: ai.forward_guidance },
+            reasons: [ai.reasoning], stat_metric: null, stat_value: null, stat_weight: 0,
+            topics: ai.topics, policy_dimensions: { forward_guidance: ai.forward_guidance },
           });
-
           existingTitles.add(item.title.toLowerCase());
-          // Rate limit
-          await new Promise(r => setTimeout(r, 800));
+          existingUrls.add(item.link);
+          await new Promise(r => setTimeout(r, 600));
         }
       }
 
-      // Also scrape Fed Board speeches page for historical Powell
-      const fedSpeechesPage = await safeFetch("https://www.federalreserve.gov/newsevents/speeches.htm");
-      if (fedSpeechesPage?.ok) {
-        const html = await fedSpeechesPage.text();
-        // Extract speech links mentioning Powell
-        const linkRegex = /href="(\/newsevents\/speech\/powell\d+a?\.htm)"/gi;
-        let linkMatch;
-        const powellLinks: string[] = [];
-        while ((linkMatch = linkRegex.exec(html)) !== null) {
-          powellLinks.push(`https://www.federalreserve.gov${linkMatch[1]}`);
+      // 2) Scrape yearly speech index pages (2018-2026) for Powell
+      const years = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018];
+      for (const year of years) {
+        if (newItems.filter(i => i.bank === "FED").length >= maxItems) break;
+
+        const indexUrl = `https://www.federalreserve.gov/newsevents/speech/${year}-speeches.htm`;
+        console.log(`Checking Fed speeches index: ${year}`);
+        const resp = await safeFetch(indexUrl, 10000);
+        if (!resp?.ok) continue;
+        const html = await resp.text();
+
+        // Find all speech links — the page lists all speeches, we filter for Powell
+        const linkRe = /href="(\/newsevents\/speech\/[^"]+\.htm)"/gi;
+        let lm;
+        const speechLinks: string[] = [];
+        while ((lm = linkRe.exec(html)) !== null) {
+          speechLinks.push(`https://www.federalreserve.gov${lm[1]}`);
         }
 
-        // Also find links by pattern near "Powell" text
-        const speechRows = html.split(/(?=<div class="row")/i);
-        for (const row of speechRows) {
-          if (row.toLowerCase().includes("powell")) {
-            const hrefMatch = row.match(/href="(\/newsevents\/speech\/[^"]+)"/i);
-            if (hrefMatch) {
-              const fullUrl = `https://www.federalreserve.gov${hrefMatch[1]}`;
-              if (!powellLinks.includes(fullUrl)) powellLinks.push(fullUrl);
-            }
-          }
-        }
-
-        console.log(`Found ${powellLinks.length} Powell speech page links`);
-
-        for (const url of powellLinks.slice(0, maxItems)) {
+        // Check each speech page for Powell's name
+        for (const url of speechLinks) {
+          if (newItems.filter(i => i.bank === "FED").length >= maxItems) break;
           if (existingUrls.has(url)) continue;
 
           const pageResp = await safeFetch(url, 12000);
           if (!pageResp?.ok) continue;
           const pageHtml = await pageResp.text();
-          const text = extractText(pageHtml);
 
-          // Extract title
+          // Check if this is a Powell speech
+          const lowerHtml = pageHtml.toLowerCase();
+          if (!lowerHtml.includes("powell") && !lowerHtml.includes("chair powell") && !lowerHtml.includes("chairman powell")) continue;
+
+          const text = extractText(pageHtml);
           const titleMatch = pageHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
-          let title = titleMatch ? titleMatch[1].trim() : "";
-          if (!title) title = `Powell Speech - ${url.match(/(\d{8})/)?.[1] || "unknown"}`;
+          let title = titleMatch ? titleMatch[1].trim() : `Powell Speech ${year}`;
+          // Clean up Fed title format
+          title = title.replace(/\s*-\s*Federal Reserve Board\s*$/i, "").trim();
+          if (!title || title.length < 5) title = `Chair Powell Speech - ${url.match(/(\d{8})/)?.[1] || year}`;
+
           if (existingTitles.has(title.toLowerCase())) continue;
 
-          // Extract date
           const dateMatch = pageHtml.match(/(\w+ \d{1,2}, \d{4})/);
           const date = dateMatch ? parseDate(dateMatch[1]) : null;
           if (!date) continue;
 
           const ai = await scoreWithAI(title, text, "FED", apiKey);
-
           newItems.push({
-            bank: "FED",
-            source: "fed_speech",
-            item_date: date,
-            title,
-            url,
-            is_statistical: false,
+            bank: "FED", source: "fed_speech", item_date: date, title,
+            url, is_statistical: false,
             hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
             dove_pts: ai.score < 0 ? Math.round(Math.abs(ai.score) * 10) : 0,
-            net_score: ai.score,
-            label: ai.label,
+            net_score: ai.score, label: ai.label,
             word_count: text.split(/\s+/).length,
-            reasons: [ai.reasoning],
-            stat_metric: null,
-            stat_value: null,
-            stat_weight: 0,
-            topics: ai.topics,
-            policy_dimensions: { forward_guidance: ai.forward_guidance },
+            reasons: [ai.reasoning], stat_metric: null, stat_value: null, stat_weight: 0,
+            topics: ai.topics, policy_dimensions: { forward_guidance: ai.forward_guidance },
           });
-
           existingTitles.add(title.toLowerCase());
-          await new Promise(r => setTimeout(r, 800));
+          existingUrls.add(url);
+          console.log(`  ✓ Powell: ${title} (${date}) → ${ai.label} ${ai.score}`);
+          await new Promise(r => setTimeout(r, 600));
         }
       }
 
       results.powell = newItems.filter(i => i.bank === "FED").length;
+      console.log(`Total Powell items found: ${results.powell}`);
     }
 
-    // ── LAGARDE: Scrape ECB speeches ──
+    // ── LAGARDE: Scrape ECB speeches across multiple years ──
     if (speakers.includes("lagarde")) {
       console.log("Scraping Lagarde speeches...");
 
-      // ECB RSS feed
-      const ecbRSS = await safeFetch("https://www.ecb.europa.eu/rss/press.html");
-      let ecbItems: { title: string; link: string; pubDate: string }[] = [];
+      const ecbItems: { title: string; link: string; pubDate: string }[] = [];
 
-      if (ecbRSS?.ok) {
-        const xml = await ecbRSS.text();
-        ecbItems = parseRSSItems(xml);
-      }
+      // 1) ECB press key speeches index pages (multiple years)
+      const ecbYears = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019];
+      for (const year of ecbYears) {
+        // ECB speeches listing
+        const indexUrl = `https://www.ecb.europa.eu/press/key/date/${year}/html/index.en.html`;
+        console.log(`Checking ECB speeches index: ${year}`);
+        const resp = await safeFetch(indexUrl, 10000);
+        if (!resp?.ok) continue;
+        const html = await resp.text();
 
-      // ECB speeches page for Lagarde
-      const ecbSpeeches = await safeFetch("https://www.ecb.europa.eu/press/key/html/downloads.en.html");
-      if (ecbSpeeches?.ok) {
-        const html = await ecbSpeeches.text();
         // Find Lagarde speech links
-        const rows = html.split(/(?=<dt)/i);
-        for (const row of rows) {
-          if (row.toLowerCase().includes("lagarde")) {
-            const hrefMatch = row.match(/href="([^"]+)"/i);
-            const dateMatch = row.match(/(\d{1,2}\s+\w+\s+\d{4})/);
-            const titleMatch = row.match(/<a[^>]*>([^<]+)<\/a>/i);
+        const sections = html.split(/(?=<dt|<div class="title")/i);
+        for (const section of sections) {
+          if (!section.toLowerCase().includes("lagarde")) continue;
+          const hrefMatch = section.match(/href="([^"]+)"/i);
+          const titleMatch = section.match(/<a[^>]*>([^<]+)<\/a>/i);
+          const dateMatch = section.match(/(\d{1,2}\s+\w+\s+\d{4})/);
 
-            if (hrefMatch && titleMatch) {
-              const link = hrefMatch[1].startsWith("http") ? hrefMatch[1] : `https://www.ecb.europa.eu${hrefMatch[1]}`;
-              ecbItems.push({
-                title: titleMatch[1].trim(),
-                link,
-                pubDate: dateMatch ? dateMatch[1] : "",
-              });
-            }
+          if (hrefMatch && titleMatch) {
+            const link = hrefMatch[1].startsWith("http") ? hrefMatch[1] : `https://www.ecb.europa.eu${hrefMatch[1]}`;
+            ecbItems.push({
+              title: titleMatch[1].trim(),
+              link,
+              pubDate: dateMatch ? dateMatch[1] : "",
+            });
+          }
+        }
+
+        // Press conferences (Lagarde is always speaker)
+        const pcUrl = `https://www.ecb.europa.eu/press/pressconf/${year}/html/index.en.html`;
+        const pcResp = await safeFetch(pcUrl, 10000);
+        if (pcResp?.ok) {
+          const pcHtml = await pcResp.text();
+          const pcRe = /href="(\/press\/pressconf\/\d{4}\/html\/[^"]+)"/gi;
+          let pm;
+          while ((pm = pcRe.exec(pcHtml)) !== null) {
+            const link = `https://www.ecb.europa.eu${pm[1]}`;
+            ecbItems.push({ title: `ECB Press Conference - Lagarde ${year}`, link, pubDate: "" });
           }
         }
       }
 
-      // Also try ECB press conferences search for Lagarde
-      const years = [2024, 2025, 2026];
-      for (const year of years) {
-        const pcUrl = `https://www.ecb.europa.eu/press/pressconf/${year}/html/index.en.html`;
-        const pcResp = await safeFetch(pcUrl, 10000);
-        if (pcResp?.ok) {
-          const html = await pcResp.text();
-          const hrefRe = /href="([^"]*pressconf[^"]*lagarde[^"]*)"/gi;
-          let hm;
-          while ((hm = hrefRe.exec(html)) !== null) {
-            const link = hm[1].startsWith("http") ? hm[1] : `https://www.ecb.europa.eu${hm[1]}`;
-            ecbItems.push({ title: `Lagarde Press Conference ${year}`, link, pubDate: "" });
-          }
-
-          // Also grab general press conference links (Lagarde is always the speaker)
-          const genRe = /href="(\/press\/pressconf\/\d{4}\/html\/[^"]+)"/gi;
-          while ((hm = genRe.exec(html)) !== null) {
-            const link = `https://www.ecb.europa.eu${hm[1]}`;
-            ecbItems.push({ title: `ECB Press Conference - Lagarde`, link, pubDate: "" });
+      // 2) ECB RSS feed
+      const ecbRSS = await safeFetch("https://www.ecb.europa.eu/rss/press.html");
+      if (ecbRSS?.ok) {
+        const xml = await ecbRSS.text();
+        const rssItems = parseRSSItems(xml);
+        for (const ri of rssItems) {
+          if (ri.title.toLowerCase().includes("lagarde") || ri.link.toLowerCase().includes("lagarde")) {
+            ecbItems.push(ri);
           }
         }
       }
 
       // Deduplicate by link
       const seenLinks = new Set<string>();
-      const uniqueEcbItems = ecbItems.filter(i => {
+      const uniqueEcb = ecbItems.filter(i => {
         if (seenLinks.has(i.link)) return false;
         seenLinks.add(i.link);
         return true;
       });
 
-      const lagardeItems = uniqueEcbItems.filter(i =>
-        i.title.toLowerCase().includes("lagarde") ||
-        i.link.toLowerCase().includes("lagarde") ||
-        i.link.includes("pressconf")
-      );
+      console.log(`Found ${uniqueEcb.length} unique Lagarde items to check`);
 
-      console.log(`Found ${lagardeItems.length} Lagarde items`);
-
-      for (const item of lagardeItems.slice(0, maxItems)) {
+      let lagardeCount = 0;
+      for (const item of uniqueEcb) {
+        if (lagardeCount >= maxItems) break;
         if (existingUrls.has(item.link)) continue;
 
         let text = "";
@@ -352,13 +321,11 @@ serve(async (req) => {
           const pageHtml = await pageResp.text();
           text = extractText(pageHtml);
 
-          // Try to extract date from page if not in RSS
           if (!item.pubDate) {
             const dateMatch = pageHtml.match(/(\d{1,2}\s+\w+\s+\d{4})/);
             if (dateMatch) item.pubDate = dateMatch[1];
           }
 
-          // Improve title from page
           if (item.title.startsWith("ECB Press Conference") || item.title.startsWith("Lagarde Press Conference")) {
             const titleMatch = pageHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
             if (titleMatch) item.title = titleMatch[1].trim();
@@ -373,36 +340,30 @@ serve(async (req) => {
         const ai = await scoreWithAI(item.title, text || item.title, "ECB", apiKey);
 
         newItems.push({
-          bank: "ECB",
-          source: "ecb_speech",
-          item_date: date,
-          title: item.title,
-          url: item.link,
-          is_statistical: false,
+          bank: "ECB", source: "ecb_speech", item_date: date, title: item.title,
+          url: item.link, is_statistical: false,
           hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
           dove_pts: ai.score < 0 ? Math.round(Math.abs(ai.score) * 10) : 0,
-          net_score: ai.score,
-          label: ai.label,
+          net_score: ai.score, label: ai.label,
           word_count: (text || item.title).split(/\s+/).length,
-          reasons: [ai.reasoning],
-          stat_metric: null,
-          stat_value: null,
-          stat_weight: 0,
-          topics: ai.topics,
-          policy_dimensions: { forward_guidance: ai.forward_guidance },
+          reasons: [ai.reasoning], stat_metric: null, stat_value: null, stat_weight: 0,
+          topics: ai.topics, policy_dimensions: { forward_guidance: ai.forward_guidance },
         });
 
         existingTitles.add(item.title.toLowerCase());
-        await new Promise(r => setTimeout(r, 800));
+        existingUrls.add(item.link);
+        lagardeCount++;
+        console.log(`  ✓ Lagarde: ${item.title} (${date}) → ${ai.label} ${ai.score}`);
+        await new Promise(r => setTimeout(r, 600));
       }
 
-      results.lagarde = newItems.filter(i => i.bank === "ECB").length;
+      results.lagarde = lagardeCount;
+      console.log(`Total Lagarde items found: ${results.lagarde}`);
     }
 
     // ── Insert new items ──
     if (newItems.length > 0) {
       console.log(`Inserting ${newItems.length} new items...`);
-      // Insert in batches of 20
       for (let i = 0; i < newItems.length; i += 20) {
         const batch = newItems.slice(i, i + 20);
         const { error } = await sb.from("sentiment_items").insert(batch);
@@ -410,14 +371,12 @@ serve(async (req) => {
       }
     }
 
-    const response = {
+    return new Response(JSON.stringify({
       success: true,
       new_items: newItems.length,
       breakdown: results,
       message: `Scraped and scored ${newItems.length} new communications`,
-    };
-
-    return new Response(JSON.stringify(response), {
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
