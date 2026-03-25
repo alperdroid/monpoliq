@@ -143,7 +143,7 @@ serve(async (req) => {
 
     // Target values
     const inflTarget = bank === "FED" ? 2.0 : 2.0;
-    const unempTarget = bank === "FED" ? 4.5 : 7.0; // natural rate approximations
+    const unempTarget = bank === "FED" ? 4.4 : 6.1; // NAIRU estimates
 
     // Build aligned dataset
     const allMonths = [...rateMap.keys()].filter(m => finalInflMap.has(m) && unempMap.has(m)).sort();
