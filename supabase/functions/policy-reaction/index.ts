@@ -536,14 +536,18 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
 async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
   
-  // Try Eurostat first for timely HICP YoY rate, fall back to FRED index
-  const eurostatHICP = await fetchEurostatHICP();
-  const useEurostat = eurostatHICP.size > 100;
-  console.log(`Using ${useEurostat ? 'Eurostat HICP YoY rate' : 'FRED HICP index'} for inflation`);
+  // Try ECB SDW first (most timely, revised methodology), then Eurostat, then FRED index
+  let hicpYoY = await fetchECBSDWHICP();
+  if (hicpYoY.size < 100) {
+    console.log('ECB SDW insufficient, trying Eurostat...');
+    hicpYoY = await fetchEurostatHICP();
+  }
+  const useYoY = hicpYoY.size > 100;
+  console.log(`Using ${useYoY ? `direct YoY rate (${hicpYoY.size} months)` : 'FRED HICP index'} for inflation`);
   
   const [ecbdfr, hicpFred, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
     fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    useEurostat ? Promise.resolve(new Map<string, number>()) : fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    useYoY ? Promise.resolve(new Map<string, number>()) : fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
