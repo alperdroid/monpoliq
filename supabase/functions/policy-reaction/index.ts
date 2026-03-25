@@ -470,8 +470,41 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
 // ─── Run ECB Model ─────────────────────────────────────────────────────────────
 
+async function fetchECBSDWHICP(): Promise<Map<string, number>> {
+  // ECB Statistical Data Warehouse — ICP dataset, Euro area, Overall HICP, Annual rate of change
+  // This is the most authoritative and timely source (includes revised methodology)
+  try {
+    const resp = await fetch(
+      'https://data-api.ecb.europa.eu/service/data/ICP/M.U2.N.000000.4.ANR?startPeriod=1997-01',
+      { headers: { Accept: 'text/csv' } }
+    );
+    if (!resp.ok) {
+      console.warn('ECB SDW failed:', resp.status);
+      return new Map();
+    }
+    const text = await resp.text();
+    const result = new Map<string, number>();
+    for (const line of text.trim().split('\n').slice(1)) {
+      // CSV columns: KEY,FREQ,...,TIME_PERIOD,OBS_VALUE,...
+      const cols = line.split(',');
+      const period = cols[7]; // TIME_PERIOD
+      const value = parseFloat(cols[8]); // OBS_VALUE
+      if (period && !isNaN(value)) {
+        result.set(period, value);
+      }
+    }
+    const entries = [...result.entries()];
+    console.log(`ECB SDW HICP: ${result.size} months, latest:`,
+      entries.slice(-3).map(([k, v]) => `${k}=${v}`).join(', '));
+    return result;
+  } catch (err) {
+    console.warn('ECB SDW HICP error:', err);
+    return new Map();
+  }
+}
+
 async function fetchEurostatHICP(): Promise<Map<string, number>> {
-  // Try Eurostat JSON API for latest HICP annual rate of change (prc_hicp_manr, CP00, EA)
+  // Fallback: Eurostat JSON API for HICP annual rate of change
   try {
     const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A';
     const resp = await fetch(url);
@@ -480,7 +513,6 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
       return new Map();
     }
     const json = await resp.json();
-    // Eurostat JSON format: dimension time with indices, values as flat object
     const timeDim = json?.dimension?.time?.category?.index;
     const values = json?.value;
     if (!timeDim || !values) return new Map();
@@ -489,12 +521,10 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
     for (const [period, idx] of Object.entries(timeDim)) {
       const val = values[String(idx)];
       if (val != null) {
-        // Convert "2025M01" to "2025-01"
-        const month = period.replace('M', '-');
-        result.set(month, val as number);
+        result.set(period, val as number);
       }
     }
-    console.log(`Eurostat HICP: ${result.size} months, latest entries:`,
+    console.log(`Eurostat HICP: ${result.size} months, latest:`,
       [...result.entries()].slice(-3).map(([k, v]) => `${k}=${v}`).join(', '));
     return result;
   } catch (err) {
