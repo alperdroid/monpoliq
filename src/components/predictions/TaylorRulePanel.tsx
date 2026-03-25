@@ -7,14 +7,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, Area, ReferenceLine, CartesianGrid } from 'recharts';
 import { FlaskConical, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
+interface RegimeInfo {
+  coefficients: { intercept: number; inflation_gap: number; output_gap: number };
+  r_squared: number;
+  sample_size: number;
+}
+
 interface TaylorRuleResult {
   bank: string;
+  regime_model?: string;
+  normal_regime?: RegimeInfo;
+  zlb_regime?: RegimeInfo | null;
   coefficients: { intercept: number; inflation_gap: number; output_gap: number };
   r_squared: number;
   sample_size: number;
   sample_start: string;
   sample_end: string;
-  time_series: { date: string; actual_rate: number; implied_rate: number; inflation: number; unemployment: number }[];
+  time_series: { date: string; actual_rate: number; implied_rate: number; inflation: number; unemployment: number; regime?: string }[];
   latest_gap: number;
   latest_implied: number;
   latest_actual: number;
@@ -60,7 +69,7 @@ export function TaylorRulePanel() {
       </div>
 
       <p className="text-[10px] text-muted-foreground">
-        OLS regression: Rate = α + β₁·(π - π*) + β₂·(y - y*) using historical FRED data
+        Two-regime OLS: estimates separate coefficients for normal (rate ≥ 0.5%) vs ZLB periods to correct censoring bias
       </p>
 
       {isLoading ? (
@@ -72,29 +81,53 @@ export function TaylorRulePanel() {
         <p className="text-xs text-muted-foreground text-center py-6">{data.error}</p>
       ) : data ? (
         <>
-          {/* Coefficients */}
-          <div className="grid grid-cols-5 gap-3">
-            <div className="rounded-md bg-surface p-2.5 text-center">
-              <p className="text-[9px] text-muted-foreground uppercase">Intercept (α)</p>
-              <p className="text-sm font-mono font-bold text-foreground">{data.coefficients.intercept.toFixed(3)}</p>
-            </div>
-            <div className="rounded-md bg-surface p-2.5 text-center">
-              <p className="text-[9px] text-muted-foreground uppercase">Inflation Gap (β₁)</p>
-              <p className="text-sm font-mono font-bold text-foreground">{data.coefficients.inflation_gap.toFixed(3)}</p>
-            </div>
-            <div className="rounded-md bg-surface p-2.5 text-center">
-              <p className="text-[9px] text-muted-foreground uppercase">Output Gap (β₂)</p>
-              <p className="text-sm font-mono font-bold text-foreground">{data.coefficients.output_gap.toFixed(3)}</p>
-            </div>
-            <div className="rounded-md bg-surface p-2.5 text-center">
-              <p className="text-[9px] text-muted-foreground uppercase">R²</p>
-              <p className="text-sm font-mono font-bold text-foreground">{data.r_squared.toFixed(3)}</p>
-            </div>
-            <div className="rounded-md bg-surface p-2.5 text-center">
-              <p className="text-[9px] text-muted-foreground uppercase">Observations</p>
-              <p className="text-sm font-mono font-bold text-foreground">{data.sample_size}</p>
+          {/* Normal regime coefficients */}
+          <div>
+            <p className="text-[9px] text-muted-foreground mb-1.5 uppercase tracking-wider">Normal Regime (rate ≥ 0.5%){data.normal_regime ? ` · n=${data.normal_regime.sample_size}` : ''}</p>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="rounded-md bg-surface p-2 text-center">
+                <p className="text-[8px] text-muted-foreground">Intercept (α)</p>
+                <p className="text-xs font-mono font-bold text-foreground">{data.coefficients.intercept.toFixed(3)}</p>
+              </div>
+              <div className="rounded-md bg-surface p-2 text-center">
+                <p className="text-[8px] text-muted-foreground">Inflation Gap (β₁)</p>
+                <p className="text-xs font-mono font-bold text-foreground">{data.coefficients.inflation_gap.toFixed(3)}</p>
+              </div>
+              <div className="rounded-md bg-surface p-2 text-center">
+                <p className="text-[8px] text-muted-foreground">Output Gap (β₂)</p>
+                <p className="text-xs font-mono font-bold text-foreground">{data.coefficients.output_gap.toFixed(3)}</p>
+              </div>
+              <div className="rounded-md bg-surface p-2 text-center">
+                <p className="text-[8px] text-muted-foreground">R²</p>
+                <p className="text-xs font-mono font-bold text-foreground">{(data.normal_regime?.r_squared ?? data.r_squared).toFixed(3)}</p>
+              </div>
             </div>
           </div>
+
+          {/* ZLB regime info if available */}
+          {data.zlb_regime && (
+            <div>
+              <p className="text-[9px] text-muted-foreground mb-1.5 uppercase tracking-wider">ZLB Regime (rate &lt; 0.5%) · n={data.zlb_regime.sample_size}</p>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="rounded-md bg-surface/50 p-2 text-center">
+                  <p className="text-[8px] text-muted-foreground">Intercept</p>
+                  <p className="text-xs font-mono text-muted-foreground">{data.zlb_regime.coefficients.intercept.toFixed(3)}</p>
+                </div>
+                <div className="rounded-md bg-surface/50 p-2 text-center">
+                  <p className="text-[8px] text-muted-foreground">Inflation Gap</p>
+                  <p className="text-xs font-mono text-muted-foreground">{data.zlb_regime.coefficients.inflation_gap.toFixed(3)}</p>
+                </div>
+                <div className="rounded-md bg-surface/50 p-2 text-center">
+                  <p className="text-[8px] text-muted-foreground">Output Gap</p>
+                  <p className="text-xs font-mono text-muted-foreground">{data.zlb_regime.coefficients.output_gap.toFixed(3)}</p>
+                </div>
+                <div className="rounded-md bg-surface/50 p-2 text-center">
+                  <p className="text-[8px] text-muted-foreground">R²</p>
+                  <p className="text-xs font-mono text-muted-foreground">{data.zlb_regime.r_squared.toFixed(3)}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Gap indicator */}
           <div className="flex items-center gap-2 px-2">

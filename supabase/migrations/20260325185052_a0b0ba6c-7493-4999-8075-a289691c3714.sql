@@ -1,0 +1,1 @@
+DELETE FROM analysis_cache WHERE analysis_type LIKE 'taylor-rule-%';
