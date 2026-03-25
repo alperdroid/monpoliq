@@ -21,23 +21,23 @@ serve(async (req) => {
     const prompt = `You are a financial data analyst. Today is ${today}. Provide ACCURATE current market data using the latest available pricing. Be very precise with prices — use realistic values consistent with current market conditions.
 
 CRITICAL MARKET CONTEXT (March 2026) — YOU MUST FOLLOW THIS:
-- The Fed has held rates at 4.25-4.50% since December 2024. As of March 2026, CME FedWatch shows markets price NO rate cuts through end of 2026. Sticky inflation (~2.8% CPI YoY), tariff uncertainty, and a resilient labor market have pushed rate cut expectations out to 2027.
-- Fed Funds futures MUST reflect this: market_hold_prob should be 0.85-0.95, market_cut_prob 0.05-0.12, market_hike_prob 0.00-0.03. Prices should be near 95.55-95.58 (implying ~4.42-4.45% effective rate, very close to spot).
-- DO NOT generate cut probabilities above 0.15 for Fed — this would be factually wrong.
-- The ECB cut to 2.50% in March 2025. Markets price 1-2 more 25bp cuts by year-end. Euribor futures can show moderate cut probabilities (0.40-0.65).
+- The Fed cut rates multiple times in late 2025. The current Fed Funds target range is 3.50-3.75% (effective rate ~3.64%). Markets now expect NO further cuts in 2026 due to sticky inflation (~2.8% CPI YoY) and tariff uncertainty.
+- Fed Funds futures MUST reflect this: prices should be near 96.36 (= 100 - 3.64), with market_hold_prob ~0.85-0.95 and market_cut_prob ~0.05-0.12.
+- DO NOT generate cut probabilities above 0.15 for Fed — markets price no more cuts.
+- The ECB has cut the deposit facility rate to 2.00% (latest FRED ECBDFR). Markets may price 0-1 additional 25bp cut(s) by year-end. Euribor futures should reflect prices near 98.00 (= 100 - 2.00).
 - For ai_ fields: the fundamental analysis may differ from market pricing (e.g., fundamental view might see slightly higher cut probability than market for Fed, but still below 0.30).
 
 **RATE FUTURES** (category: "rate_futures"):
-1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. MUST show hold_prob 0.85-0.95, cut_prob 0.05-0.12 per current CME FedWatch.
-2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. ECB deposit rate is 2.50%, markets price gradual easing so forward rates slightly below spot.
+1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Current effective rate is 3.64%. Prices should be near 96.36. MUST show hold_prob 0.85-0.95, cut_prob 0.05-0.12.
+2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. ECB deposit rate is 2.00%, 3M Euribor ~2.01%. Prices should be near 97.95-98.00.
 - Include: price (must be consistent with rate expectations), market-implied hike/hold/cut probabilities, fundamental-assessed probabilities, 24h change
 - IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument
 
 **TREASURY & SOVEREIGN BONDS** (category: "bonds"):
 1. US 10-Year Treasury Note futures (ZN) — current ~110-112 range, yield ~4.2-4.4%
-2. US 2-Year Treasury Note futures (ZT) — current ~103-104 range, yield ~3.9-4.1%
+2. US 2-Year Treasury Note futures (ZT) — current ~103-104 range, yield ~3.8-3.9%
 3. German 10-Year Bund futures (FGBL) — current ~130-133 range, yield ~2.6-2.8%
-4. US 10Y-2Y yield curve spread — currently ~30-50 bps
+4. US 10Y-2Y yield curve spread — currently ~50 bps (DGS10 4.34% - DGS2 3.83%)
 - Include: price/yield, 24h change, direction (bullish/bearish/neutral), ai_direction
 
 **CURRENCY FORWARDS** (category: "currency"):
