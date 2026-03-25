@@ -1,4 +1,4 @@
-import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare, Shield, Grid3X3, Layers, Crosshair, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Radio, TrendingUp, Settings, BarChart3, MessageSquare, Shield, Grid3X3, Layers, Crosshair, FlaskConical, Bell } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import { MonPolLogo } from '@/components/brand/MonPolLogo';
