@@ -36,25 +36,26 @@ const FED_R2 = 0.998174;
 const FED_OOS = { rmse: 0.1055, r2_vs_naive: 0.6312, r2_level: 0.9971, n_oos: 234 };
 
 const ECB_COEFFICIENTS: Record<string, number> = {
-  const: 0,  // intercept from OLS (notebook didn't list explicit intercept; use 0 and let model compute)
-  y2y: 0.459258,
-  policy_rate_lag: 0.668543,
-  fci_l1: -0.276744,
-  inflation_gap_l1: 0.009320,
-  y2y_l3: -0.220754,
-  slope: -0.079463,
-  hy_spread: 0.063591,
-  rate_change_l1: -0.250694,
-  fci_l3: 0.103869,
-  unemp_gap_x_gfc: -0.098756,
-  vix: -0.004148,
-  infl_gap_x_neg_rate: -0.000823,
-  rate_lag_x_sov_crisis: -0.157497,
-  credit_spread: -0.095016,
+  const: 0,
+  y2y: 0.474432,
+  policy_rate_lag: 0.571832,
+  inflation_gap_l1: 0.010221,
+  fci_l1: -0.239780,
+  slope_x_d_gfc: 0.111782,
+  slope: -0.141431,
+  y2y_l3: -0.169863,
+  infl_gap_x_neg_rate: -0.001809,
+  rate_change_l1: -0.214750,
+  y2y_x_d_sov_crisis: -0.101180,
+  hy_spread: 0.025882,
+  slope_x_d_neg_rate: 0.104035,
+  vix: -0.003046,
+  slope_x_d_pre_gfc: 0.150675,
+  fci_l3: 0.064801,
 };
 
-const ECB_R2 = 0.997042;
-const ECB_OOS = { rmse: 0.0860, r2_vs_naive: 0.5992, r2_level: 0.9966, n_oos: 162 };
+const ECB_R2 = 0.997112;
+const ECB_OOS = { rmse: 0.0858, r2_vs_naive: 0.6016, r2_level: 0.9966, n_oos: 162 };
 
 // ─── FRED Data Fetching ────────────────────────────────────────────────────────
 
