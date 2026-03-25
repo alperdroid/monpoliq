@@ -18,27 +18,28 @@ serve(async (req) => {
 
     const today = new Date().toISOString().split('T')[0];
     
-    const prompt = `You are a financial data analyst. For today (${today}), provide current market data across these categories:
+    const prompt = `You are a financial data analyst. Today is ${today}. Provide ACCURATE current market data using the latest available pricing. Be very precise with prices — use realistic values consistent with current market conditions.
 
 **RATE FUTURES** (category: "rate_futures"):
-1. Fed Funds futures for next 2-3 upcoming FOMC meetings
-2. Euribor futures for next 2-3 upcoming ECB meetings
-- Include: price, market-implied hike/hold/cut probabilities, AI-assessed probabilities, 24h change
+1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Current Fed Funds target is 4.25-4.50%. Price should reflect realistic market-implied rate expectations (e.g., if market expects 4.18% effective rate, price = 95.82).
+2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. Current ECB deposit rate is 2.50%. Price should reflect realistic Euribor forward rates.
+- Include: price (must be consistent with rate expectations), market-implied hike/hold/cut probabilities, fundamental-assessed probabilities, 24h change
+- IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument
 
 **TREASURY & SOVEREIGN BONDS** (category: "bonds"):
-1. US 10-Year Treasury Note futures
-2. US 2-Year Treasury Note futures  
-3. German 10-Year Bund futures
-4. US 10Y-2Y yield curve spread
+1. US 10-Year Treasury Note futures (ZN) — current ~110-112 range, yield ~4.2-4.4%
+2. US 2-Year Treasury Note futures (ZT) — current ~103-104 range, yield ~3.9-4.1%
+3. German 10-Year Bund futures (FGBL) — current ~130-133 range, yield ~2.6-2.8%
+4. US 10Y-2Y yield curve spread — currently ~30-50 bps
 - Include: price/yield, 24h change, direction (bullish/bearish/neutral), ai_direction
 
 **CURRENCY FORWARDS** (category: "currency"):
-1. EUR/USD 3-month forward
-2. GBP/USD 3-month forward
-3. USD/JPY 3-month forward
-- Include: price (forward rate), 24h change, direction, ai_direction
+1. EUR/USD 3-month forward — currently around 1.08-1.10
+2. GBP/USD 3-month forward — currently around 1.29-1.31
+3. USD/JPY 3-month forward — currently around 148-152
+- Include: price (forward rate to 4 decimal places), 24h change, direction, ai_direction
 
-Use actual current market data. For rate futures, probabilities must sum to 1.0.`;
+Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or round numbers. For the "ai_" fields, use "fundamental" analysis-based assessment that may differ from market pricing.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
