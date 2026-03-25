@@ -473,7 +473,7 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 async function fetchEurostatHICP(): Promise<Map<string, number>> {
   // Try Eurostat JSON API for latest HICP annual rate of change (prc_hicp_manr, CP00, EA)
   try {
-    const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A&sinceTimePeriod=2000M01';
+    const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A';
     const resp = await fetch(url);
     if (!resp.ok) {
       console.warn('Eurostat API failed:', resp.status);
