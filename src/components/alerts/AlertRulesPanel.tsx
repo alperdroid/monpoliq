@@ -83,12 +83,12 @@ export function AlertRulesPanel() {
     queryKey: ['alert-history', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('alert_history')
+        .from('alert_history' as any)
         .select('*')
         .order('triggered_at', { ascending: false })
         .limit(20);
       if (error) throw error;
-      return data as AlertHistoryEntry[];
+      return (data || []) as unknown as AlertHistoryEntry[];
     },
     enabled: !!user,
   });
