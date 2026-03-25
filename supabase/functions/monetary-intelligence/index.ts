@@ -179,6 +179,23 @@ Probabilities for each bank MUST sum to 1.0. Base your analysis on:
 4. Market expectations and positioning — dovish tone ≠ imminent cut
 5. Geopolitical risk assessment`;
 
+    // ── Minutes Diff context ──
+    const fedMinutesDiff = minutesDiffFedRes.data?.result as any;
+    const ecbMinutesDiff = minutesDiffEcbRes.data?.result as any;
+
+    const formatMinutesDiff = (diff: any, bank: string) => {
+      if (!diff || diff.error) return `No minutes diff available for ${bank}.`;
+      const added = (diff.added || []).slice(0, 5).map((a: any) => `  + "${a.text}" (${a.significance})`).join("\n");
+      const removed = (diff.removed || []).slice(0, 5).map((r: any) => `  - "${r.text}" (${r.significance})`).join("\n");
+      return `### Minutes Language Shift (${diff.previous?.date || "?"} → ${diff.current?.date || "?"})
+Summary: ${diff.summary || "N/A"}
+Key phrases ADDED:
+${added || "  (none)"}
+Key phrases REMOVED:
+${removed || "  (none)"}
+Score shift: ${diff.previous?.score ?? "?"} → ${diff.current?.score ?? "?"}`;
+    };
+
     const userPrompt = `Analyze the following data and predict the next Fed and ECB decisions:
 
 ## FED SENTIMENT (30-day avg: ${avg(fedComms) ?? "N/A"})
@@ -190,6 +207,8 @@ ${summarizeItems(fedStats)}
 
 ${fedScore ? `### Algorithm Scores: Score2 avg=${fedScore.score_2_avg}, label=${fedScore.score_2_label}, count=${fedScore.score_2_count}` : ""}
 
+${formatMinutesDiff(fedMinutesDiff, "FED")}
+
 ## ECB SENTIMENT (30-day avg: ${avg(ecbComms) ?? "N/A"})
 ### Recent Communications (${ecbComms.length} items, 90d):
 ${summarizeItems(ecbComms)}
@@ -198,6 +217,8 @@ ${summarizeItems(ecbComms)}
 ${summarizeItems(ecbStats)}
 
 ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
+
+${formatMinutesDiff(ecbMinutesDiff, "ECB")}
 
 ## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
 Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
@@ -209,6 +230,11 @@ MANDATORY CONSISTENCY RULE:
 - If Fed more dovish (more negative) → USD weakens → EUR/USD direction MUST be "bullish"
 - If ECB more dovish (more negative) → EUR weakens → EUR/USD direction MUST be "bearish"
 - The EUR/USD direction MUST be mathematically consistent with the sentiment differential above.
+
+MINUTES LANGUAGE SHIFT INTEGRATION:
+- Use the minutes language diff above to identify EVOLVING policy themes
+- Newly added phrases signal emerging policy concerns; removed phrases signal resolved issues
+- Weight these language shifts alongside sentiment scores for a more nuanced prediction
 
 Current date: ${new Date().toISOString().split("T")[0]}
 Consider current market expectations, geopolitical tensions, and any emerging risks that may override historical data patterns.`;
