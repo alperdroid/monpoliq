@@ -1,5 +1,6 @@
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
+import { AlertBell } from '@/components/alerts/AlertBell';
 import { Search } from 'lucide-react';
 
 interface AppLayoutProps {
