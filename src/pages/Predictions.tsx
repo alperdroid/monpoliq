@@ -7,7 +7,7 @@ import { Brain, LineChart } from 'lucide-react';
 import { PivotProbabilityPanel } from '@/components/predictions/PivotProbabilityPanel';
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
-import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
+
 import { OISOverlayChart } from '@/components/predictions/OISOverlayChart';
 
 import {
