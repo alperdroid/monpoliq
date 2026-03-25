@@ -121,7 +121,7 @@ export function PredictionPanel({
               </div>
             </div>
             {us10yReasoning && (
-              <p className="text-sm text-foreground/80 mt-2 leading-relaxed font-medium">{us10yReasoning}</p>
+              <p className="text-[13px] text-foreground/85 mt-2 leading-relaxed font-medium">{us10yReasoning}</p>
             )}
           </div>
         )}
