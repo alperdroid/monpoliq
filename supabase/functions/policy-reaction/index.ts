@@ -470,8 +470,41 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
 // ─── Run ECB Model ─────────────────────────────────────────────────────────────
 
+async function fetchECBSDWHICP(): Promise<Map<string, number>> {
+  // ECB Statistical Data Warehouse — ICP dataset, Euro area, Overall HICP, Annual rate of change
+  // This is the most authoritative and timely source (includes revised methodology)
+  try {
+    const resp = await fetch(
+      'https://data-api.ecb.europa.eu/service/data/ICP/M.U2.N.000000.4.ANR?startPeriod=1997-01',
+      { headers: { Accept: 'text/csv' } }
+    );
+    if (!resp.ok) {
+      console.warn('ECB SDW failed:', resp.status);
+      return new Map();
+    }
+    const text = await resp.text();
+    const result = new Map<string, number>();
+    for (const line of text.trim().split('\n').slice(1)) {
+      // CSV columns: KEY,FREQ,...,TIME_PERIOD,OBS_VALUE,...
+      const cols = line.split(',');
+      const period = cols[7]; // TIME_PERIOD
+      const value = parseFloat(cols[8]); // OBS_VALUE
+      if (period && !isNaN(value)) {
+        result.set(period, value);
+      }
+    }
+    const entries = [...result.entries()];
+    console.log(`ECB SDW HICP: ${result.size} months, latest:`,
+      entries.slice(-3).map(([k, v]) => `${k}=${v}`).join(', '));
+    return result;
+  } catch (err) {
+    console.warn('ECB SDW HICP error:', err);
+    return new Map();
+  }
+}
+
 async function fetchEurostatHICP(): Promise<Map<string, number>> {
-  // Try Eurostat JSON API for latest HICP annual rate of change (prc_hicp_manr, CP00, EA)
+  // Fallback: Eurostat JSON API for HICP annual rate of change
   try {
     const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A';
     const resp = await fetch(url);
@@ -480,7 +513,6 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
       return new Map();
     }
     const json = await resp.json();
-    // Eurostat JSON format: dimension time with indices, values as flat object
     const timeDim = json?.dimension?.time?.category?.index;
     const values = json?.value;
     if (!timeDim || !values) return new Map();
@@ -489,12 +521,10 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
     for (const [period, idx] of Object.entries(timeDim)) {
       const val = values[String(idx)];
       if (val != null) {
-        // Convert "2025M01" to "2025-01"
-        const month = period.replace('M', '-');
-        result.set(month, val as number);
+        result.set(period, val as number);
       }
     }
-    console.log(`Eurostat HICP: ${result.size} months, latest entries:`,
+    console.log(`Eurostat HICP: ${result.size} months, latest:`,
       [...result.entries()].slice(-3).map(([k, v]) => `${k}=${v}`).join(', '));
     return result;
   } catch (err) {
@@ -506,14 +536,18 @@ async function fetchEurostatHICP(): Promise<Map<string, number>> {
 async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
   
-  // Try Eurostat first for timely HICP YoY rate, fall back to FRED index
-  const eurostatHICP = await fetchEurostatHICP();
-  const useEurostat = eurostatHICP.size > 100;
-  console.log(`Using ${useEurostat ? 'Eurostat HICP YoY rate' : 'FRED HICP index'} for inflation`);
+  // Try ECB SDW first (most timely, revised methodology), then Eurostat, then FRED index
+  let hicpYoY = await fetchECBSDWHICP();
+  if (hicpYoY.size < 100) {
+    console.log('ECB SDW insufficient, trying Eurostat...');
+    hicpYoY = await fetchEurostatHICP();
+  }
+  const useYoY = hicpYoY.size > 100;
+  console.log(`Using ${useYoY ? `direct YoY rate (${hicpYoY.size} months)` : 'FRED HICP index'} for inflation`);
   
   const [ecbdfr, hicpFred, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
     fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    useEurostat ? Promise.resolve(new Map<string, number>()) : fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    useYoY ? Promise.resolve(new Map<string, number>()) : fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
@@ -529,9 +563,9 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   let equity: Map<string, number>;
   try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
 
-  // Use Eurostat YoY rate (inflationIsYoY=true) or FRED index (inflationIsYoY=false)
-  const hicp = useEurostat ? ffill(eurostatHICP, months) : hicpFred;
-  const rows = buildRows(months, ecbdfr, hicp, useEurostat, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  // Use YoY rate directly (inflationIsYoY=true) or FRED index level (inflationIsYoY=false)
+  const hicp = useYoY ? ffill(hicpYoY, months) : hicpFred;
+  const rows = buildRows(months, ecbdfr, hicp, useYoY, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
@@ -610,7 +644,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v14&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v15&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -631,7 +665,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v14',
+        analysis_type: 'policy_reaction_v15',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
