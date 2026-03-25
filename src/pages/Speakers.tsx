@@ -1,14 +1,16 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { StanceGauge } from '@/components/analytics/StanceGauge';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { TrendChip } from '@/components/analytics/TrendChip';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, User } from 'lucide-react';
+import { Search, User, Download, Loader2 } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
+import { toast } from 'sonner';
 
 /** Known speaker reference data — metrics computed from real items */
 const SPEAKER_REFS = [
