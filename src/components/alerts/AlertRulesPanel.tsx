@@ -120,7 +120,7 @@ export function AlertRulesPanel() {
 
   const deleteRule = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('alert_rules').delete().eq('id', id);
+      const { error } = await (supabase.from('alert_rules' as any) as any).delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {

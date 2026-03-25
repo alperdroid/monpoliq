@@ -20,12 +20,12 @@ export function AlertBell() {
     queryKey: ['recent-alerts', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('alert_history')
+        .from('alert_history' as any)
         .select('*')
         .order('triggered_at', { ascending: false })
         .limit(5);
       if (error) throw error;
-      return data;
+      return (data || []) as unknown as { id: string; triggered_at: string; message: string; current_value: number }[];
     },
     enabled: !!user,
     refetchInterval: 60000,
