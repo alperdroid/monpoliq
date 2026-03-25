@@ -256,7 +256,7 @@ export function MarketSentimentTable() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
           <Clock className="w-4 h-4 text-primary" />
-          Market vs AI Expectations
+          Market Expectations & Pricing
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           Multi-asset market data: rate futures, sovereign bonds, and currency forwards

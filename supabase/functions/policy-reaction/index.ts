@@ -470,11 +470,50 @@ async function runFedModel(months: string[]): Promise<ModelResult> {
 
 // ─── Run ECB Model ─────────────────────────────────────────────────────────────
 
+async function fetchEurostatHICP(): Promise<Map<string, number>> {
+  // Try Eurostat JSON API for latest HICP annual rate of change (prc_hicp_manr, CP00, EA)
+  try {
+    const url = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_manr?geo=EA&coicop=CP00&unit=RCH_A&sinceTimePeriod=2000M01';
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn('Eurostat API failed:', resp.status);
+      return new Map();
+    }
+    const json = await resp.json();
+    // Eurostat JSON format: dimension time with indices, values as flat object
+    const timeDim = json?.dimension?.time?.category?.index;
+    const values = json?.value;
+    if (!timeDim || !values) return new Map();
+    
+    const result = new Map<string, number>();
+    for (const [period, idx] of Object.entries(timeDim)) {
+      const val = values[String(idx)];
+      if (val != null) {
+        // Convert "2025M01" to "2025-01"
+        const month = period.replace('M', '-');
+        result.set(month, val as number);
+      }
+    }
+    console.log(`Eurostat HICP: ${result.size} months, latest entries:`,
+      [...result.entries()].slice(-3).map(([k, v]) => `${k}=${v}`).join(', '));
+    return result;
+  } catch (err) {
+    console.warn('Eurostat HICP fetch error:', err);
+    return new Map();
+  }
+}
+
 async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
-  const [ecbdfr, hicp, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
+  
+  // Try Eurostat first for timely HICP YoY rate, fall back to FRED index
+  const eurostatHICP = await fetchEurostatHICP();
+  const useEurostat = eurostatHICP.size > 100;
+  console.log(`Using ${useEurostat ? 'Eurostat HICP YoY rate' : 'FRED HICP index'} for inflation`);
+  
+  const [ecbdfr, hicpFred, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
     fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    useEurostat ? Promise.resolve(new Map<string, number>()) : fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
