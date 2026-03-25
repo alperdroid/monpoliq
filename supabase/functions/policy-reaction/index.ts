@@ -474,7 +474,8 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   console.log('Fetching ECB data...');
   const [ecbdfr, hicp, urate, de10y, de3m, oil, baa10y, hy, vixcls, nfci] = await Promise.all([
     fetchFredCSV('ECBDFR').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    fetchFredCSV('CP0000EZ19M086NEST').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
+    // Direct YoY HICP rate (less lag than index series CP0000EZ19M086NEST)
+    fetchFredCSV('CPALTT01EZM659N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('LRHUTTTTEZM156S').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
@@ -490,7 +491,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   let equity: Map<string, number>;
   try { equity = await fetchYahooMonthly('^STOXX50E'); } catch { equity = new Map(); }
 
-  const rows = buildRows(months, ecbdfr, hicp, false, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
+  const rows = buildRows(months, ecbdfr, hicp, true, urate, new Map(), de3m, de10y, oil, equity, baa10y, hy, vixcls, nfci);
   console.log(`ECB: ${rows.length} rows`);
   if (rows.length < 50) throw new Error('Insufficient ECB data');
 
@@ -569,7 +570,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v11&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v12&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -590,7 +591,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v11',
+        analysis_type: 'policy_reaction_v12',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
