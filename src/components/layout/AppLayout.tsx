@@ -36,6 +36,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <div className="text-[10px] text-muted-foreground font-mono">
                 {new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}
               </div>
+              <AlertBell />
             </div>
           </header>
           <main className="flex-1 overflow-auto p-4 md:p-6 bg-background">

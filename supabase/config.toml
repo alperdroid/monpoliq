@@ -35,3 +35,18 @@ verify_jwt = false
 
 [functions.policy-reaction]
 verify_jwt = false
+
+[functions.minutes-diff]
+verify_jwt = false
+
+[functions.taylor-rule]
+verify_jwt = false
+
+[functions.ois-curve]
+verify_jwt = false
+
+[functions.check-alerts]
+verify_jwt = false
+
+[functions.market-futures]
+verify_jwt = false

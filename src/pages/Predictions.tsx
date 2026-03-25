@@ -101,6 +101,9 @@ const Predictions = () => {
       )}
 
 
+      {/* OIS Market Pricing Overlay */}
+      <OISOverlayChart />
+
       {/* Divergence Alert */}
       <DivergenceAlertWidget />
 

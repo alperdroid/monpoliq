@@ -226,6 +226,11 @@ const MeetingCycles = () => {
         </div>
       )}
 
+      {/* Minutes Language Diff */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <MinutesDiffCloud />
+      </div>
+
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Upcoming</p>

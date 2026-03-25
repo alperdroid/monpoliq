@@ -29,6 +29,7 @@ const mainNav = [
   { title: 'Policy Taxonomy', url: '/taxonomy', icon: Layers },
   { title: 'Policy Radar', url: '/radar', icon: Crosshair },
   { title: 'Committee', url: '/committee', icon: Shield },
+  { title: 'Alerts', url: '/alerts', icon: Bell },
 ];
 
 const secondaryNav = [
