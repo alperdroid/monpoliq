@@ -177,7 +177,8 @@ Probabilities for each bank MUST sum to 1.0. Base your analysis on:
 2. Statistical/economic data trends
 3. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
 4. Market expectations and positioning — dovish tone ≠ imminent cut
-5. Geopolitical risk assessment`;
+5. Geopolitical risk assessment
+6. Minutes language shift analysis — newly added/removed phrases signal evolving policy priorities`;
 
     // ── Minutes Diff context ──
     const fedMinutesDiff = minutesDiffFedRes.data?.result as any;
