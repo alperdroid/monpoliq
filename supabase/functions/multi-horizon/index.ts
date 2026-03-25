@@ -80,6 +80,18 @@ serve(async (req) => {
     const ecb30 = summarize("ECB", 30);
     const ecb90 = summarize("ECB", 90);
 
+    // Also fetch the main prediction cache to ensure meeting forecasts are consistent
+    const { data: predCache } = await sb
+      .from("prediction_cache")
+      .select("predictions")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const mainPredictions = predCache?.predictions as any;
+    const mainFedProbs = mainPredictions?.fed ? `Main model Fed meeting probs: hike=${mainPredictions.fed.hike_probability}, hold=${mainPredictions.fed.hold_probability}, cut=${mainPredictions.fed.cut_probability}, decision=${mainPredictions.fed.next_decision}` : "";
+    const mainEcbProbs = mainPredictions?.ecb ? `Main model ECB meeting probs: hike=${mainPredictions.ecb.hike_probability}, hold=${mainPredictions.ecb.hold_probability}, cut=${mainPredictions.ecb.cut_probability}, decision=${mainPredictions.ecb.next_decision}` : "";
+
     const prompt = `You are a monetary policy forecaster. Based on the following data windows, produce multi-horizon forecasts for both FED and ECB.
 
 FED 7-day: avg=${fed7.avg_score}, ${fed7.comms_count} comms, hawk_ratio=${fed7.hawk_ratio.toFixed(2)}
@@ -98,9 +110,14 @@ Stats: ${ecb30.key_stats.join("; ")}
 
 ECB 90-day: avg=${ecb90.avg_score}, ${ecb90.comms_count} comms
 
+${mainFedProbs}
+${mainEcbProbs}
+
+CRITICAL CONSISTENCY RULE: Your "Next Meeting" probabilities MUST be identical to the main model probabilities shown above. Use EXACTLY the same hike_prob, hold_prob, cut_prob values. The multi-horizon near-term and policy path can differ, but the meeting decision probabilities must match.
+
 For each bank, produce three horizon forecasts:
 1. Near-term (1-7 days): direction of tone/market sentiment
-2. Meeting outcome: next meeting decision probabilities
+2. Meeting outcome: next meeting decision probabilities (MUST match main model above)
 3. Policy path (1-3 months): bias direction`;
 
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

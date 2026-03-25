@@ -109,9 +109,13 @@ const Dashboard = () => {
   const fedStatAvg = computeAvg(fed60Stats);
   const ecbStatAvg = computeAvg(ecb60Stats);
 
-  // 1-year monthly fluctuation data
-  const fedMonthly = monthlyAverages(allItems, 'FED');
-  const ecbMonthly = monthlyAverages(allItems, 'ECB');
+  // 1.5-year monthly fluctuation data
+  const eighteenMonthsAgo = new Date();
+  eighteenMonthsAgo.setMonth(eighteenMonthsAgo.getMonth() - 18);
+  const eighteenMonthsCutoff = eighteenMonthsAgo.toISOString().split('T')[0].slice(0, 7);
+  const recentItems18m = allItems.filter(i => i.item_date.slice(0, 7) >= eighteenMonthsCutoff);
+  const fedMonthly = monthlyAverages(recentItems18m, 'FED');
+  const ecbMonthly = monthlyAverages(recentItems18m, 'ECB');
   const allMonths = [...new Set([...fedMonthly.map(m => m.month), ...ecbMonthly.map(m => m.month)])].sort();
   const fluctuationData = allMonths.map(month => ({
     month,

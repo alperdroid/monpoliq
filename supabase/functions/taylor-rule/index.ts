@@ -100,7 +100,7 @@ serve(async (req) => {
     // Fetch historical macro data from FRED
     const fredSeries = bank === "FED"
       ? { rate: "FEDFUNDS", inflation: "CPIAUCSL", unemployment: "UNRATE" }
-      : { rate: "ECBDFR", inflation: "EA19CPHPLA01GYM", unemployment: "LRHUTTTTEZM156S" };
+      : { rate: "ECBDFR", inflation: "CP0000EZ19M086NEST", unemployment: "LRHUTTTTEZM156S" };
 
     const startDate = "2000-01-01";
 
