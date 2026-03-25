@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { StanceGauge } from '@/components/analytics/StanceGauge';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
