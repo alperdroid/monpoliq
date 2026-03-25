@@ -129,9 +129,24 @@ const Speakers = () => {
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
-        <span className="text-xs text-muted-foreground font-mono">
-          {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
-        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => scrapeMutation.mutate()}
+            disabled={scrapeMutation.isPending}
+            className="text-xs h-7"
+          >
+            {scrapeMutation.isPending ? (
+              <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Scraping...</>
+            ) : (
+              <><Download className="w-3 h-3 mr-1" />Scrape Powell & Lagarde</>
+            )}
+          </Button>
+          <span className="text-xs text-muted-foreground font-mono">
+            {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 items-center">
