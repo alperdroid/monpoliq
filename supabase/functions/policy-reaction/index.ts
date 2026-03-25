@@ -351,23 +351,25 @@ function computeECBImplied(row: DataRow): number {
   const dNeg = row.policy_rate_lag <= 0 ? 1 : 0;
   const dGFC = (row.month >= '2008-09' && row.month <= '2010-06') ? 1 : 0;
   const dSov = (row.month >= '2010-04' && row.month <= '2012-09') ? 1 : 0;
+  const dPreGFC = row.month < '2008-09' ? 1 : 0;
 
   const terms: [string, number][] = [
     ['const', 1],
     ['y2y', row.y2y],
     ['policy_rate_lag', row.policy_rate_lag],
-    ['fci_l1', row.fci_l1],
     ['inflation_gap_l1', row.inflation_gap_l1],
-    ['y2y_l3', row.y2y_l3],
+    ['fci_l1', row.fci_l1],
+    ['slope_x_d_gfc', row.slope * dGFC],
     ['slope', row.slope],
-    ['hy_spread', row.hy_spread],
-    ['rate_change_l1', row.rate_change_l1],
-    ['fci_l3', row.fci_l3],
-    ['unemp_gap_x_gfc', row.unemployment_gap * dGFC],
-    ['vix', row.vix],
+    ['y2y_l3', row.y2y_l3],
     ['infl_gap_x_neg_rate', row.inflation_gap * dNeg],
-    ['rate_lag_x_sov_crisis', row.policy_rate_lag * dSov],
-    ['credit_spread', row.credit_spread],
+    ['rate_change_l1', row.rate_change_l1],
+    ['y2y_x_d_sov_crisis', row.y2y * dSov],
+    ['hy_spread', row.hy_spread],
+    ['slope_x_d_neg_rate', row.slope * dNeg],
+    ['vix', row.vix],
+    ['slope_x_d_pre_gfc', row.slope * dPreGFC],
+    ['fci_l3', row.fci_l3],
   ];
   return terms.reduce((sum, [name, x]) => sum + (ECB_COEFFICIENTS[name] ?? 0) * x, 0);
 }
