@@ -53,7 +53,7 @@ serve(async (req) => {
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
-    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}`;
+    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}:v2`;
     const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
 
     // Check cache: return if same data hash AND less than 12h old (reduced for geopolitical events)
