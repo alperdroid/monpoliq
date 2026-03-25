@@ -510,21 +510,23 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   const dNegC = lastRow.policy_rate_lag <= 0 ? 1 : 0;
   const dGFCC = (lastRow.month >= '2008-09' && lastRow.month <= '2010-06') ? 1 : 0;
   const dSovC = (lastRow.month >= '2010-04' && lastRow.month <= '2012-09') ? 1 : 0;
+  const dPreGFCC = lastRow.month < '2008-09' ? 1 : 0;
   const ecbTerms: [string, number][] = [
     ['y2y', lastRow.y2y],
     ['policy_rate_lag', lastRow.policy_rate_lag],
-    ['fci_l1', lastRow.fci_l1],
     ['inflation_gap_l1', lastRow.inflation_gap_l1],
-    ['y2y_l3', lastRow.y2y_l3],
+    ['fci_l1', lastRow.fci_l1],
+    ['slope_x_d_gfc', lastRow.slope * dGFCC],
     ['slope', lastRow.slope],
-    ['hy_spread', lastRow.hy_spread],
-    ['rate_change_l1', lastRow.rate_change_l1],
-    ['fci_l3', lastRow.fci_l3],
-    ['unemp_gap_x_gfc', lastRow.unemployment_gap * dGFCC],
-    ['vix', lastRow.vix],
+    ['y2y_l3', lastRow.y2y_l3],
     ['infl_gap_x_neg_rate', lastRow.inflation_gap * dNegC],
-    ['rate_lag_x_sov_crisis', lastRow.policy_rate_lag * dSovC],
-    ['credit_spread', lastRow.credit_spread],
+    ['rate_change_l1', lastRow.rate_change_l1],
+    ['y2y_x_d_sov_crisis', lastRow.y2y * dSovC],
+    ['hy_spread', lastRow.hy_spread],
+    ['slope_x_d_neg_rate', lastRow.slope * dNegC],
+    ['vix', lastRow.vix],
+    ['slope_x_d_pre_gfc', lastRow.slope * dPreGFCC],
+    ['fci_l3', lastRow.fci_l3],
   ];
   const contributions: Record<string, number> = {};
   for (const [name, x] of ecbTerms) {
