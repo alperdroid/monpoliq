@@ -25,7 +25,7 @@ serve(async (req) => {
     const cutoff30 = new Date();
     cutoff30.setDate(cutoff30.getDate() - 30);
 
-    const [commsRes, statsRes, scoresRes] = await Promise.all([
+    const [commsRes, statsRes, scoresRes, minutesDiffFedRes, minutesDiffEcbRes] = await Promise.all([
       sb.from("sentiment_items")
         .select("bank, source, title, item_date, net_score, label, reasons, hawk_pts, dove_pts")
         .eq("is_statistical", false)
@@ -42,6 +42,18 @@ serve(async (req) => {
         .select("*")
         .order("fetched_at", { ascending: false })
         .limit(2),
+      sb.from("analysis_cache")
+        .select("result")
+        .eq("analysis_type", "minutes-diff-FED")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single(),
+      sb.from("analysis_cache")
+        .select("result")
+        .eq("analysis_type", "minutes-diff-ECB")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single(),
     ]);
 
     const comms = (commsRes.data || []).filter((i: any) => Math.abs(i.net_score) > 0.001);
