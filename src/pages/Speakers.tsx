@@ -1,16 +1,14 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { StanceGauge } from '@/components/analytics/StanceGauge';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { TrendChip } from '@/components/analytics/TrendChip';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, User, Download, Loader2 } from 'lucide-react';
+import { Search, User } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
-import { toast } from 'sonner';
 
 /** Known speaker reference data — metrics computed from real items */
 const SPEAKER_REFS = [
@@ -77,7 +75,6 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
 const Speakers = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const queryClient = useQueryClient();
 
   const { data: commItems = [], isLoading } = useQuery({
     queryKey: ['comm-items-all'],
@@ -91,32 +88,6 @@ const Speakers = () => {
 
   const speakers = useMemo(() => deriveSpeakers(commItems), [commItems]);
 
-  const scrapeMutation = useMutation({
-    mutationFn: async () => {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      const resp = await fetch(`https://${projectId}.supabase.co/functions/v1/speaker-scraper`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${anonKey}`,
-          'apikey': anonKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ speakers: ['powell', 'lagarde'], maxItems: 25 }),
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      return resp.json();
-    },
-    onSuccess: (data) => {
-      toast.success(`Scraped ${data.new_items} new communications`);
-      queryClient.invalidateQueries({ queryKey: ['comm-items-all'] });
-      queryClient.invalidateQueries({ queryKey: ['all-sentiment-items'] });
-    },
-    onError: (err: Error) => {
-      toast.error(`Scraping failed: ${err.message}`);
-    },
-  });
-
   const filtered = useMemo(() => {
     return speakers.filter(s => {
       if (bankFilter !== 'all' && s.bank !== bankFilter) return false;
@@ -129,24 +100,9 @@ const Speakers = () => {
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => scrapeMutation.mutate()}
-            disabled={scrapeMutation.isPending}
-            className="text-xs h-7"
-          >
-            {scrapeMutation.isPending ? (
-              <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Scraping...</>
-            ) : (
-              <><Download className="w-3 h-3 mr-1" />Scrape Powell & Lagarde</>
-            )}
-          </Button>
-          <span className="text-xs text-muted-foreground font-mono">
-            {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
-          </span>
-        </div>
+        <span className="text-xs text-muted-foreground font-mono">
+          {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
+        </span>
       </div>
 
       <div className="flex flex-wrap gap-3 items-center">

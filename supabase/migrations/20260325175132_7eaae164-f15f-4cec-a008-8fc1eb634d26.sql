@@ -1,0 +1,1 @@
+DELETE FROM sentiment_items WHERE source = 'fed_speech' AND lower(title) NOT LIKE '%powell%'
