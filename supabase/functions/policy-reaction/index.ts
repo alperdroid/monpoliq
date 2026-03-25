@@ -36,25 +36,26 @@ const FED_R2 = 0.998174;
 const FED_OOS = { rmse: 0.1055, r2_vs_naive: 0.6312, r2_level: 0.9971, n_oos: 234 };
 
 const ECB_COEFFICIENTS: Record<string, number> = {
-  const: 0,  // intercept from OLS (notebook didn't list explicit intercept; use 0 and let model compute)
-  y2y: 0.459258,
-  policy_rate_lag: 0.668543,
-  fci_l1: -0.276744,
-  inflation_gap_l1: 0.009320,
-  y2y_l3: -0.220754,
-  slope: -0.079463,
-  hy_spread: 0.063591,
-  rate_change_l1: -0.250694,
-  fci_l3: 0.103869,
-  unemp_gap_x_gfc: -0.098756,
-  vix: -0.004148,
-  infl_gap_x_neg_rate: -0.000823,
-  rate_lag_x_sov_crisis: -0.157497,
-  credit_spread: -0.095016,
+  const: 0,
+  y2y: 0.474432,
+  policy_rate_lag: 0.571832,
+  inflation_gap_l1: 0.010221,
+  fci_l1: -0.239780,
+  slope_x_d_gfc: 0.111782,
+  slope: -0.141431,
+  y2y_l3: -0.169863,
+  infl_gap_x_neg_rate: -0.001809,
+  rate_change_l1: -0.214750,
+  y2y_x_d_sov_crisis: -0.101180,
+  hy_spread: 0.025882,
+  slope_x_d_neg_rate: 0.104035,
+  vix: -0.003046,
+  slope_x_d_pre_gfc: 0.150675,
+  fci_l3: 0.064801,
 };
 
-const ECB_R2 = 0.997042;
-const ECB_OOS = { rmse: 0.0860, r2_vs_naive: 0.5992, r2_level: 0.9966, n_oos: 162 };
+const ECB_R2 = 0.997112;
+const ECB_OOS = { rmse: 0.0858, r2_vs_naive: 0.6016, r2_level: 0.9966, n_oos: 162 };
 
 // ─── FRED Data Fetching ────────────────────────────────────────────────────────
 
@@ -350,23 +351,25 @@ function computeECBImplied(row: DataRow): number {
   const dNeg = row.policy_rate_lag <= 0 ? 1 : 0;
   const dGFC = (row.month >= '2008-09' && row.month <= '2010-06') ? 1 : 0;
   const dSov = (row.month >= '2010-04' && row.month <= '2012-09') ? 1 : 0;
+  const dPreGFC = row.month < '2008-09' ? 1 : 0;
 
   const terms: [string, number][] = [
     ['const', 1],
     ['y2y', row.y2y],
     ['policy_rate_lag', row.policy_rate_lag],
-    ['fci_l1', row.fci_l1],
     ['inflation_gap_l1', row.inflation_gap_l1],
-    ['y2y_l3', row.y2y_l3],
+    ['fci_l1', row.fci_l1],
+    ['slope_x_d_gfc', row.slope * dGFC],
     ['slope', row.slope],
-    ['hy_spread', row.hy_spread],
-    ['rate_change_l1', row.rate_change_l1],
-    ['fci_l3', row.fci_l3],
-    ['unemp_gap_x_gfc', row.unemployment_gap * dGFC],
-    ['vix', row.vix],
+    ['y2y_l3', row.y2y_l3],
     ['infl_gap_x_neg_rate', row.inflation_gap * dNeg],
-    ['rate_lag_x_sov_crisis', row.policy_rate_lag * dSov],
-    ['credit_spread', row.credit_spread],
+    ['rate_change_l1', row.rate_change_l1],
+    ['y2y_x_d_sov_crisis', row.y2y * dSov],
+    ['hy_spread', row.hy_spread],
+    ['slope_x_d_neg_rate', row.slope * dNeg],
+    ['vix', row.vix],
+    ['slope_x_d_pre_gfc', row.slope * dPreGFC],
+    ['fci_l3', row.fci_l3],
   ];
   return terms.reduce((sum, [name, x]) => sum + (ECB_COEFFICIENTS[name] ?? 0) * x, 0);
 }
@@ -476,11 +479,9 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
     fetchFredCSV('IRLTLT01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('IR3TIB01DEM156N').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
     fetchFredCSV('DCOILBRENTEU').then(d => toMonthlyLast(d)).then(d => ffill(d, months)),
-    // Use European credit spread (EA AAA-rated bond spread) instead of US BAA10Y
-    fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(
-      () => fetchFredCSV('BAMLC0A4CBBBEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>())
-    ),
-    // European HY spread
+    // Euro credit spread (BAMLC0A0CMEY) — used as credit_spread input
+    fetchFredCSV('BAMLC0A0CMEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
+    // European HY spread (BAMLHE00EHYIEY)
     fetchFredCSV('BAMLHE00EHYIEY').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('VIXCLS').then(d => toMonthlyLast(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
     fetchFredCSV('NFCI').then(d => toMonthlyMean(d)).then(d => ffill(d, months)).catch(() => new Map<string, number>()),
@@ -509,21 +510,23 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
   const dNegC = lastRow.policy_rate_lag <= 0 ? 1 : 0;
   const dGFCC = (lastRow.month >= '2008-09' && lastRow.month <= '2010-06') ? 1 : 0;
   const dSovC = (lastRow.month >= '2010-04' && lastRow.month <= '2012-09') ? 1 : 0;
+  const dPreGFCC = lastRow.month < '2008-09' ? 1 : 0;
   const ecbTerms: [string, number][] = [
     ['y2y', lastRow.y2y],
     ['policy_rate_lag', lastRow.policy_rate_lag],
-    ['fci_l1', lastRow.fci_l1],
     ['inflation_gap_l1', lastRow.inflation_gap_l1],
-    ['y2y_l3', lastRow.y2y_l3],
+    ['fci_l1', lastRow.fci_l1],
+    ['slope_x_d_gfc', lastRow.slope * dGFCC],
     ['slope', lastRow.slope],
-    ['hy_spread', lastRow.hy_spread],
-    ['rate_change_l1', lastRow.rate_change_l1],
-    ['fci_l3', lastRow.fci_l3],
-    ['unemp_gap_x_gfc', lastRow.unemployment_gap * dGFCC],
-    ['vix', lastRow.vix],
+    ['y2y_l3', lastRow.y2y_l3],
     ['infl_gap_x_neg_rate', lastRow.inflation_gap * dNegC],
-    ['rate_lag_x_sov_crisis', lastRow.policy_rate_lag * dSovC],
-    ['credit_spread', lastRow.credit_spread],
+    ['rate_change_l1', lastRow.rate_change_l1],
+    ['y2y_x_d_sov_crisis', lastRow.y2y * dSovC],
+    ['hy_spread', lastRow.hy_spread],
+    ['slope_x_d_neg_rate', lastRow.slope * dNegC],
+    ['vix', lastRow.vix],
+    ['slope_x_d_pre_gfc', lastRow.slope * dPreGFCC],
+    ['fci_l3', lastRow.fci_l3],
   ];
   const contributions: Record<string, number> = {};
   for (const [name, x] of ecbTerms) {
@@ -537,7 +540,7 @@ async function runECBModel(months: string[]): Promise<ModelResult> {
     gap: Math.round((implied - lastRow.policy_rate) * 1000) / 1000,
     r2_insample: ECB_R2,
     oos_metrics: ECB_OOS,
-    model_name: 'Structural Break OLS (p≤0.10 pruned)',
+    model_name: 'P-Value Pruned OLS (threshold=0.10, BAMLC0A0CMEY)',
     n_features: featureNames.length,
     feature_names: featureNames,
     regime,
@@ -566,7 +569,7 @@ const CACHE_TTL_HOURS = 12;
 async function getCached(): Promise<{ fed: ModelResult; ecb: ModelResult; generated_at: string } | null> {
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v10&order=created_at.desc&limit=1`,
+      `${SUPABASE_URL}/rest/v1/analysis_cache?analysis_type=eq.policy_reaction_v11&order=created_at.desc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return null;
@@ -587,7 +590,7 @@ async function setCache(result: { fed: ModelResult; ecb: ModelResult; generated_
         'Content-Type': 'application/json', Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        analysis_type: 'policy_reaction_v10',
+        analysis_type: 'policy_reaction_v11',
         bank: 'ALL',
         data_hash: new Date().toISOString().substring(0, 10),
         result,
