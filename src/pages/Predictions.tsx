@@ -8,7 +8,7 @@ import { PivotProbabilityPanel } from '@/components/predictions/PivotProbability
 import { MultiHorizonPanel } from '@/components/predictions/MultiHorizonPanel';
 import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTable';
 import { DivergenceAlertWidget } from '@/components/predictions/DivergenceAlertWidget';
-
+import { OISOverlayChart } from '@/components/predictions/OISOverlayChart';
 
 import {
   getCachedSentimentItems,
@@ -100,6 +100,9 @@ const Predictions = () => {
         </div>
       )}
 
+
+      {/* OIS Market Pricing Overlay */}
+      <OISOverlayChart />
 
       {/* Divergence Alert */}
       <DivergenceAlertWidget />

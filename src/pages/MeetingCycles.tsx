@@ -11,6 +11,7 @@ import { CheckCircle, Clock, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { MeetingPrepPack } from '@/components/meetings/MeetingPrepPack';
+import { MinutesDiffCloud } from '@/components/meetings/MinutesDiffCloud';
 
 /** Real central bank meeting dates with verified decisions */
 const REAL_MEETINGS = [
@@ -224,6 +225,11 @@ const MeetingCycles = () => {
           <MeetingPrepPack allItems={allItems as any} />
         </div>
       )}
+
+      {/* Minutes Language Diff */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <MinutesDiffCloud />
+      </div>
 
       {upcomingMeetings.length > 0 && (
         <div className="space-y-4">

@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Shield, Vote, Users, Crown, Star, Network } from 'lucide-react';
+import { Shield, Vote, Users, Crown, Star, Network, Grid3X3 } from 'lucide-react';
+import { FragmentationHeatmap } from '@/components/committee/FragmentationHeatmap';
 import { DissentTimeline } from '@/components/committee/DissentTimeline';
 import { CommitteeNetworkGraph } from '@/components/committee/CommitteeNetworkGraph';
 import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
@@ -88,9 +89,16 @@ const Committee = () => {
       <Tabs defaultValue="composition" className="space-y-4">
         <TabsList>
           <TabsTrigger value="composition" className="text-xs">Composition</TabsTrigger>
+          <TabsTrigger value="fragmentation" className="text-xs">Fragmentation</TabsTrigger>
           <TabsTrigger value="dissents" className="text-xs">Dissent History</TabsTrigger>
           <TabsTrigger value="network" className="text-xs">Network Graph</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="fragmentation">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <FragmentationHeatmap allItems={allItems as any} />
+          </div>
+        </TabsContent>
 
         <TabsContent value="dissents">
           <DissentTimeline />

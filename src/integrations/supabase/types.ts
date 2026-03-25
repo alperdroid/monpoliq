@@ -14,6 +14,86 @@ export type Database = {
   }
   public: {
     Tables: {
+      alert_history: {
+        Row: {
+          current_value: number
+          id: string
+          message: string
+          rule_id: string | null
+          triggered_at: string
+          user_id: string
+        }
+        Insert: {
+          current_value?: number
+          id?: string
+          message?: string
+          rule_id?: string | null
+          triggered_at?: string
+          user_id: string
+        }
+        Update: {
+          current_value?: number
+          id?: string
+          message?: string
+          rule_id?: string | null
+          triggered_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_history_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "alert_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      alert_rules: {
+        Row: {
+          bank: string | null
+          created_at: string
+          email_notify: boolean
+          id: string
+          is_active: boolean
+          last_triggered_at: string | null
+          metric: string
+          name: string
+          operator: string
+          rule_type: string
+          threshold: number
+          user_id: string
+        }
+        Insert: {
+          bank?: string | null
+          created_at?: string
+          email_notify?: boolean
+          id?: string
+          is_active?: boolean
+          last_triggered_at?: string | null
+          metric?: string
+          name?: string
+          operator?: string
+          rule_type?: string
+          threshold?: number
+          user_id: string
+        }
+        Update: {
+          bank?: string | null
+          created_at?: string
+          email_notify?: boolean
+          id?: string
+          is_active?: boolean
+          last_triggered_at?: string | null
+          metric?: string
+          name?: string
+          operator?: string
+          rule_type?: string
+          threshold?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       analysis_cache: {
         Row: {
           analysis_type: string
