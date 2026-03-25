@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
-import { AlertOctagon } from 'lucide-react';
+import { AlertOctagon, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Contradiction {
   speaker: string;
@@ -35,10 +36,10 @@ async function fetchContradictions(bank: string): Promise<ContradictionResult> {
   return resp.json();
 }
 
-const severityStyles: Record<string, string> = {
-  high: 'border-signal-hawkish/30 bg-signal-hawkish/5',
-  medium: 'border-signal-neutral/30 bg-signal-neutral/5',
-  low: 'border-border bg-surface',
+const severityDot: Record<string, string> = {
+  high: 'bg-signal-hawkish',
+  medium: 'bg-signal-neutral',
+  low: 'bg-muted-foreground',
 };
 
 const typeLabels: Record<string, string> = {
@@ -57,7 +58,13 @@ interface ContradictionFlagsProps {
   bank: string;
 }
 
+function truncate(text: string, max: number) {
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
 export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['contradictions', bank],
     queryFn: () => fetchContradictions(bank),
@@ -72,7 +79,7 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
           <AlertOctagon className="w-3.5 h-3.5 text-muted-foreground animate-pulse" />
           <span className="text-xs text-muted-foreground">Analyzing contradictions for {bank}...</span>
         </div>
-        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-16 w-full" />
       </div>
     );
   }
@@ -80,7 +87,7 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
   if (error || !data?.contradictions?.length) {
     return (
       <div className="text-center py-3">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {error ? 'Contradiction analysis unavailable' : `No contradictions detected for ${bank}`}
         </p>
       </div>
@@ -88,51 +95,58 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <AlertOctagon className="w-4 h-4 text-signal-hawkish" />
-          <h4 className="text-xs font-semibold">{bank} Contradiction Flags</h4>
-          <span className="text-[9px] text-muted-foreground">{data.contradictions.length} detected</span>
-        </div>
-        {data.generated_at && (
-          <span className="text-[9px] text-muted-foreground font-mono">
-            {new Date(data.generated_at).toLocaleDateString()}
+          <h4 className="text-xs font-semibold">{bank} Contradictions</h4>
+          <span className="text-[10px] bg-signal-hawkish/10 text-signal-hawkish px-1.5 py-0.5 rounded-full font-mono font-semibold">
+            {data.contradictions.length}
           </span>
-        )}
+        </div>
       </div>
 
-      {data.summary && (
-        <p className="text-[11px] text-muted-foreground italic">{data.summary}</p>
-      )}
+      <div className="space-y-1">
+        {data.contradictions.map((c, i) => {
+          const isExpanded = expandedIndex === i;
+          return (
+            <div key={i} className="rounded-md border border-border bg-surface/50 overflow-hidden">
+              {/* Compact row — always visible */}
+              <button
+                onClick={() => setExpandedIndex(isExpanded ? null : i)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-surface transition-colors"
+              >
+                <div className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', severityDot[c.severity])} />
+                <span className="text-xs font-medium flex-shrink-0">{c.speaker}</span>
+                <SignalBadge label={typeLabels[c.type]} variant={typeVariants[c.type]} size="sm" />
+                <span className="text-[11px] text-muted-foreground truncate flex-1">
+                  {truncate(c.explanation, 60)}
+                </span>
+                {isExpanded
+                  ? <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  : <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                }
+              </button>
 
-      <div className="space-y-2">
-        {data.contradictions.map((c, i) => (
-          <div key={i} className={cn('rounded-md border p-3 space-y-1.5', severityStyles[c.severity])}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-semibold capitalize">{c.speaker}</span>
-              <SignalBadge label={typeLabels[c.type]} variant={typeVariants[c.type]} size="sm" />
-              <SignalBadge
-                label={c.severity}
-                variant={c.severity === 'high' ? 'hawkish' : c.severity === 'medium' ? 'neutral' : 'info'}
-                size="sm"
-              />
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-1 border-t border-border/50 space-y-2 animate-slide-in">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase mb-0.5">Earlier{c.earlier_date ? ` · ${c.earlier_date}` : ''}</p>
+                      <p className="text-xs leading-relaxed">{c.earlier_statement}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase mb-0.5">Later{c.later_date ? ` · ${c.later_date}` : ''}</p>
+                      <p className="text-xs leading-relaxed">{c.later_statement}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground italic">{c.explanation}</p>
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <p className="text-[9px] text-muted-foreground uppercase">Earlier</p>
-                <p className="text-[11px]">{c.earlier_statement}</p>
-                {c.earlier_date && <p className="text-[9px] font-mono text-muted-foreground">{c.earlier_date}</p>}
-              </div>
-              <div>
-                <p className="text-[9px] text-muted-foreground uppercase">Later</p>
-                <p className="text-[11px]">{c.later_statement}</p>
-                {c.later_date && <p className="text-[9px] font-mono text-muted-foreground">{c.later_date}</p>}
-              </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">{c.explanation}</p>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

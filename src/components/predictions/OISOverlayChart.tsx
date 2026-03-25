@@ -118,7 +118,7 @@ export function OISOverlayChart() {
         </Tabs>
       </div>
 
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Real OIS swap-implied forward rates vs fundamental model predictions. Gap = tradeable signal.
       </p>
 
@@ -144,8 +144,8 @@ export function OISOverlayChart() {
 
           {/* Notes */}
           {data.notes && (
-            <div className="rounded-md bg-surface p-2.5">
-              <p className="text-[10px] text-muted-foreground leading-relaxed">{data.notes}</p>
+            <div className="rounded-md bg-surface p-3">
+              <p className="text-xs text-muted-foreground leading-relaxed">{data.notes}</p>
             </div>
           )}
 
