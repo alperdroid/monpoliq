@@ -193,7 +193,7 @@ function BankReactionCard({ data }: { data: PolicyReactionResult }) {
         <div className="grid grid-cols-4 gap-2">
           <VarCell label="Inflation Gap" value={data.variables.inflation_gap ?? null} suffix="pp" />
           <VarCell label="Unemp. Gap" value={data.variables.unemployment_gap ?? null} suffix="pp" />
-          <VarCell label="2Y Yield" value={data.variables.y2y ?? null} suffix="%" />
+          <VarCell label={isFed ? "2Y Yield" : "3M Yield"} value={data.variables.y2y ?? null} suffix="%" />
           <VarCell label="Yield Slope" value={data.variables.slope ?? null} suffix="pp" />
           <VarCell label="Oil Δ" value={data.variables.oil_log_change ?? null} />
           <VarCell label="Credit Spread" value={data.variables.credit_spread ?? null} suffix="pp" />
