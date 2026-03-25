@@ -170,7 +170,9 @@ const MeetingCycles = () => {
         meeting.meeting_date,
       );
 
-      const isPast = meeting.decision !== null;
+      // Auto-switch: meeting is past if decision is set OR 5+ days have elapsed since meeting date
+      const daysSinceMeeting = (Date.now() - new Date(meeting.meeting_date + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24);
+      const isPast = meeting.decision !== null || daysSinceMeeting >= 5;
       const allComms = [...pre, ...post].sort((a, b) => a.item_date.localeCompare(b.item_date));
 
       return {
