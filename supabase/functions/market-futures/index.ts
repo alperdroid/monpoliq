@@ -20,9 +20,15 @@ serve(async (req) => {
     
     const prompt = `You are a financial data analyst. Today is ${today}. Provide ACCURATE current market data using the latest available pricing. Be very precise with prices — use realistic values consistent with current market conditions.
 
+CRITICAL MARKET CONTEXT (March 2026):
+- The Fed has held rates steady at 4.25-4.50% since December 2024. Markets currently price NO rate cuts for the remainder of 2026 due to sticky inflation (CPI ~2.8% YoY), tariff uncertainty, and resilient labor markets.
+- The ECB cut rates to 2.50% in March 2025 and markets price 1-2 additional 25bp cuts by year-end as euro area inflation moderates near target.
+- Fed Funds futures should reflect hold expectations (prices near 95.55-95.60 implying ~4.40% effective rate, with very high hold probabilities ~80-95%).
+- Euribor futures should reflect gradual ECB easing expectations.
+
 **RATE FUTURES** (category: "rate_futures"):
-1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Current Fed Funds target is 4.25-4.50%. Price should reflect realistic market-implied rate expectations (e.g., if market expects 4.18% effective rate, price = 95.82).
-2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. Current ECB deposit rate is 2.50%. Price should reflect realistic Euribor forward rates.
+1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Since markets expect NO cuts, prices should be near 95.55-95.60 with hold_prob ~0.85-0.95 and cut_prob ~0.05-0.15.
+2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. ECB deposit rate is 2.50%, markets price gradual easing so forward rates slightly below spot.
 - Include: price (must be consistent with rate expectations), market-implied hike/hold/cut probabilities, fundamental-assessed probabilities, 24h change
 - IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument
 
