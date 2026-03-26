@@ -113,17 +113,17 @@ const Events = () => {
       {/* Table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs table-fixed">
             <thead>
               <tr className="border-b border-border bg-surface">
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Date</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Bank</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Source</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[110px]">Date</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[50px]">Bank</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[110px]">Source</th>
                 <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Title</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Label</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Topics</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Score</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Words</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[80px]">Label</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[160px]">Topics</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[65px]">Score</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[55px]">Words</th>
               </tr>
             </thead>
             <tbody>
