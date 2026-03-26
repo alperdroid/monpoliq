@@ -29,10 +29,14 @@ function extractText(html: string): string {
 }
 
 function parseDate(t: string): string | null {
-  if (!t) return null;
+  if (!t || t.trim().length < 4) return null;
   try {
     const d = new Date(t);
-    return isNaN(d.getTime()) ? null : d.toISOString().split("T")[0];
+    if (isNaN(d.getTime())) return null;
+    // Reject epoch (1970) and anything before 2018
+    const year = d.getFullYear();
+    if (year < 2018 || year > 2030) return null;
+    return d.toISOString().split("T")[0];
   } catch { return null; }
 }
 
