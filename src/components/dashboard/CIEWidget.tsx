@@ -60,15 +60,15 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
 
       return {
         cie: Math.round(cie * 1000) / 1000,
-        statsImplied: Math.round(statsAvg30 * 1000) / 1000,
-        combined: Math.round(combinedAvg30 * 1000) / 1000,
+        statsImplied: Math.round(statsAvg60 * 1000) / 1000,
+        combined: Math.round(combinedAvg * 1000) / 1000,
         modelImplied: Math.round(modelImplied * 1000) / 1000,
         gap: Math.round(gap * 1000) / 1000,
         trend: Math.round(trend * 1000) / 1000,
         riskLevel,
         gapDirection,
-        commsCount: comms30.length,
-        statsCount: stats30.length,
+        commsCount: comms45.length,
+        statsCount: stats60.length,
       };
     };
 
