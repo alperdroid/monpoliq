@@ -265,14 +265,14 @@ Content: ${truncated}`;
 }
 
 async function scoreBatchWithAI(
-  items: { title: string; text: string; bank: string }[],
+  items: { title: string; text: string; bank: string; source?: string }[],
   apiKey: string,
 ): Promise<AIScore[]> {
   const results: AIScore[] = [];
   for (let i = 0; i < items.length; i += 3) {
     const batch = items.slice(i, i + 3);
     const batchResults = await Promise.allSettled(
-      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey))
+      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey, item.source))
     );
     for (const r of batchResults) {
       results.push(r.status === 'fulfilled' ? r.value : { score: 0, label: 'neutral', reasoning: 'error' });
