@@ -299,10 +299,19 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       
       // Post-hoc: enforce realistic Fed expectations (no cuts priced in 2026)
       if (bank === "fed") {
-        // Fed hold probability should dominate — dovish tone ≠ imminent cut
         p.hold_probability = Math.max(p.hold_probability || 0, 0.60);
         p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
         p.hike_probability = Math.min(p.hike_probability || 0, 0.10);
+        if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
+          p.next_decision = "hold";
+        }
+      }
+
+      // Post-hoc: enforce realistic ECB expectations (no cuts expected, hike risk exists)
+      if (bank === "ecb") {
+        p.hold_probability = Math.max(p.hold_probability || 0, 0.50);
+        p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
+        p.hike_probability = Math.max(p.hike_probability || 0, 0.05);
         if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
           p.next_decision = "hold";
         }
