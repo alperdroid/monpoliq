@@ -1397,11 +1397,12 @@ Deno.serve(async (req) => {
       ]);
       console.log('ECB: ' + existing.size + ' existing items in DB, ' + existingStatItems.length + ' stat items for dedup');
 
-      const [rawComms, st, ecbPressConf, ecbAccounts] = await Promise.allSettled([
+      const [rawComms, st, ecbPressConf, ecbAccounts, mediaInterviews] = await Promise.allSettled([
         fetchRssRaw(cs, 'ECB'),
         fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
         fetchEcbAccounts(cs),
+        fetchMediaInterviews('ECB', aiKey, existing),
       ]);
 
       const ei: It[] = [];
