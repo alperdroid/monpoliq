@@ -965,6 +965,7 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
+        { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
