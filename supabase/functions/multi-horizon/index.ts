@@ -243,6 +243,19 @@ For each bank, produce three horizon forecasts:
     if (!toolCall) throw new Error("No tool call in response");
 
     const forecast = JSON.parse(toolCall.function.arguments);
+
+    // ENFORCE CONSISTENCY: override meeting probabilities with main model values
+    if (mainPredictions?.fed) {
+      forecast.fed.meeting.hike_prob = mainPredictions.fed.hike_probability;
+      forecast.fed.meeting.hold_prob = mainPredictions.fed.hold_probability;
+      forecast.fed.meeting.cut_prob = mainPredictions.fed.cut_probability;
+    }
+    if (mainPredictions?.ecb) {
+      forecast.ecb.meeting.hike_prob = mainPredictions.ecb.hike_probability;
+      forecast.ecb.meeting.hold_prob = mainPredictions.ecb.hold_probability;
+      forecast.ecb.meeting.cut_prob = mainPredictions.ecb.cut_probability;
+    }
+
     const result = {
       ...forecast,
       data_windows: { fed: { d7: fed7, d30: fed30, d90: fed90 }, ecb: { d7: ecb7, d30: ecb30, d90: ecb90 } },
