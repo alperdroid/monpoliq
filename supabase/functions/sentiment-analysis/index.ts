@@ -992,11 +992,10 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
+        // ECB speeches RSS — note: this is an Atom feed, parsed by ae()
         { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
-        // NCB governor speeches — key Governing Council members
-        { url: 'https://www.bundesbank.de/en/press/speeches/rss-feed-773482', lbl: 'Bundesbank Speech' },
-        { url: 'https://www.banque-france.fr/en/rss/speeches.xml', lbl: 'Banque de France Speech' },
-        { url: 'https://www.dnb.nl/en/actueel/speeches/rss/', lbl: 'DNB Speech' },
+        // Bundesbank speeches, interviews and contributions (correct RSS URL)
+        { url: 'https://www.bundesbank.de/service/rss/en/633296/feed.rss', lbl: 'Bundesbank Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
