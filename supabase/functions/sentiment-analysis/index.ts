@@ -1425,6 +1425,12 @@ Deno.serve(async (req) => {
         console.log('ECB: ' + ecbAccounts.value.length + ' meeting accounts found');
       }
 
+      // Add media interview remarks from GC members
+      if (mediaInterviews.status === 'fulfilled' && mediaInterviews.value.length > 0) {
+        allRawComms.push(...mediaInterviews.value);
+        console.log('ECB: ' + mediaInterviews.value.length + ' media interview remarks found');
+      }
+
       // Reclassify consumer expectations surveys and similar as statistical
       // But score them with AI since they contain policy-relevant textual content
       const actualComms: RawComm[] = [];
