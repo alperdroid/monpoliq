@@ -1406,7 +1406,7 @@ Deno.serve(async (req) => {
 
       if (newComms.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank })),
+          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
         for (let i = 0; i < newComms.length; i++) {
