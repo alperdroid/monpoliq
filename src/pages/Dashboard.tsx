@@ -59,17 +59,6 @@ function monthlyAverages(items: SentimentItem[], bank?: string) {
     }));
 }
 
-/** Monthly volume chart data */
-function monthlyVolume(items: SentimentItem[]) {
-  const byMonth: Record<string, number> = {};
-  for (const it of items) {
-    const month = it.item_date.slice(0, 7);
-    byMonth[month] = (byMonth[month] || 0) + 1;
-  }
-  return Object.entries(byMonth)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, count]) => ({ month, count }));
-}
 
 const Dashboard = () => {
   const { data: allItems = [] } = useQuery({
