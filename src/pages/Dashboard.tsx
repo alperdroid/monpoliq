@@ -113,7 +113,7 @@ const Dashboard = () => {
   }));
 
   // Communication volume chart
-  const volumeData = monthlyVolume(allItems);
+  
 
   // Latest items for bank panels
   const fedItems = allItems.filter(i => i.bank === 'FED');
