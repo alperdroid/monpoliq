@@ -1065,9 +1065,8 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
-        // ECB speeches RSS — note: this is an Atom feed, parsed by ae()
-        { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
-        // Bundesbank speeches, interviews and contributions (correct RSS URL)
+        // Note: ECB speeches.html is HTML, not RSS — individual speeches come via speaker-scraper & media interviews
+        // Bundesbank speeches, interviews and contributions (verified RSS feed)
         { url: 'https://www.bundesbank.de/service/rss/en/633296/feed.rss', lbl: 'Bundesbank Speech' },
       ];
 
