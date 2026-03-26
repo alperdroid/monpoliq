@@ -62,7 +62,7 @@ async function fetchTaylorRule(bank: string): Promise<TaylorRuleResult> {
 export function TaylorRulePanel() {
   const [bank, setBank] = useState<string>('FED');
   const [showClassic, setShowClassic] = useState(false);
-
+  const [showYellen, setShowYellen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['taylor-rule', bank],
     queryFn: () => fetchTaylorRule(bank),
