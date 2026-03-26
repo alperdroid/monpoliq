@@ -1328,6 +1328,12 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Add Fed official media interview remarks
+      if (fedMediaInterviews.status === 'fulfilled' && fedMediaInterviews.value.length > 0) {
+        allRawComms.push(...fedMediaInterviews.value);
+        console.log('FED: ' + fedMediaInterviews.value.length + ' media interview remarks found');
+      }
+
       const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
       console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
 
