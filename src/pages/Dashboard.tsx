@@ -17,7 +17,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, Brain, BarChart3 } from 'lucide-react';
+import { TrendingUp, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
 import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
@@ -59,17 +59,6 @@ function monthlyAverages(items: SentimentItem[], bank?: string) {
     }));
 }
 
-/** Monthly volume chart data */
-function monthlyVolume(items: SentimentItem[]) {
-  const byMonth: Record<string, number> = {};
-  for (const it of items) {
-    const month = it.item_date.slice(0, 7);
-    byMonth[month] = (byMonth[month] || 0) + 1;
-  }
-  return Object.entries(byMonth)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, count]) => ({ month, count }));
-}
 
 const Dashboard = () => {
   const { data: allItems = [] } = useQuery({
@@ -124,7 +113,7 @@ const Dashboard = () => {
   }));
 
   // Communication volume chart
-  const volumeData = monthlyVolume(allItems);
+  
 
   // Latest items for bank panels
   const fedItems = allItems.filter(i => i.bank === 'FED');
@@ -213,7 +202,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              fedAggAvg !== null && fedAggAvg > 0.05 ? 'text-signal-hawkish' : fedAggAvg !== null && fedAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              fedAggAvg !== null && fedAggAvg > 0.1 ? 'text-signal-hawkish' : fedAggAvg !== null && fedAggAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
             </p>
@@ -222,7 +211,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Comms Only (45d)</span>
             <p className={cn('text-lg font-mono font-semibold',
-              fedCommAvg !== null && fedCommAvg > 0.05 ? 'text-signal-hawkish' : fedCommAvg !== null && fedCommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              fedCommAvg !== null && fedCommAvg > 0.1 ? 'text-signal-hawkish' : fedCommAvg !== null && fedCommAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {fedCommAvg !== null ? (fedCommAvg > 0 ? '+' : '') + fedCommAvg.toFixed(3) : '—'}
             </p>
@@ -230,7 +219,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              ecbAggAvg !== null && ecbAggAvg > 0.05 ? 'text-signal-hawkish' : ecbAggAvg !== null && ecbAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbAggAvg !== null && ecbAggAvg > 0.1 ? 'text-signal-hawkish' : ecbAggAvg !== null && ecbAggAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
             </p>
@@ -239,7 +228,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Comms Only (45d)</span>
             <p className={cn('text-lg font-mono font-semibold',
-              ecbCommAvg !== null && ecbCommAvg > 0.05 ? 'text-signal-hawkish' : ecbCommAvg !== null && ecbCommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbCommAvg !== null && ecbCommAvg > 0.1 ? 'text-signal-hawkish' : ecbCommAvg !== null && ecbCommAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {ecbCommAvg !== null ? (ecbCommAvg > 0 ? '+' : '') + ecbCommAvg.toFixed(3) : '—'}
             </p>
@@ -345,24 +334,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Communication Volume Chart */}
-      {volumeData.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-semibold">Communication Volume</h3>
-          </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={volumeData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px', fontSize: '11px' }} />
-              <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Events" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
     </div>
   );
 };
