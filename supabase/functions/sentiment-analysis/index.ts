@@ -170,21 +170,33 @@ interface AIScore {
   reasoning: string;
 }
 
+// Detect if an item is a major policy document that needs stronger AI model
+function isPolicyDocForScoring(title: string, source: string): boolean {
+  const tl = (title + ' ' + source).toLowerCase();
+  const keywords = [
+    'minutes', 'accounts', 'account', 'press conf', 'statement',
+    'monetary policy', 'fomc', 'governing council',
+  ];
+  return keywords.some(k => tl.includes(k));
+}
+
 async function scoreWithAI(
   title: string,
   text: string,
   bank: string,
   apiKey: string,
+  source?: string,
 ): Promise<AIScore> {
+  const isPolicy = isPolicyDocForScoring(title, source || '');
   let truncated: string;
   if (text.length <= 6000) {
     truncated = text;
   } else {
     // For long documents (press conferences, minutes), sample beginning + middle + end
     // Beginning needs to be large enough to capture rate decisions (typically 1500-2500 chars in)
-    const beginLen = 3000;
-    const midLen = 1500;
-    const endLen = 1500;
+    const beginLen = isPolicy ? 4000 : 3000;
+    const midLen = isPolicy ? 2000 : 1500;
+    const endLen = isPolicy ? 2000 : 1500;
     const mid = Math.floor(text.length / 2);
     truncated = text.slice(0, beginLen) +
       '\n...[early section truncated]...\n' +
@@ -193,9 +205,24 @@ async function scoreWithAI(
       text.slice(-endLen);
   }
 
+  // Add special instructions for policy documents
+  let policyPreamble = '';
+  if (isPolicy) {
+    policyPreamble = `\n\nIMPORTANT: This is an official central bank policy document. It CANNOT be neutral — it always contains policy signals. Read the full text carefully for:
+- Rate decisions (cut/hold/hike)
+- Forward guidance language ("appropriate stance", "data-dependent", "further adjustment")
+- Risk assessments (upside/downside)
+- Dissent or disagreement among members
+- Inflation/growth outlook changes
+Score this firmly — policy documents should typically score ±0.2 to ±0.8.`;
+  }
+
   const userMsg = `Bank: ${bank}
-Title: ${title}
+Title: ${title}${policyPreamble}
 Content: ${truncated}`;
+
+  // Use stronger model for policy documents, lighter model for routine items
+  const model = isPolicy ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
 
   try {
     const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -205,7 +232,7 @@ Content: ${truncated}`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
+        model,
         messages: [
           { role: 'system', content: AI_SCORING_PROMPT },
           { role: 'user', content: userMsg },
@@ -238,14 +265,14 @@ Content: ${truncated}`;
 }
 
 async function scoreBatchWithAI(
-  items: { title: string; text: string; bank: string }[],
+  items: { title: string; text: string; bank: string; source?: string }[],
   apiKey: string,
 ): Promise<AIScore[]> {
   const results: AIScore[] = [];
   for (let i = 0; i < items.length; i += 3) {
     const batch = items.slice(i, i + 3);
     const batchResults = await Promise.allSettled(
-      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey))
+      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey, item.source))
     );
     for (const r of batchResults) {
       results.push(r.status === 'fulfilled' ? r.value : { score: 0, label: 'neutral', reasoning: 'error' });
@@ -463,7 +490,7 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     const data = await resp.json();
     // Skip items with 0 score from policy documents — they need re-scoring
     // BUT always keep FOMC SEP as existing — they're scored by delta comparison, not AI
-    const policySourceKeywords = ['minutes', 'press conf', 'statement'];
+    const policySourceKeywords = ['minutes', 'press conf', 'statement', 'accounts', 'account'];
     return new Set((data || [])
       .filter((d: any) => {
         const src = (d.source || '').toLowerCase();
@@ -966,6 +993,10 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
         { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
+        // NCB governor speeches — key Governing Council members
+        { url: 'https://www.bundesbank.de/en/press/speeches/rss-feed-773482', lbl: 'Bundesbank Speech' },
+        { url: 'https://www.banque-france.fr/en/rss/speeches.xml', lbl: 'Banque de France Speech' },
+        { url: 'https://www.dnb.nl/en/actueel/speeches/rss/', lbl: 'DNB Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
@@ -1230,7 +1261,7 @@ Deno.serve(async (req) => {
       // Score new items with AI
       if (newComms.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank })),
+          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
         for (let i = 0; i < newComms.length; i++) {
@@ -1379,7 +1410,7 @@ Deno.serve(async (req) => {
 
       if (newComms.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank })),
+          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
         for (let i = 0; i < newComms.length; i++) {
