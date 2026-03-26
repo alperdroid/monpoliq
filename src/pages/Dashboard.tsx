@@ -17,7 +17,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, Brain, BarChart3 } from 'lucide-react';
+import { TrendingUp, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
 import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
