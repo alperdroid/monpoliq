@@ -463,7 +463,7 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     const data = await resp.json();
     // Skip items with 0 score from policy documents — they need re-scoring
     // BUT always keep FOMC SEP as existing — they're scored by delta comparison, not AI
-    const policySourceKeywords = ['minutes', 'press conf', 'statement'];
+    const policySourceKeywords = ['minutes', 'press conf', 'statement', 'accounts', 'account'];
     return new Set((data || [])
       .filter((d: any) => {
         const src = (d.source || '').toLowerCase();
