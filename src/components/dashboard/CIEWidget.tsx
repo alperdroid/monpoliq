@@ -16,9 +16,11 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
     if (!aiPrediction) return null;
 
     const now = new Date();
-    const d30 = new Date(now); d30.setDate(d30.getDate() - 30);
+    const d45 = new Date(now); d45.setDate(d45.getDate() - 45);
+    const d60 = new Date(now); d60.setDate(d60.getDate() - 60);
     const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
-    const cs30 = d30.toISOString().split('T')[0];
+    const cs45 = d45.toISOString().split('T')[0];
+    const cs60 = d60.toISOString().split('T')[0];
     const cs7 = d7.toISOString().split('T')[0];
 
     const computeBank = (bank: string, pred: AIPredictionResponse['fed']) => {
@@ -26,10 +28,10 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
       const comms = bankItems.filter(i => !i.is_statistical);
       const stats = bankItems.filter(i => i.is_statistical);
 
-      const comms30 = comms.filter(i => i.item_date >= cs30);
+      const comms45 = comms.filter(i => i.item_date >= cs45);
       const comms7 = comms.filter(i => i.item_date >= cs7);
-      const stats30 = stats.filter(i => i.item_date >= cs30);
-      const all30 = bankItems.filter(i => i.item_date >= cs30);
+      const stats60 = stats.filter(i => i.item_date >= cs60);
+      const all = [...comms45, ...stats60];
 
       const avgOf = (arr: SentimentItem[]) => {
         const scored = arr.filter(i => Math.abs(i.net_score) > 0.001);
