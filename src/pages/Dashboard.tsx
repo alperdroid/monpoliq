@@ -228,7 +228,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Comms Only (45d)</span>
             <p className={cn('text-lg font-mono font-semibold',
-              ecbCommAvg !== null && ecbCommAvg > 0.05 ? 'text-signal-hawkish' : ecbCommAvg !== null && ecbCommAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbCommAvg !== null && ecbCommAvg > 0.1 ? 'text-signal-hawkish' : ecbCommAvg !== null && ecbCommAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {ecbCommAvg !== null ? (ecbCommAvg > 0 ? '+' : '') + ecbCommAvg.toFixed(3) : '—'}
             </p>
