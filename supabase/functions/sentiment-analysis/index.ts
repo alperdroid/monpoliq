@@ -170,21 +170,33 @@ interface AIScore {
   reasoning: string;
 }
 
+// Detect if an item is a major policy document that needs stronger AI model
+function isPolicyDocForScoring(title: string, source: string): boolean {
+  const tl = (title + ' ' + source).toLowerCase();
+  const keywords = [
+    'minutes', 'accounts', 'account', 'press conf', 'statement',
+    'monetary policy', 'fomc', 'governing council',
+  ];
+  return keywords.some(k => tl.includes(k));
+}
+
 async function scoreWithAI(
   title: string,
   text: string,
   bank: string,
   apiKey: string,
+  source?: string,
 ): Promise<AIScore> {
+  const isPolicy = isPolicyDocForScoring(title, source || '');
   let truncated: string;
   if (text.length <= 6000) {
     truncated = text;
   } else {
     // For long documents (press conferences, minutes), sample beginning + middle + end
     // Beginning needs to be large enough to capture rate decisions (typically 1500-2500 chars in)
-    const beginLen = 3000;
-    const midLen = 1500;
-    const endLen = 1500;
+    const beginLen = isPolicy ? 4000 : 3000;
+    const midLen = isPolicy ? 2000 : 1500;
+    const endLen = isPolicy ? 2000 : 1500;
     const mid = Math.floor(text.length / 2);
     truncated = text.slice(0, beginLen) +
       '\n...[early section truncated]...\n' +
@@ -193,9 +205,24 @@ async function scoreWithAI(
       text.slice(-endLen);
   }
 
+  // Add special instructions for policy documents
+  let policyPreamble = '';
+  if (isPolicy) {
+    policyPreamble = `\n\nIMPORTANT: This is an official central bank policy document. It CANNOT be neutral — it always contains policy signals. Read the full text carefully for:
+- Rate decisions (cut/hold/hike)
+- Forward guidance language ("appropriate stance", "data-dependent", "further adjustment")
+- Risk assessments (upside/downside)
+- Dissent or disagreement among members
+- Inflation/growth outlook changes
+Score this firmly — policy documents should typically score ±0.2 to ±0.8.`;
+  }
+
   const userMsg = `Bank: ${bank}
-Title: ${title}
+Title: ${title}${policyPreamble}
 Content: ${truncated}`;
+
+  // Use stronger model for policy documents, lighter model for routine items
+  const model = isPolicy ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
 
   try {
     const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -205,7 +232,7 @@ Content: ${truncated}`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
+        model,
         messages: [
           { role: 'system', content: AI_SCORING_PROMPT },
           { role: 'user', content: userMsg },
