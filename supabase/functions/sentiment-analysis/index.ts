@@ -963,6 +963,79 @@ async function fetchEcbAccounts(cutoffDate: string): Promise<{ title: string; te
   return items;
 }
 
+// ── AI-Powered Media Interview Scraper ──
+// Uses Gemini to find recent central banker media interviews (Reuters, Bloomberg, FT etc.)
+async function fetchMediaInterviews(bank: string, aiKey: string, existingTitles: Set<string>): Promise<RawComm[]> {
+  if (!aiKey) return [];
+  const items: RawComm[] = [];
+  
+  const governors = bank === 'ECB' 
+    ? ['Nagel (Bundesbank)', 'Villeroy de Galhau (Banque de France)', 'Knot (DNB)', 'Centeno (Bank of Portugal)', 'Holzmann (OeNB Austria)']
+    : ['Goolsbee (Chicago Fed)', 'Bostic (Atlanta Fed)', 'Daly (SF Fed)', 'Williams (NY Fed)', 'Kashkari (Minneapolis Fed)'];
+  
+  const today = new Date().toISOString().split('T')[0];
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+  
+  const searchPrompt = `Find the most important recent (${twoWeeksAgo} to ${today}) monetary policy comments made by ${bank === 'ECB' ? 'ECB Governing Council members' : 'Federal Reserve officials'} in media interviews, press conferences, or public remarks.
+
+Focus on: ${governors.join(', ')}
+
+For each comment, provide:
+- speaker: full name
+- date: YYYY-MM-DD format  
+- headline: what they said (include the media outlet if known)
+- summary: 2-3 sentences of what they said about monetary policy
+- sentiment: hawkish/dovish/neutral
+- score: -1.0 to 1.0
+
+Only include comments about monetary policy (rates, inflation, growth outlook).
+Skip ceremonial, administrative, or non-monetary remarks.
+Only include items you are confident actually happened — do NOT fabricate.
+
+Respond with ONLY a JSON array (no markdown):
+[{"speaker":"...","date":"YYYY-MM-DD","headline":"...","summary":"...","sentiment":"...","score":0.0}]
+Return empty array [] if no significant remarks found.`;
+
+  try {
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: searchPrompt }],
+      }),
+    });
+
+    if (!resp.ok) { console.error('Media interview search failed:', resp.status); return []; }
+    const data = await resp.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    const remarks: { speaker: string; date: string; headline: string; summary: string; sentiment: string; score: number }[] = JSON.parse(content);
+    console.log('Media interview search (' + bank + '): found ' + remarks.length + ' remarks');
+    
+    for (const remark of remarks) {
+      if (!remark.date || !/^\d{4}-\d{2}-\d{2}$/.test(remark.date)) continue;
+      const d = new Date(remark.date);
+      if (isNaN(d.getTime()) || d.getFullYear() < 2024) continue;
+      
+      const titleKey = remark.headline + '|' + remark.date;
+      if (existingTitles.has(titleKey)) continue;
+      
+      items.push({
+        title: remark.headline,
+        text: remark.summary,
+        date: remark.date,
+        url: '',
+        source: bank === 'ECB' ? 'GC Member Remark' : 'Fed Official Remark',
+        bank,
+      });
+    }
+  } catch (e) { console.error('Media interview search error:', e); }
+  
+  return items;
+}
+
 // ── Patterns to reclassify as statistical (not commentary) ──
 const STATISTICAL_RECLASSIFY_PATTERNS = [
   /consumer\s+expectations?\s+survey/i,
