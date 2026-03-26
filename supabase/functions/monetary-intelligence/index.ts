@@ -112,10 +112,10 @@ serve(async (req) => {
 
 CRITICAL MARKET CONTEXT (March 2026):
 - The Fed cut rates multiple times in late 2025. The current Fed Funds target range is 3.50-3.75% (effective rate ~3.64%). Markets now expect NO further cuts in 2026 due to sticky inflation (~2.8% CPI YoY) and tariff uncertainty.
-- The ECB deposit facility rate is currently 2.00%. Markets may price 0-1 additional cut(s) by year-end.
-- Your predictions should reflect this market reality. A dovish communication tone does NOT automatically mean a cut is imminent — the Fed can sound dovish while remaining on hold due to data dependency and uncertainty.
+- The ECB deposit facility rate is currently 2.00%. Markets expect NO further cuts in 2026. Some analysts and ECB Governing Council members (e.g. Bundesbank president Nagel) have openly discussed the possibility of rate HIKES if inflation expectations de-anchor.
+- Your predictions should reflect this market reality. A dovish communication tone does NOT automatically mean a cut is imminent — central banks can sound cautious while holding or even preparing to tighten.
 - For the Fed: hold probability should generally be HIGH (60-85%) unless data dramatically shifts. Cut probability should be LOW (5-25%) reflecting market pricing.
-- For the ECB: cut probability can be moderate (30-55%) given their easing cycle, but the deposit rate is already at 2.00% so further cuts are less certain.
+- For the ECB: hold probability should be HIGH (50-75%). Hike probability should be NON-ZERO (5-20%) reflecting the hawkish shift from NCB governors. Cut probability should be LOW (10-30%) — the easing cycle is likely over at 2.00%. Pay close attention to individual Governing Council members' speeches, especially from Bundesbank, Banque de France, and DNB — these often signal future policy shifts before official ECB statements.
 
 CRITICAL EUR/USD LOGIC — you MUST follow this:
 - EUR/USD = how many USD per 1 EUR
