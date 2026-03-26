@@ -219,7 +219,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              ecbAggAvg !== null && ecbAggAvg > 0.05 ? 'text-signal-hawkish' : ecbAggAvg !== null && ecbAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              ecbAggAvg !== null && ecbAggAvg > 0.1 ? 'text-signal-hawkish' : ecbAggAvg !== null && ecbAggAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
             </p>
