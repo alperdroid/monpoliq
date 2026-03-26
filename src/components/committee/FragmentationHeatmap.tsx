@@ -9,20 +9,31 @@ interface FragmentationHeatmapProps {
   allItems: SentimentItem[];
 }
 
-function extractSpeaker(source: string): string | null {
-  // Source field often has format like "Fed - Powell" or "ECB - Lagarde"
-  // Also handle "Federal Reserve Board", "FOMC Minutes" etc — skip these
-  const skipPatterns = ['minutes', 'statement', 'press release', 'bulletin', 'report', 'account', 'blog'];
-  const lower = source.toLowerCase();
-  if (skipPatterns.some(p => lower.includes(p))) return null;
+function extractSpeaker(title: string, source: string): string | null {
+  const lowerSrc = source.toLowerCase();
+  const lowerTitle = title.toLowerCase();
+  
+  // Skip non-speaker items
+  const skipPatterns = ['minutes', 'statement', 'press release', 'bulletin', 'report', 'account', 'blog', 'monetary policy', 'fomc statement', 'sep ', 'projections', 'press conf'];
+  if (skipPatterns.some(p => lowerSrc.includes(p) || lowerTitle.includes(p))) return null;
 
-  // Try to extract speaker name after dash
-  const dashIdx = source.indexOf(' - ');
-  if (dashIdx > 0) return source.slice(dashIdx + 3).trim();
+  // Fed Speech titles: "LastName, Title of Speech"
+  if (lowerSrc.includes('speech')) {
+    const commaMatch = title.match(/^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?),\s/);
+    if (commaMatch) return commaMatch[1].trim();
+  }
 
-  // Try title patterns: "Speech by X" / "Remarks by X"
-  const byMatch = source.match(/(?:speech|remarks|testimony|interview)\s+by\s+(.+)/i);
-  if (byMatch) return byMatch[1].trim();
+  // fed_speech / ECB Speech: "remarks by Chair Powell" / "Speech by Christine Lagarde"
+  const byMatch = title.match(/(?:remarks|speech|keynote|address|comments|testimony|interview|lecture)\s+by\s+(?:chair\s+|president\s+|governor\s+|vice[- ]president\s+|board\s+member\s+)?(\w+(?:\s\w+)?)/i);
+  if (byMatch) {
+    // Return last name only for consistency
+    const parts = byMatch[1].trim().split(/\s+/);
+    return parts[parts.length - 1];
+  }
+
+  // ECB speeches with "Name:" pattern
+  const colonMatch = title.match(/^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s*:/);
+  if (colonMatch) return colonMatch[1].trim();
 
   return null;
 }
