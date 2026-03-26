@@ -101,8 +101,7 @@ const Predictions = () => {
       )}
 
 
-      {/* OIS Market Pricing Overlay */}
-      <OISOverlayChart />
+
 
       {/* Multi-Horizon Forecasts */}
       <MultiHorizonPanel />
