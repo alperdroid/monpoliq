@@ -49,6 +49,10 @@ const CLASSIC_INTERCEPT = 4; // r* (2%) + π* (2%)
 const CLASSIC_INFL_COEFF = 1.5;
 const CLASSIC_OUTPUT_COEFF = 0.5;
 
+const YELLEN_INTERCEPT = 4; // r* (2%) + π* (2%)
+const YELLEN_INFL_COEFF = 1.0;
+const YELLEN_OUTPUT_COEFF = 1.0;
+
 async function fetchTaylorRule(bank: string): Promise<TaylorRuleResult> {
   const { data, error } = await supabase.functions.invoke('taylor-rule', { body: { bank } });
   if (error) throw error;
