@@ -113,17 +113,17 @@ const Events = () => {
       {/* Table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs table-fixed">
             <thead>
               <tr className="border-b border-border bg-surface">
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Date</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Bank</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Source</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[110px]">Date</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[50px]">Bank</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[110px]">Source</th>
                 <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Title</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Label</th>
-                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Topics</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Score</th>
-                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px]">Words</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[80px]">Label</th>
+                <th className="text-left p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[160px]">Topics</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[65px]">Score</th>
+                <th className="text-right p-3 font-medium text-muted-foreground uppercase tracking-wider text-[10px] w-[55px]">Words</th>
               </tr>
             </thead>
             <tbody>
@@ -141,14 +141,14 @@ const Events = () => {
                   <td className="p-3">
                     <span className="text-muted-foreground text-[11px]">{event.source}</span>
                   </td>
-                  <td className="p-3 max-w-xs">
+                  <td className="p-3 overflow-hidden">
                     {event.url ? (
-                      <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-foreground hover:text-primary transition-colors flex items-center gap-1">
-                        <span className="truncate">{event.title}</span>
+                      <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-foreground hover:text-primary transition-colors flex items-center gap-1 min-w-0">
+                        <span className="truncate block">{event.title}</span>
                         <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-50" />
                       </a>
                     ) : (
-                      <span className="truncate">{event.title}</span>
+                      <span className="truncate block">{event.title}</span>
                     )}
                   </td>
                   <td className="p-3">
