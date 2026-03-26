@@ -259,36 +259,14 @@ export function MarketSentimentTable() {
           Market Expectations & Pricing
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Multi-asset market data: rate futures, sovereign bonds, and currency forwards
+          Rate futures pricing with fundamental vs market probability comparison
         </p>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="rates" className="w-full">
-          <TabsList className="w-full grid grid-cols-3 mb-3">
-            <TabsTrigger value="rates" className="text-xs gap-1">
-              <BarChart3 className="w-3 h-3" /> Rates {tabCounts.rates > 0 && `(${tabCounts.rates})`}
-            </TabsTrigger>
-            <TabsTrigger value="bonds" className="text-xs gap-1">
-              <Landmark className="w-3 h-3" /> Bonds {tabCounts.bonds > 0 && `(${tabCounts.bonds})`}
-            </TabsTrigger>
-            <TabsTrigger value="fx" className="text-xs gap-1">
-              <DollarSign className="w-3 h-3" /> FX {tabCounts.fx > 0 && `(${tabCounts.fx})`}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="rates">
-            {rateFutures.length > 0 ? <RateFuturesTable items={rateFutures} /> : <EmptyTab />}
-          </TabsContent>
-          <TabsContent value="bonds">
-            {bonds.length > 0 ? <BondsTable items={bonds} /> : <EmptyTab />}
-          </TabsContent>
-          <TabsContent value="fx">
-            {currency.length > 0 ? <CurrencyTable items={currency} /> : <EmptyTab />}
-          </TabsContent>
-        </Tabs>
+        {rateFutures.length > 0 ? <RateFuturesTable items={rateFutures} /> : <EmptyTab />}
 
         <div className="mt-3 text-[10px] text-muted-foreground">
-          AI-generated daily market data • Updates every 30 minutes • {marketData.length} instruments tracked
+          AI-generated daily market data • Updates every 30 minutes • {rateFutures.length} instruments tracked
         </div>
       </CardContent>
     </Card>

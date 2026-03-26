@@ -211,7 +211,7 @@ function CommScoreCard({ bank, label, score }: {
           </div>
           <p className={cn(
             'text-xl font-mono font-bold',
-            score.avg > 0.05 ? 'text-signal-hawkish' : score.avg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+            score.avg > 0.1 ? 'text-signal-hawkish' : score.avg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
           )}>
             {score.avg > 0 ? '+' : ''}{score.avg.toFixed(3)}
           </p>
