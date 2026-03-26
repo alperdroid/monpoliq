@@ -172,8 +172,9 @@ const Events = () => {
                   </td>
                   <td className="p-3 text-right font-mono">
                     <span className={cn(
-                      event.net_score && event.net_score > 0.3 ? 'text-signal-hawkish' :
-                      event.net_score && event.net_score < -0.3 ? 'text-signal-dovish' :
+                      event.net_score && event.net_score > 0.1 ? 'text-signal-hawkish' :
+                      event.net_score && event.net_score < -0.1 ? 'text-signal-dovish' :
+                      event.net_score && Math.abs(event.net_score) > 0.001 ? 'text-signal-neutral' :
                       'text-muted-foreground'
                     )}>
                       {event.net_score?.toFixed(2) ?? '—'}
