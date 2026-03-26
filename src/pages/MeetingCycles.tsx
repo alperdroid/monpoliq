@@ -55,7 +55,7 @@ const REAL_MEETINGS = [
     meeting_id: 'ecb-2026-03-19',
     bank: 'ECB' as const,
     meeting_date: '2026-03-19',
-    decision: 'Hold — Deposit Facility Rate at 2.50%',
+    decision: 'Hold — Deposit Facility Rate at 2.00%',
   },
   {
     meeting_id: 'fed-2026-03-19',
