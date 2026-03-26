@@ -149,7 +149,7 @@ const Dashboard = () => {
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Executive Summary</span>
           <span className="text-[10px] text-muted-foreground font-mono ml-auto">Aggregate Signal (Comms 45d + Stats 60d)</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           <MetricCard
             label="Fed Aggregate"
             value={fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
@@ -164,24 +164,21 @@ const Dashboard = () => {
           />
           <MetricCard label="Regime" value={regime} sublabel="FED vs ECB" />
           {isPredictionLoading ? (
-            <>
-              <div className="space-y-2 p-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-2/3" /></div>
-              <div className="space-y-2 p-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-2/3" /></div>
-              <div className="space-y-2 p-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-2/3" /></div>
-            </>
-          ) : fedPred && ecbPred && eurusdPred ? (
-            <>
-              <MetricCard label="Fed Path (Fund.)" value={fedPred.next_decision.toUpperCase()} sublabel={`${(fedPred.hold_probability * 100).toFixed(0)}% hold`} variant="prediction" />
-              <MetricCard label="ECB Path (Fund.)" value={ecbPred.next_decision.toUpperCase()} sublabel={`${(ecbPred.cut_probability * 100).toFixed(0)}% cut`} variant="prediction" />
-              <MetricCard label="EUR/USD (Fund.)" value={eurusdPred.direction.toUpperCase()} sublabel={`${(eurusdPred.signal_strength * 100).toFixed(0)}% signal`} variant="prediction" />
-            </>
-          ) : (
-            <>
-              <MetricCard label="Fed Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
-              <MetricCard label="ECB Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
-              <MetricCard label="EUR/USD (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
-            </>
-          )}
+             <>
+               <div className="space-y-2 p-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-2/3" /></div>
+               <div className="space-y-2 p-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-3 w-2/3" /></div>
+             </>
+           ) : fedPred && ecbPred ? (
+             <>
+               <MetricCard label="Fed Path (Fund.)" value={fedPred.next_decision.toUpperCase()} sublabel={`${(fedPred.hold_probability * 100).toFixed(0)}% hold`} variant="prediction" />
+               <MetricCard label="ECB Path (Fund.)" value={ecbPred.next_decision.toUpperCase()} sublabel={`${(ecbPred.cut_probability * 100).toFixed(0)}% cut`} variant="prediction" />
+             </>
+           ) : (
+             <>
+               <MetricCard label="Fed Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
+               <MetricCard label="ECB Path (Fund.)" value="—" sublabel="Loading..." variant="prediction" />
+             </>
+           )}
           <MetricCard label="Comm. Volume" value={String(totalRecentItems)} sublabel="recent events" trend={recent7.length > 5 ? 'up' : 'flat'} trendValue={`${recent7.length} this week`} />
         </div>
       </div>
