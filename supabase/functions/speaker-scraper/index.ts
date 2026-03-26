@@ -189,7 +189,7 @@ serve(async (req) => {
       const ecbCandidates: { url: string; title: string; pubDate: string }[] = [];
 
       // ECB key speeches pages (correct URL format)
-      const ecbYears = [2025, 2024, 2023, 2022, 2021, 2020, 2019];
+      const ecbYears = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
       for (const year of ecbYears) {
         // ECB uses this format for speeches listing
         const indexUrl = `https://www.ecb.europa.eu/press/key/date/${year}/html/index_include.en.html`;
