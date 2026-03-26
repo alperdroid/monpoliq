@@ -110,7 +110,7 @@ export function MinutesDiffCloud() {
             <div className="rounded-lg border border-border bg-surface overflow-hidden">
               <div className="px-3 py-2 border-b border-border bg-card">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                  Previous — {data.previous.date}
+                  Previous — {new Date(data.previous.date + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
                 </p>
                 <p className="text-[9px] text-muted-foreground truncate">{data.previous.title}</p>
               </div>
@@ -119,7 +119,7 @@ export function MinutesDiffCloud() {
             <div className="rounded-lg border border-border bg-surface overflow-hidden">
               <div className="px-3 py-2 border-b border-border bg-card">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                  Current — {data.current.date}
+                  Current — {new Date(data.current.date + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
                 </p>
                 <p className="text-[9px] text-muted-foreground truncate">{data.current.title}</p>
               </div>
