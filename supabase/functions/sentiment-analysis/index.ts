@@ -1298,11 +1298,12 @@ Deno.serve(async (req) => {
       const existing = await loadExistingItems('FED', sbUrl, sbKey);
       console.log('FED: ' + existing.size + ' existing items in DB');
 
-      const [fr, rawComms, fomcRaw, pressConfRaw] = await Promise.allSettled([
+      const [fr, rawComms, fomcRaw, pressConfRaw, fedMediaInterviews] = await Promise.allSettled([
         fk ? fetchFred(fk, days) : Promise.resolve([]),
         fetchRssRaw(cs, 'FED'),
         fetchFomcMinutes(cs),
         fetchFomcPressConferences(cs),
+        fetchMediaInterviews('FED', aiKey, existing),
       ]);
 
       const fi: It[] = [];
