@@ -141,14 +141,14 @@ const Events = () => {
                   <td className="p-3">
                     <span className="text-muted-foreground text-[11px]">{event.source}</span>
                   </td>
-                  <td className="p-3 max-w-xs">
+                  <td className="p-3 overflow-hidden">
                     {event.url ? (
-                      <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-foreground hover:text-primary transition-colors flex items-center gap-1">
-                        <span className="truncate">{event.title}</span>
+                      <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-foreground hover:text-primary transition-colors flex items-center gap-1 min-w-0">
+                        <span className="truncate block">{event.title}</span>
                         <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-50" />
                       </a>
                     ) : (
-                      <span className="truncate">{event.title}</span>
+                      <span className="truncate block">{event.title}</span>
                     )}
                   </td>
                   <td className="p-3">
