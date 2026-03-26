@@ -735,7 +735,7 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
 // Known ECB Governing Council meeting dates for press conferences
 const KNOWN_ECB_DATES = [
   '250130', '250306', '250417', '250605', '250724', '250911', '251030', '251218',
-  '260205', '260305', '260416', '260604', '260723', '260910', '261029', '261217',
+  '260205', '260319', '260430', '260611', '260723', '260910', '261029', '261217',
 ];
 
 async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {

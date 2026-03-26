@@ -7,8 +7,8 @@ import type { SentimentItem } from '@/lib/api/sentiment';
 
 /** Meetings for prep pack generation */
 const UPCOMING_MEETINGS = [
-  { bank: 'FED', date: '2026-03-19', label: 'FOMC Meeting — March 19, 2026' },
-  { bank: 'ECB', date: '2026-03-05', label: 'ECB GC Meeting — March 5, 2026' },
+  { bank: 'FED', date: '2026-04-30', label: 'FOMC Meeting — April 30, 2026' },
+  { bank: 'ECB', date: '2026-04-30', label: 'ECB GC Meeting — April 30, 2026' },
 ];
 
 interface MeetingPrepPackProps {

@@ -26,9 +26,10 @@ const PAST_MEETINGS = [
   { id: 'ecb-2025-10-30', bank: 'ECB', date: '2025-10-30', label: 'ECB Oct 2025 — Hold at 2.00%' },
   { id: 'fed-2025-12-10', bank: 'FED', date: '2025-12-10', label: 'FOMC Dec 2025 — Cut to 3.25–3.50%' },
   { id: 'ecb-2025-12-18', bank: 'ECB', date: '2025-12-18', label: 'ECB Dec 2025 — Hold at 2.00%' },
-  { id: 'fed-2026-01-28', bank: 'FED', date: '2026-01-28', label: 'FOMC Jan 2026 — Hold at 3.25–3.50%' },
+  { id: 'fed-2026-01-29', bank: 'FED', date: '2026-01-29', label: 'FOMC Jan 2026 — Hold at 3.25–3.50%' },
   { id: 'ecb-2026-02-05', bank: 'ECB', date: '2026-02-05', label: 'ECB Feb 2026 — Hold at 2.00%' },
-  { id: 'fed-2026-03-18', bank: 'FED', date: '2026-03-18', label: 'FOMC Mar 2026' },
+  { id: 'fed-2026-03-19', bank: 'FED', date: '2026-03-19', label: 'FOMC Mar 2026 — Hold at 3.50–3.75%' },
+  { id: 'ecb-2026-03-19', bank: 'ECB', date: '2026-03-19', label: 'ECB Mar 2026' },
 ].sort((a, b) => a.date.localeCompare(b.date));
 
 const POLICY_SOURCES = [
