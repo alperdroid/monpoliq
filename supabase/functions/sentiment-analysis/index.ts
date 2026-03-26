@@ -963,6 +963,79 @@ async function fetchEcbAccounts(cutoffDate: string): Promise<{ title: string; te
   return items;
 }
 
+// ── AI-Powered Media Interview Scraper ──
+// Uses Gemini to find recent central banker media interviews (Reuters, Bloomberg, FT etc.)
+async function fetchMediaInterviews(bank: string, aiKey: string, existingTitles: Set<string>): Promise<RawComm[]> {
+  if (!aiKey) return [];
+  const items: RawComm[] = [];
+  
+  const governors = bank === 'ECB' 
+    ? ['Nagel (Bundesbank)', 'Villeroy de Galhau (Banque de France)', 'Knot (DNB)', 'Centeno (Bank of Portugal)', 'Holzmann (OeNB Austria)']
+    : ['Goolsbee (Chicago Fed)', 'Bostic (Atlanta Fed)', 'Daly (SF Fed)', 'Williams (NY Fed)', 'Kashkari (Minneapolis Fed)'];
+  
+  const today = new Date().toISOString().split('T')[0];
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split('T')[0];
+  
+  const searchPrompt = `Find the most important recent (${twoWeeksAgo} to ${today}) monetary policy comments made by ${bank === 'ECB' ? 'ECB Governing Council members' : 'Federal Reserve officials'} in media interviews, press conferences, or public remarks.
+
+Focus on: ${governors.join(', ')}
+
+For each comment, provide:
+- speaker: full name
+- date: YYYY-MM-DD format  
+- headline: what they said (include the media outlet if known)
+- summary: 2-3 sentences of what they said about monetary policy
+- sentiment: hawkish/dovish/neutral
+- score: -1.0 to 1.0
+
+Only include comments about monetary policy (rates, inflation, growth outlook).
+Skip ceremonial, administrative, or non-monetary remarks.
+Only include items you are confident actually happened — do NOT fabricate.
+
+Respond with ONLY a JSON array (no markdown):
+[{"speaker":"...","date":"YYYY-MM-DD","headline":"...","summary":"...","sentiment":"...","score":0.0}]
+Return empty array [] if no significant remarks found.`;
+
+  try {
+    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: searchPrompt }],
+      }),
+    });
+
+    if (!resp.ok) { console.error('Media interview search failed:', resp.status); return []; }
+    const data = await resp.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    const remarks: { speaker: string; date: string; headline: string; summary: string; sentiment: string; score: number }[] = JSON.parse(content);
+    console.log('Media interview search (' + bank + '): found ' + remarks.length + ' remarks');
+    
+    for (const remark of remarks) {
+      if (!remark.date || !/^\d{4}-\d{2}-\d{2}$/.test(remark.date)) continue;
+      const d = new Date(remark.date);
+      if (isNaN(d.getTime()) || d.getFullYear() < 2024) continue;
+      
+      const titleKey = remark.headline + '|' + remark.date;
+      if (existingTitles.has(titleKey)) continue;
+      
+      items.push({
+        title: remark.headline,
+        text: remark.summary,
+        date: remark.date,
+        url: '',
+        source: bank === 'ECB' ? 'GC Member Remark' : 'Fed Official Remark',
+        bank,
+      });
+    }
+  } catch (e) { console.error('Media interview search error:', e); }
+  
+  return items;
+}
+
 // ── Patterns to reclassify as statistical (not commentary) ──
 const STATISTICAL_RECLASSIFY_PATTERNS = [
   /consumer\s+expectations?\s+survey/i,
@@ -992,11 +1065,9 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
     : [
         { url: 'https://www.ecb.europa.eu/rss/press.html', lbl: 'ECB Press' },
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
-        { url: 'https://www.ecb.europa.eu/rss/speeches.html', lbl: 'ECB Speech' },
-        // NCB governor speeches — key Governing Council members
-        { url: 'https://www.bundesbank.de/en/press/speeches/rss-feed-773482', lbl: 'Bundesbank Speech' },
-        { url: 'https://www.banque-france.fr/en/rss/speeches.xml', lbl: 'Banque de France Speech' },
-        { url: 'https://www.dnb.nl/en/actueel/speeches/rss/', lbl: 'DNB Speech' },
+        // Note: ECB speeches.html is HTML, not RSS — individual speeches come via speaker-scraper & media interviews
+        // Bundesbank speeches, interviews and contributions (verified RSS feed)
+        { url: 'https://www.bundesbank.de/service/rss/en/633296/feed.rss', lbl: 'Bundesbank Speech' },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
@@ -1226,11 +1297,12 @@ Deno.serve(async (req) => {
       const existing = await loadExistingItems('FED', sbUrl, sbKey);
       console.log('FED: ' + existing.size + ' existing items in DB');
 
-      const [fr, rawComms, fomcRaw, pressConfRaw] = await Promise.allSettled([
+      const [fr, rawComms, fomcRaw, pressConfRaw, fedMediaInterviews] = await Promise.allSettled([
         fk ? fetchFred(fk, days) : Promise.resolve([]),
         fetchRssRaw(cs, 'FED'),
         fetchFomcMinutes(cs),
         fetchFomcPressConferences(cs),
+        fetchMediaInterviews('FED', aiKey, existing),
       ]);
 
       const fi: It[] = [];
@@ -1253,6 +1325,12 @@ Deno.serve(async (req) => {
           else if (pc.title.includes('Transcript')) src = 'FOMC Press Conf';
           allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: src, bank: 'FED' });
         }
+      }
+
+      // Add Fed official media interview remarks
+      if (fedMediaInterviews.status === 'fulfilled' && fedMediaInterviews.value.length > 0) {
+        allRawComms.push(...fedMediaInterviews.value);
+        console.log('FED: ' + fedMediaInterviews.value.length + ' media interview remarks found');
       }
 
       const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
@@ -1325,11 +1403,12 @@ Deno.serve(async (req) => {
       ]);
       console.log('ECB: ' + existing.size + ' existing items in DB, ' + existingStatItems.length + ' stat items for dedup');
 
-      const [rawComms, st, ecbPressConf, ecbAccounts] = await Promise.allSettled([
+      const [rawComms, st, ecbPressConf, ecbAccounts, mediaInterviews] = await Promise.allSettled([
         fetchRssRaw(cs, 'ECB'),
         fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
         fetchEcbAccounts(cs),
+        fetchMediaInterviews('ECB', aiKey, existing),
       ]);
 
       const ei: It[] = [];
@@ -1350,6 +1429,12 @@ Deno.serve(async (req) => {
           allRawComms.push({ title: ac.title, text: ac.text, date: ac.date, url: ac.url, source: 'ECB Monetary Policy Accounts', bank: 'ECB' });
         }
         console.log('ECB: ' + ecbAccounts.value.length + ' meeting accounts found');
+      }
+
+      // Add media interview remarks from GC members
+      if (mediaInterviews.status === 'fulfilled' && mediaInterviews.value.length > 0) {
+        allRawComms.push(...mediaInterviews.value);
+        console.log('ECB: ' + mediaInterviews.value.length + ' media interview remarks found');
       }
 
       // Reclassify consumer expectations surveys and similar as statistical
