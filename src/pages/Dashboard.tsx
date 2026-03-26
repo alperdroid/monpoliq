@@ -345,24 +345,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Communication Volume Chart */}
-      {volumeData.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-semibold">Communication Volume</h3>
-          </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={volumeData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px', fontSize: '11px' }} />
-              <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Events" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
     </div>
   );
 };
