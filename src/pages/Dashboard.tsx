@@ -202,7 +202,7 @@ const Dashboard = () => {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Aggregate</span>
             <p className={cn('text-2xl font-mono font-bold',
-              fedAggAvg !== null && fedAggAvg > 0.05 ? 'text-signal-hawkish' : fedAggAvg !== null && fedAggAvg < -0.05 ? 'text-signal-dovish' : 'text-signal-neutral',
+              fedAggAvg !== null && fedAggAvg > 0.1 ? 'text-signal-hawkish' : fedAggAvg !== null && fedAggAvg < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral',
             )}>
               {fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
             </p>
