@@ -149,7 +149,7 @@ const Dashboard = () => {
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">Executive Summary</span>
           <span className="text-[10px] text-muted-foreground font-mono ml-auto">Aggregate Signal (Comms 45d + Stats 60d)</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           <MetricCard
             label="Fed Aggregate"
             value={fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
