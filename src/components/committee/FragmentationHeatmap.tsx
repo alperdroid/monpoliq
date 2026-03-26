@@ -86,7 +86,7 @@ export function FragmentationHeatmap({ allItems }: FragmentationHeatmapProps) {
     const speakerOverall: Record<string, { sum: number; count: number }> = {};
 
     for (const item of comms) {
-      const speaker = extractSpeaker(item.source);
+      const speaker = extractSpeaker(item.title, item.source);
       if (!speaker) continue;
       const monthKey = getMonthKey(item.item_date);
       if (!months.includes(monthKey)) continue;
