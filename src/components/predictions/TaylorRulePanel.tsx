@@ -101,13 +101,21 @@ export function TaylorRulePanel() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <Switch
-              checked={showClassic}
-              onCheckedChange={setShowClassic}
-              className="h-4 w-7 data-[state=checked]:bg-chart-2"
-            />
-            <span className="text-[9px] text-muted-foreground">Classic (β₁=1.5)</span>
-          </div>
+              <Switch
+                checked={showClassic}
+                onCheckedChange={setShowClassic}
+                className="h-4 w-7 data-[state=checked]:bg-chart-2"
+              />
+              <span className="text-[9px] text-muted-foreground">Classic (β₁=1.5)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Switch
+                checked={showYellen}
+                onCheckedChange={setShowYellen}
+                className="h-4 w-7 data-[state=checked]:bg-chart-5"
+              />
+              <span className="text-[9px] text-muted-foreground">Yellen (β₂=1.0)</span>
+            </div>
           <Select value={bank} onValueChange={setBank}>
             <SelectTrigger className="w-20 h-7 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
