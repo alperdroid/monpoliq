@@ -82,6 +82,7 @@ export function TaylorRulePanel() {
       return {
         ...d,
         classic_rate: Math.round((CLASSIC_INTERCEPT + CLASSIC_INFL_COEFF * inflGap + CLASSIC_OUTPUT_COEFF * outputGap) * 1000) / 1000,
+        yellen_rate: Math.round((YELLEN_INTERCEPT + YELLEN_INFL_COEFF * inflGap + YELLEN_OUTPUT_COEFF * outputGap) * 1000) / 1000,
       };
     });
   }, [data, bank]);
