@@ -49,6 +49,10 @@ const CLASSIC_INTERCEPT = 4; // r* (2%) + π* (2%)
 const CLASSIC_INFL_COEFF = 1.5;
 const CLASSIC_OUTPUT_COEFF = 0.5;
 
+const YELLEN_INTERCEPT = 4; // r* (2%) + π* (2%)
+const YELLEN_INFL_COEFF = 1.0;
+const YELLEN_OUTPUT_COEFF = 1.0;
+
 async function fetchTaylorRule(bank: string): Promise<TaylorRuleResult> {
   const { data, error } = await supabase.functions.invoke('taylor-rule', { body: { bank } });
   if (error) throw error;
@@ -58,7 +62,7 @@ async function fetchTaylorRule(bank: string): Promise<TaylorRuleResult> {
 export function TaylorRulePanel() {
   const [bank, setBank] = useState<string>('FED');
   const [showClassic, setShowClassic] = useState(false);
-
+  const [showYellen, setShowYellen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['taylor-rule', bank],
     queryFn: () => fetchTaylorRule(bank),
@@ -78,6 +82,7 @@ export function TaylorRulePanel() {
       return {
         ...d,
         classic_rate: Math.round((CLASSIC_INTERCEPT + CLASSIC_INFL_COEFF * inflGap + CLASSIC_OUTPUT_COEFF * outputGap) * 1000) / 1000,
+        yellen_rate: Math.round((YELLEN_INTERCEPT + YELLEN_INFL_COEFF * inflGap + YELLEN_OUTPUT_COEFF * outputGap) * 1000) / 1000,
       };
     });
   }, [data, bank]);
@@ -96,13 +101,21 @@ export function TaylorRulePanel() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <Switch
-              checked={showClassic}
-              onCheckedChange={setShowClassic}
-              className="h-4 w-7 data-[state=checked]:bg-chart-2"
-            />
-            <span className="text-[9px] text-muted-foreground">Classic (β₁=1.5)</span>
-          </div>
+              <Switch
+                checked={showClassic}
+                onCheckedChange={setShowClassic}
+                className="h-4 w-7 data-[state=checked]:bg-chart-2"
+              />
+              <span className="text-[9px] text-muted-foreground">Classic (β₁=1.5)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Switch
+                checked={showYellen}
+                onCheckedChange={setShowYellen}
+                className="h-4 w-7 data-[state=checked]:bg-chart-5"
+              />
+              <span className="text-[9px] text-muted-foreground">Yellen (β₂=1.0)</span>
+            </div>
           <Select value={bank} onValueChange={setBank}>
             <SelectTrigger className="w-20 h-7 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -209,13 +222,16 @@ export function TaylorRulePanel() {
                 }}
                 formatter={(value: number, name: string) => [
                   `${value.toFixed(2)}%`,
-                  name === 'actual_rate' ? 'Actual Rate' : name === 'classic_rate' ? 'Classic Taylor (β₁=1.5)' : 'Estimated Taylor',
+                  name === 'actual_rate' ? 'Actual Rate' : name === 'classic_rate' ? 'Classic Taylor (β₁=1.5)' : name === 'yellen_rate' ? 'Yellen Rule (β₂=1.0)' : 'Estimated Taylor',
                 ]}
               />
               <Line type="monotone" dataKey="actual_rate" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} name="actual_rate" />
               <Line type="monotone" dataKey="implied_rate" stroke="hsl(var(--chart-4))" strokeWidth={2} strokeDasharray="5 3" dot={false} name="implied_rate" />
               {showClassic && (
                 <Line type="monotone" dataKey="classic_rate" stroke="hsl(var(--chart-2))" strokeWidth={1.5} strokeDasharray="2 2" dot={false} name="classic_rate" />
+              )}
+              {showYellen && (
+                <Line type="monotone" dataKey="yellen_rate" stroke="hsl(var(--chart-5))" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="yellen_rate" />
               )}
             </LineChart>
           </ResponsiveContainer>
@@ -234,6 +250,12 @@ export function TaylorRulePanel() {
               <div className="flex items-center gap-1.5">
                 <div className="w-4 h-0.5 rounded" style={{ borderTop: '2px dotted hsl(var(--chart-2))' }} />
                 <span className="text-muted-foreground">Classic (r*=2, β₁=1.5, β₂=0.5)</span>
+              </div>
+            )}
+            {showYellen && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-0.5 rounded" style={{ borderTop: '2px dashed hsl(var(--chart-5))' }} />
+                <span className="text-muted-foreground">Yellen (r*=2, β₁=1.0, β₂=1.0)</span>
               </div>
             )}
           </div>
