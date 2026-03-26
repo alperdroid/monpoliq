@@ -234,7 +234,7 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
           </span>
           <TooltipInfo content="Decomposes sentiment into comms-only (speeches, minutes), stats-only (economic data), and combined averages. The 'Model Implied' score is derived from AI prediction probabilities (hike×1 + hold×0 + cut×−1). Large gaps flag volatility risk." />
         </div>
-        <span className="text-[9px] text-muted-foreground font-mono">CIE · 30d window</span>
+        <span className="text-[9px] text-muted-foreground font-mono">CIE · 45d comms · 60d stats</span>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
