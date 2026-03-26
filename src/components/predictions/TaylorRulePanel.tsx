@@ -252,6 +252,12 @@ export function TaylorRulePanel() {
                 <span className="text-muted-foreground">Classic (r*=2, β₁=1.5, β₂=0.5)</span>
               </div>
             )}
+            {showYellen && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-4 h-0.5 rounded" style={{ borderTop: '2px dashed hsl(var(--chart-5))' }} />
+                <span className="text-muted-foreground">Yellen (r*=2, β₁=1.0, β₂=1.0)</span>
+              </div>
+            )}
           </div>
 
           <p className="text-[9px] text-muted-foreground text-center">
