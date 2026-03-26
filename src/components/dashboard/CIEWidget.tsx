@@ -40,13 +40,13 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
           : 0;
       };
 
-      const commsAvg30 = avgOf(comms30);
+      const commsAvg45 = avgOf(comms45);
       const commsAvg7 = avgOf(comms7);
-      const statsAvg30 = avgOf(stats30);
-      const combinedAvg30 = avgOf(all30);
+      const statsAvg60 = avgOf(stats60);
+      const combinedAvg = avgOf(all);
 
-      const cie = commsAvg30;
-      const trend = commsAvg7 - commsAvg30;
+      const cie = commsAvg45;
+      const trend = commsAvg7 - commsAvg45;
       const modelImplied = pred.hike_probability * 1 + pred.hold_probability * 0 + pred.cut_probability * -1;
       const gap = modelImplied - cie;
       const absGap = Math.abs(gap);
