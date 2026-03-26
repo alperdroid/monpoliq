@@ -25,14 +25,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 bg-muted rounded-lg px-3 py-1.5 border border-border/50">
-                <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search events, speakers..."
-                  className="bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none w-48"
-                />
-              </div>
+              <SearchCommand />
               <div className="text-[10px] text-muted-foreground font-mono">
                 {new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}
               </div>
