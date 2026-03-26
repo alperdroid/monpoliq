@@ -282,7 +282,7 @@ serve(async (req) => {
 
         const ai = await scoreWithAI(title, text, "ECB", apiKey);
         newItems.push({
-          bank: "ECB", source: "ecb_speech", item_date: date, title,
+          bank: "ECB", source: "ECB Speech", item_date: date, title,
           url: item.url, is_statistical: false,
           hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
           dove_pts: ai.score < 0 ? Math.round(Math.abs(ai.score) * 10) : 0,
