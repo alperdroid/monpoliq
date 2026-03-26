@@ -222,13 +222,16 @@ export function TaylorRulePanel() {
                 }}
                 formatter={(value: number, name: string) => [
                   `${value.toFixed(2)}%`,
-                  name === 'actual_rate' ? 'Actual Rate' : name === 'classic_rate' ? 'Classic Taylor (β₁=1.5)' : 'Estimated Taylor',
+                  name === 'actual_rate' ? 'Actual Rate' : name === 'classic_rate' ? 'Classic Taylor (β₁=1.5)' : name === 'yellen_rate' ? 'Yellen Rule (β₂=1.0)' : 'Estimated Taylor',
                 ]}
               />
               <Line type="monotone" dataKey="actual_rate" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} name="actual_rate" />
               <Line type="monotone" dataKey="implied_rate" stroke="hsl(var(--chart-4))" strokeWidth={2} strokeDasharray="5 3" dot={false} name="implied_rate" />
               {showClassic && (
                 <Line type="monotone" dataKey="classic_rate" stroke="hsl(var(--chart-2))" strokeWidth={1.5} strokeDasharray="2 2" dot={false} name="classic_rate" />
+              )}
+              {showYellen && (
+                <Line type="monotone" dataKey="yellen_rate" stroke="hsl(var(--chart-5))" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="yellen_rate" />
               )}
             </LineChart>
           </ResponsiveContainer>
