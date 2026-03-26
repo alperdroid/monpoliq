@@ -156,7 +156,7 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
 
         {/* Signal Decomposition */}
         <div className="space-y-2.5 rounded-lg border border-border/50 bg-muted/20 p-2.5">
-          <span className="text-[8px] uppercase tracking-widest text-muted-foreground font-medium">Underlying Signals (30d avg)</span>
+          <span className="text-[8px] uppercase tracking-widest text-muted-foreground font-medium">Underlying Signals (45d comms · 60d stats)</span>
 
           <SignalRow
             icon={MessageSquare}
