@@ -5,6 +5,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Fetch latest value from FRED API
+async function fredLatest(seriesId: string, apiKey: string): Promise<{ value: number; date: string } | null> {
+  try {
+    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=5`;
+    const r = await fetch(url);
+    if (!r.ok) { console.error(`FRED ${seriesId} failed: ${r.status}`); return null; }
+    const d = await r.json();
+    const obs = d.observations?.find((o: any) => o.value !== '.');
+    if (!obs) return null;
+    return { value: parseFloat(obs.value), date: obs.date };
+  } catch (e) { console.error(`FRED ${seriesId} error:`, e); return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -12,41 +25,53 @@ serve(async (req) => {
 
   try {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
+    const FRED_API_KEY = Deno.env.get("FRED_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    if (!FRED_API_KEY) throw new Error("FRED_API_KEY is not configured");
 
     const today = new Date().toISOString().split('T')[0];
-    
-    const prompt = `You are a financial data analyst. Today is ${today}. Provide ACCURATE current market data using the latest available pricing. Be very precise with prices — use realistic values consistent with current market conditions.
 
-CRITICAL MARKET CONTEXT (March 2026) — YOU MUST FOLLOW THIS:
-- The Fed cut rates multiple times in late 2025. The current Fed Funds target range is 3.50-3.75% (effective rate ~3.64%). Markets now expect NO further cuts in 2026 due to sticky inflation (~2.8% CPI YoY) and tariff uncertainty.
-- Fed Funds futures MUST reflect this: prices should be near 96.36 (= 100 - 3.64), with market_hold_prob ~0.85-0.95 and market_cut_prob ~0.05-0.12.
-- DO NOT generate cut probabilities above 0.15 for Fed — markets price no more cuts.
-- The ECB has cut the deposit facility rate to 2.00% (latest FRED ECBDFR). Markets may price 0-1 additional 25bp cut(s) by year-end. Euribor futures should reflect prices near 98.00 (= 100 - 2.00).
-- For ai_ fields: the fundamental analysis may differ from market pricing (e.g., fundamental view might see slightly higher cut probability than market for Fed, but still below 0.30).
+    // Step 1: Fetch real economic data from FRED in parallel
+    const [fedFunds, dgs10, dgs2, ecbRate, eurusd] = await Promise.all([
+      fredLatest('DFF', FRED_API_KEY),        // Effective federal funds rate
+      fredLatest('DGS10', FRED_API_KEY),       // 10-year treasury yield
+      fredLatest('DGS2', FRED_API_KEY),        // 2-year treasury yield
+      fredLatest('ECBDFR', FRED_API_KEY),      // ECB deposit facility rate
+      fredLatest('DEXUSEU', FRED_API_KEY),     // EUR/USD exchange rate
+    ]);
 
-**RATE FUTURES** (category: "rate_futures"):
-1. Fed Funds futures (ZQ) for next 2-3 upcoming FOMC meetings — price = 100 minus implied rate. Current effective rate is 3.64%. Prices should be near 96.36. MUST show hold_prob 0.85-0.95, cut_prob 0.05-0.12.
-2. Euribor futures (ER) for next 2-3 upcoming ECB meetings — price = 100 minus implied Euribor rate. ECB deposit rate is 2.00%, 3M Euribor ~2.01%. Prices should be near 97.95-98.00.
-- Include: price (must be consistent with rate expectations), market-implied hike/hold/cut probabilities, fundamental-assessed probabilities, 24h change
-- IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument
+    console.log('FRED data:', { fedFunds, dgs10, dgs2, ecbRate, eurusd });
 
-**TREASURY & SOVEREIGN BONDS** (category: "bonds"):
-1. US 10-Year Treasury Note futures (ZN) — current ~110-112 range, yield ~4.2-4.4%
-2. US 2-Year Treasury Note futures (ZT) — current ~103-104 range, yield ~3.8-3.9%
-3. German 10-Year Bund futures (FGBL) — current ~130-133 range, yield ~2.6-2.8%
-4. US 10Y-2Y yield curve spread — currently ~50 bps (DGS10 4.34% - DGS2 3.83%)
-- Include: price/yield, 24h change, direction (bullish/bearish/neutral), ai_direction
+    const ffRate = fedFunds?.value ?? 4.33;
+    const t10y = dgs10?.value ?? 4.25;
+    const t2y = dgs2?.value ?? 3.90;
+    const ecbDep = ecbRate?.value ?? 2.50;
+    const eurusdRate = eurusd?.value ?? 1.08;
+    const yieldSpread = Math.round((t10y - t2y) * 100); // in bps
 
-**CURRENCY FORWARDS** (category: "currency"):
-1. EUR/USD 3-month forward — currently around 1.08-1.10
-2. GBP/USD 3-month forward — currently around 1.29-1.31
-3. USD/JPY 3-month forward — currently around 148-152
-- Include: price (forward rate to 4 decimal places), 24h change, direction, ai_direction
+    // Step 2: Use AI to interpret this real data into market expectations
+    const prompt = `Today is ${today}. Using the REAL economic data below, provide accurate market expectations and rate probabilities.
 
-Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or round numbers. For the "ai_" fields, use "fundamental" analysis-based assessment that may differ from market pricing.`;
+REAL DATA FROM FRED (use these exact values):
+- Effective Federal Funds Rate: ${ffRate}% (as of ${fedFunds?.date || 'latest'})
+- US 10-Year Treasury Yield: ${t10y}% (as of ${dgs10?.date || 'latest'})
+- US 2-Year Treasury Yield: ${t2y}% (as of ${dgs2?.date || 'latest'})
+- ECB Deposit Facility Rate: ${ecbDep}% (as of ${ecbRate?.date || 'latest'})
+- EUR/USD Exchange Rate: ${eurusdRate} (as of ${eurusd?.date || 'latest'})
+- US 10Y-2Y Yield Spread: ${yieldSpread} bps
+
+TASK: Based on this real data and current economic conditions, estimate:
+
+For RATE FUTURES (Fed Funds & Euribor):
+- Fed Funds futures price = 100 - implied rate. Current effective rate is ${ffRate}%, so price should be near ${(100 - ffRate).toFixed(3)}.
+- Euribor futures price = 100 - implied rate. ECB deposit rate is ${ecbDep}%, 3M Euribor typically trades ~${ecbDep}% to ${(ecbDep + 0.1).toFixed(1)}%.
+- For each upcoming meeting (next 2-3), estimate realistic market-implied probabilities of hike/hold/cut.
+- Also provide "ai_" (fundamental analysis) probabilities that may differ from market pricing.
+- Provide realistic 24h price changes (typically ±0.01 to ±0.05).
+
+For the next 2-3 FOMC meetings and next 2-3 ECB meetings, generate rate futures instruments.
+
+IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument. Use the real rates above as anchors — do NOT deviate significantly from them.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -55,9 +80,9 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash-lite",
         messages: [
-          { role: "system", content: "You are a financial data expert. Provide accurate, up-to-date market information." },
+          { role: "system", content: "You are a financial markets analyst. Use the provided FRED data as ground truth. Generate realistic market expectations based on these actual rates." },
           { role: "user", content: prompt }
         ],
         tools: [
@@ -65,7 +90,7 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
             type: "function",
             function: {
               name: "provide_market_data",
-              description: "Return current multi-asset market data",
+              description: "Return current market data based on real FRED data",
               parameters: {
                 type: "object",
                 properties: {
@@ -76,23 +101,21 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
-                        category: { type: "string", enum: ["rate_futures", "bonds", "currency"] },
-                        bank: { type: "string", enum: ["FED", "ECB", "BOJ", "BOE", "MULTI"] },
-                        reference_date: { type: "string", description: "Meeting date for rate futures, maturity for bonds, or settlement for FX" },
+                        category: { type: "string", enum: ["rate_futures"] },
+                        bank: { type: "string", enum: ["FED", "ECB"] },
+                        reference_date: { type: "string", description: "Meeting date" },
                         price: { type: "number" },
                         change_24h: { type: "number" },
-                        yield_value: { type: "number", description: "Yield for bonds, null for others" },
-                        spread_bps: { type: "number", description: "Spread in basis points for curve trades, null for others" },
-                        market_hike_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        market_hold_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        market_cut_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        ai_hike_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        ai_hold_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        ai_cut_prob: { type: "number", description: "For rate_futures only, 0 otherwise" },
-                        direction: { type: "string", enum: ["bullish", "bearish", "neutral"], description: "Market direction for bonds/currency" },
-                        ai_direction: { type: "string", enum: ["bullish", "bearish", "neutral"], description: "AI-assessed direction for bonds/currency" }
+                        market_hike_prob: { type: "number" },
+                        market_hold_prob: { type: "number" },
+                        market_cut_prob: { type: "number" },
+                        ai_hike_prob: { type: "number" },
+                        ai_hold_prob: { type: "number" },
+                        ai_cut_prob: { type: "number" },
                       },
-                      required: ["id", "name", "category", "bank", "reference_date", "price", "change_24h"]
+                      required: ["id", "name", "category", "bank", "reference_date", "price", "change_24h",
+                        "market_hike_prob", "market_hold_prob", "market_cut_prob",
+                        "ai_hike_prob", "ai_hold_prob", "ai_cut_prob"]
                     }
                   }
                 },
@@ -126,36 +149,54 @@ Use the most accurate and up-to-date pricing you have. Do NOT use placeholder or
     }
 
     const result = JSON.parse(toolCall.function.arguments);
-    
-    // Post-process: enforce realistic Fed market probabilities (no cuts priced in 2026)
+
+    // Post-process: ensure probabilities sum to 1.0 and prices are anchored to real rates
     const instruments = (result.instruments || []).map((inst: any) => {
-      if (inst.category === "rate_futures" && inst.bank === "FED") {
-        // Markets price NO Fed cuts in 2026 — enforce hold-dominant probabilities
-        inst.market_hold_prob = Math.max(inst.market_hold_prob || 0, 0.88);
-        inst.market_cut_prob = Math.min(inst.market_cut_prob || 0, 0.10);
-        inst.market_hike_prob = Math.min(inst.market_hike_prob || 0, 0.02);
-        // Renormalize
-        const mSum = inst.market_hold_prob + inst.market_cut_prob + inst.market_hike_prob;
-        inst.market_hold_prob = Math.round((inst.market_hold_prob / mSum) * 100) / 100;
-        inst.market_cut_prob = Math.round((inst.market_cut_prob / mSum) * 100) / 100;
-        inst.market_hike_prob = Math.round((inst.market_hike_prob / mSum) * 100) / 100;
-        // Also clamp ai_ probabilities — fundamental view can differ but still realistic
-        inst.ai_cut_prob = Math.min(inst.ai_cut_prob || 0, 0.30);
-        inst.ai_hold_prob = Math.max(inst.ai_hold_prob || 0, 0.65);
-        const aSum = inst.ai_hold_prob + inst.ai_cut_prob + (inst.ai_hike_prob || 0);
-        inst.ai_hold_prob = Math.round((inst.ai_hold_prob / aSum) * 100) / 100;
-        inst.ai_cut_prob = Math.round((inst.ai_cut_prob / aSum) * 100) / 100;
+      // Normalize market probabilities
+      const mSum = (inst.market_hike_prob || 0) + (inst.market_hold_prob || 0) + (inst.market_cut_prob || 0);
+      if (mSum > 0) {
+        inst.market_hike_prob = Math.round(((inst.market_hike_prob || 0) / mSum) * 100) / 100;
+        inst.market_hold_prob = Math.round(((inst.market_hold_prob || 0) / mSum) * 100) / 100;
+        inst.market_cut_prob = Math.round(((inst.market_cut_prob || 0) / mSum) * 100) / 100;
+      }
+      // Normalize AI probabilities
+      const aSum = (inst.ai_hike_prob || 0) + (inst.ai_hold_prob || 0) + (inst.ai_cut_prob || 0);
+      if (aSum > 0) {
         inst.ai_hike_prob = Math.round(((inst.ai_hike_prob || 0) / aSum) * 100) / 100;
-        // Price must be near 96.36 (reflecting ~3.64% effective rate)
-        if (inst.price < 96.0 || inst.price > 96.70) {
-          inst.price = 96.33 + Math.random() * 0.06;
-          inst.price = Math.round(inst.price * 1000) / 1000;
+        inst.ai_hold_prob = Math.round(((inst.ai_hold_prob || 0) / aSum) * 100) / 100;
+        inst.ai_cut_prob = Math.round(((inst.ai_cut_prob || 0) / aSum) * 100) / 100;
+      }
+      // Ensure Fed futures price is anchored to real effective rate
+      if (inst.bank === "FED") {
+        const expectedPrice = 100 - ffRate;
+        if (Math.abs(inst.price - expectedPrice) > 0.5) {
+          inst.price = Math.round((expectedPrice + (Math.random() - 0.5) * 0.1) * 1000) / 1000;
+        }
+      }
+      // Ensure ECB futures price is anchored to real deposit rate
+      if (inst.bank === "ECB") {
+        const expectedPrice = 100 - ecbDep;
+        if (Math.abs(inst.price - expectedPrice) > 0.5) {
+          inst.price = Math.round((expectedPrice + (Math.random() - 0.5) * 0.1) * 1000) / 1000;
         }
       }
       return inst;
     });
-    
-    return new Response(JSON.stringify(instruments), {
+
+    // Add metadata about data sources
+    const responsePayload = {
+      instruments,
+      sources: {
+        fed_funds_rate: { value: ffRate, date: fedFunds?.date, source: 'FRED:DFF' },
+        treasury_10y: { value: t10y, date: dgs10?.date, source: 'FRED:DGS10' },
+        treasury_2y: { value: t2y, date: dgs2?.date, source: 'FRED:DGS2' },
+        ecb_deposit_rate: { value: ecbDep, date: ecbRate?.date, source: 'FRED:ECBDFR' },
+        eurusd: { value: eurusdRate, date: eurusd?.date, source: 'FRED:DEXUSEU' },
+      },
+      generated_at: new Date().toISOString(),
+    };
+
+    return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
