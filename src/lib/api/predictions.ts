@@ -128,7 +128,13 @@ export interface MarketInstrument {
   ai_direction?: 'bullish' | 'bearish' | 'neutral';
 }
 
-export async function fetchMarketData(): Promise<MarketInstrument[]> {
+export interface MarketDataResponse {
+  instruments: MarketInstrument[];
+  sources?: Record<string, { value: number; date: string; source: string }>;
+  generated_at?: string;
+}
+
+export async function fetchMarketData(): Promise<MarketDataResponse> {
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const url = `https://${projectId}.supabase.co/functions/v1/market-futures`;
@@ -147,5 +153,10 @@ export async function fetchMarketData(): Promise<MarketInstrument[]> {
     throw new Error(`Market data fetch failed: ${errorText}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  // Handle both old format (array) and new format (object with instruments)
+  if (Array.isArray(data)) {
+    return { instruments: data };
+  }
+  return data;
 }
