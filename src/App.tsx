@@ -24,7 +24,7 @@ import Alerts from "./pages/Alerts";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import NotFound from "./pages/NotFound";
-
+import SettingsPage from "./pages/SettingsPage";
 const queryClient = new QueryClient();
 
 const App = () => (
