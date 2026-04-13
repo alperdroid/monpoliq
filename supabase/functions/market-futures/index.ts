@@ -49,29 +49,48 @@ serve(async (req) => {
     const eurusdRate = eurusd?.value ?? 1.08;
     const yieldSpread = Math.round((t10y - t2y) * 100); // in bps
 
-    // Step 2: Use AI to interpret this real data into market expectations
-    const prompt = `Today is ${today}. Using the REAL economic data below, provide accurate market expectations and rate probabilities.
+    // 2026 meeting schedule (source of truth)
+    const fomcDates = ['2026-01-29','2026-03-19','2026-04-30','2026-06-11','2026-07-30','2026-09-17','2026-11-05','2026-12-17'];
+    const ecbDates = ['2026-02-05','2026-03-19','2026-04-30','2026-06-11','2026-07-23','2026-09-10','2026-10-29','2026-12-17'];
 
-REAL DATA FROM FRED (use these exact values):
+    // Get next 3 upcoming meetings from today
+    const nextFomc = fomcDates.filter(d => d >= today).slice(0, 3);
+    const nextEcb = ecbDates.filter(d => d >= today).slice(0, 3);
+
+    // Fed Funds futures: price = 100 - implied rate
+    const ffPrice = Math.round((100 - ffRate) * 1000) / 1000;
+    // Euribor futures: price = 100 - implied 3M Euribor (typically deposit rate + ~0.05)
+    const euriborImplied = ecbDep + 0.05;
+    const erPrice = Math.round((100 - euriborImplied) * 1000) / 1000;
+
+    // Step 2: Use AI to estimate probabilities based on real data
+    const fomcList = nextFomc.map((d, i) => `${i+1}. FOMC ${d} — id: "ZQ_FOMC_${d.replace(/-/g,'')}"`).join('\n');
+    const ecbList = nextEcb.map((d, i) => `${i+1}. ECB ${d} — id: "ER_ECB_${d.replace(/-/g,'')}"`).join('\n');
+
+    const prompt = `Today is ${today}. Using REAL economic data, estimate market-implied rate probabilities for upcoming central bank meetings.
+
+REAL DATA FROM FRED:
 - Effective Federal Funds Rate: ${ffRate}% (as of ${fedFunds?.date || 'latest'})
-- US 10-Year Treasury Yield: ${t10y}% (as of ${dgs10?.date || 'latest'})
-- US 2-Year Treasury Yield: ${t2y}% (as of ${dgs2?.date || 'latest'})
+- Fed Funds futures implied price: ${ffPrice} (= 100 - ${ffRate})
 - ECB Deposit Facility Rate: ${ecbDep}% (as of ${ecbRate?.date || 'latest'})
-- EUR/USD Exchange Rate: ${eurusdRate} (as of ${eurusd?.date || 'latest'})
-- US 10Y-2Y Yield Spread: ${yieldSpread} bps
+- Euribor futures implied price: ${erPrice} (= 100 - ${euriborImplied})
+- US 10Y Yield: ${t10y}%, US 2Y Yield: ${t2y}%, Spread: ${yieldSpread}bps
+- EUR/USD: ${eurusdRate}
 
-TASK: Based on this real data and current economic conditions, estimate:
+EXACT MEETING DATES (use these, do NOT invent dates):
+FED (FOMC):
+${fomcList}
 
-For RATE FUTURES (Fed Funds & Euribor):
-- Fed Funds futures price = 100 - implied rate. Current effective rate is ${ffRate}%, so price should be near ${(100 - ffRate).toFixed(3)}.
-- Euribor futures price = 100 - implied rate. ECB deposit rate is ${ecbDep}%, 3M Euribor typically trades ~${ecbDep}% to ${(ecbDep + 0.1).toFixed(1)}%.
-- For each upcoming meeting (next 2-3), estimate realistic market-implied probabilities of hike/hold/cut.
-- Also provide "ai_" (fundamental analysis) probabilities that may differ from market pricing.
-- Provide realistic 24h price changes (typically ±0.01 to ±0.05).
+ECB (Governing Council):
+${ecbList}
 
-For the next 2-3 FOMC meetings and next 2-3 ECB meetings, generate rate futures instruments.
+For each meeting, provide:
+- price: For Fed meetings, base price is ${ffPrice}. For meetings further out where a cut is priced, price rises slightly (each 25bp cut = +0.25 to price). For ECB, base is ${erPrice}.
+- change_24h: realistic daily change (±0.005 to ±0.03)
+- market probabilities (hike/hold/cut) — these represent what futures markets currently imply
+- ai probabilities — these represent the fundamental/model view which may differ
 
-IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument. Use the real rates above as anchors — do NOT deviate significantly from them.`;
+IMPORTANT: Use the exact meeting dates and IDs listed above. Probabilities must sum to 1.0.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
