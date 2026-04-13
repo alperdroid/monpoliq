@@ -151,11 +151,17 @@ CRITICAL — READ THE CONCLUSIONS, NOT JUST THE TOPIC:
 - A blog about tariffs is NOT automatically hawkish. Read what the authors CONCLUDE about the impact on the economy.
 - Focus on the POLICY IMPLICATIONS the authors draw, not just the subject matter.
 
+ENERGY / SUPPLY-SIDE RISKS:
+- "Risks to price stability" from energy, fossil fuels, or supply shocks = UPSIDE INFLATION RISK = HAWKISH (not dovish!)
+- Discussions warning that commodity dependence or supply disruptions could push prices higher are HAWKISH signals
+- Green transition advocacy WITHOUT direct monetary policy implications → score near 0.0 (structural topic)
+- Only score energy topics as dovish if the conclusion is that energy prices are FALLING or will ease inflation
+
 SCORING RULES:
 - Score from -1.0 (extremely dovish) to +1.0 (extremely hawkish), with 0.0 being neutral
 - DOVISH signals (-0.2 to -1.0): rate cuts, easing, weak growth concerns, disinflation, labor softening, dissent favoring cuts, downside risks, weaker activity, falling inflation forecasts
-- HAWKISH signals (+0.2 to +1.0): rate hikes, tightening, inflation persistence, strong economy, labor tightness, upside risks to inflation
-- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate, banking supervision, counterfeit notes, appointments, structural reforms)
+- HAWKISH signals (+0.2 to +1.0): rate hikes, tightening, inflation persistence, strong economy, labor tightness, upside risks to inflation, supply-side threats to price stability
+- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate structural reform, banking supervision, counterfeit notes, appointments, green transition without policy implications)
 - Government deficit/fiscal policy discussions: score near 0.0 unless they explicitly discuss monetary policy responses
 - If the speech is NOT about monetary policy, score 0.0
 - Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
@@ -163,7 +169,6 @@ SCORING RULES:
 
 Respond with ONLY a JSON object (no markdown):
 {"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>"}`;
-
 interface AIScore {
   score: number;
   label: string;
