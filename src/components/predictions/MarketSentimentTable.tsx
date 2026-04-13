@@ -265,7 +265,7 @@ export function MarketSentimentTable() {
         {rateFutures.length > 0 ? <RateFuturesTable items={rateFutures} /> : <EmptyTab />}
 
         <div className="mt-3 text-[10px] text-muted-foreground">
-          AI-generated daily market data • Updates every 30 minutes • {rateFutures.length} instruments tracked
+          Daily market data • Updates every 30 minutes • {rateFutures.length} instruments tracked
         </div>
       </CardContent>
     </Card>
