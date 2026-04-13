@@ -19,12 +19,11 @@ import Committee from "./pages/Committee";
 import TopicHeatmaps from "./pages/TopicHeatmaps";
 import PolicyTaxonomy from "./pages/PolicyTaxonomy";
 import PolicyRadar from "./pages/PolicyRadar";
-import SettingsPage from "./pages/SettingsPage";
 import Alerts from "./pages/Alerts";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import NotFound from "./pages/NotFound";
-import SettingsPage from "./pages/SettingsPage";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -54,7 +53,6 @@ const App = () => (
                   <Route path="/taxonomy" element={<PolicyTaxonomy />} />
                   <Route path="/radar" element={<PolicyRadar />} />
                   <Route path="/alerts" element={<Alerts />} />
-                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </AppLayout>
