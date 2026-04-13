@@ -80,7 +80,7 @@ IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument. Use the re
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: "You are a financial markets analyst. Use the provided FRED data as ground truth. Generate realistic market expectations based on these actual rates." },
           { role: "user", content: prompt }
