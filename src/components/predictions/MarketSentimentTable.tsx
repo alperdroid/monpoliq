@@ -194,12 +194,15 @@ function CurrencyTable({ items }: { items: MarketInstrument[] }) {
 }
 
 export function MarketSentimentTable() {
-  const { data: marketData = [], isLoading, error } = useQuery({
+  const { data: marketResponse, isLoading, error } = useQuery({
     queryKey: ['market-sentiment'],
     queryFn: fetchMarketData,
     staleTime: 1000 * 60 * 30,
     retry: 2,
   });
+
+  const marketData = marketResponse?.instruments || [];
+  const sources = marketResponse?.sources;
 
   const rateFutures = marketData.filter(i => i.category === 'rate_futures');
   const bonds = marketData.filter(i => i.category === 'bonds');
@@ -265,7 +268,8 @@ export function MarketSentimentTable() {
         {rateFutures.length > 0 ? <RateFuturesTable items={rateFutures} /> : <EmptyTab />}
 
         <div className="mt-3 text-[10px] text-muted-foreground">
-          Daily market data • Updates every 30 minutes • {rateFutures.length} instruments tracked
+          Daily market data sourced from FRED • {rateFutures.length} instruments tracked
+          {sources?.fed_funds_rate?.date && ` • Rates as of ${sources.fed_funds_rate.date}`}
         </div>
       </CardContent>
     </Card>

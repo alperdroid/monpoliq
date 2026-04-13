@@ -29,7 +29,8 @@ export function DivergenceAlertWidget() {
 
   if (error || !marketData) return null;
 
-  const divergences = marketData.filter(item => {
+  const instruments = marketData.instruments || [];
+  const divergences = instruments.filter(item => {
     if (item.category === 'rate_futures' && item.market_hike_prob != null && item.ai_hike_prob != null) {
       const diff = Math.abs(item.market_hike_prob - item.ai_hike_prob) + 
                    Math.abs((item.market_hold_prob||0) - (item.ai_hold_prob||0)) + 
