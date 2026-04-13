@@ -268,8 +268,7 @@ export function MarketSentimentTable() {
         {rateFutures.length > 0 ? <RateFuturesTable items={rateFutures} /> : <EmptyTab />}
 
         <div className="mt-3 text-[10px] text-muted-foreground">
-          Daily market data sourced from FRED • {rateFutures.length} instruments tracked
-          {sources?.fed_funds_rate?.date && ` • Rates as of ${sources.fed_funds_rate.date}`}
+          Interest rate futures pricing • {rateFutures.length} contracts tracked
         </div>
       </CardContent>
     </Card>
