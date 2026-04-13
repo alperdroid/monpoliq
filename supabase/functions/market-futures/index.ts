@@ -143,12 +143,15 @@ IMPORTANT: Probabilities must sum to exactly 1.0 for each instrument. Use the re
     }
 
     const data = await response.json();
+    console.log('AI response structure:', JSON.stringify(data.choices?.[0]?.message).slice(0, 500));
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall || toolCall.function?.name !== "provide_market_data") {
+      console.error('No valid tool call found. Message:', JSON.stringify(data.choices?.[0]?.message).slice(0, 1000));
       throw new Error("Invalid response format");
     }
 
     const result = JSON.parse(toolCall.function.arguments);
+    console.log('Parsed instruments count:', result.instruments?.length || 0);
 
     // Post-process: ensure probabilities sum to 1.0 and prices are anchored to real rates
     const instruments = (result.instruments || []).map((inst: any) => {
