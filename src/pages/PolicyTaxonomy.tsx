@@ -17,6 +17,7 @@ const POLICY_SOURCES = [
   'ecb press conference', 'ecb monetary policy statement', 'ecb monetary policy accounts',
   'fed press conference', 'fed minutes', 'fed statement',
   'press conf', 'minutes', 'statement', 'monetary policy', 'fed monetary',
+  'meeting of', 'accounts of', 'account —',
   'summary of economic projections',
 ];
 
