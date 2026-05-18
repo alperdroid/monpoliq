@@ -11,8 +11,11 @@ import { toast } from 'sonner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 
-/** All past meetings with actual data, sorted oldest → newest */
-const MEETINGS = CENTRAL_BANK_MEETINGS;
+/** Only meetings that have actually occurred (date strictly in the past). Heatmaps
+ *  are built from the official policy statement released after the meeting, so
+ *  future / same-day meetings must not appear. */
+const todayISO = new Date().toISOString().slice(0, 10);
+const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date < todayISO);
 
 const POLICY_SOURCES = [
   'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',
