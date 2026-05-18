@@ -4,12 +4,7 @@ import { FileDown, Printer, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import type { SentimentItem } from '@/lib/api/sentiment';
-
-/** Meetings for prep pack generation */
-const UPCOMING_MEETINGS = [
-  { bank: 'FED', date: '2026-04-30', label: 'FOMC Meeting — April 30, 2026' },
-  { bank: 'ECB', date: '2026-04-30', label: 'ECB GC Meeting — April 30, 2026' },
-];
+import { CENTRAL_BANK_MEETINGS, getUpcomingMeetings } from '@/data/meeting-schedule';
 
 interface MeetingPrepPackProps {
   allItems: SentimentItem[];
@@ -19,12 +14,14 @@ function computePackData(items: SentimentItem[], bank: string, meetingDate: stri
   const comms = items.filter(i => i.bank === bank && !i.is_statistical);
   const stats = items.filter(i => i.bank === bank && i.is_statistical);
 
-  // Items since last meeting (approx 6 weeks back)
-  const since = new Date(meetingDate);
-  since.setDate(since.getDate() - 45);
-  const sinceStr = since.toISOString().split('T')[0];
-  const recentComms = comms.filter(i => i.item_date >= sinceStr && i.item_date <= meetingDate);
-  const recentStats = stats.filter(i => i.item_date >= sinceStr && i.item_date <= meetingDate);
+  const previousMeeting = CENTRAL_BANK_MEETINGS
+    .filter(m => m.bank === bank && m.date < meetingDate)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+  const sinceStr = previousMeeting?.date || '2000-01-01';
+  const todayStr = new Date().toISOString().split('T')[0];
+  const endDate = todayStr < meetingDate ? todayStr : meetingDate;
+  const recentComms = comms.filter(i => i.item_date > sinceStr && i.item_date <= endDate);
+  const recentStats = stats.filter(i => i.item_date > sinceStr && i.item_date <= endDate);
 
   // Average tone
   const scored = recentComms.filter(i => Math.abs(i.net_score) > 0.001);
@@ -57,12 +54,19 @@ function computePackData(items: SentimentItem[], bank: string, meetingDate: stri
 export function MeetingPrepPack({ allItems }: MeetingPrepPackProps) {
   const printRef = useRef<HTMLDivElement>(null);
 
-  const packs = useMemo(() =>
-    UPCOMING_MEETINGS.map(m => ({
-      ...m,
-      data: computePackData(allItems, m.bank, m.date),
-    })),
-  [allItems]);
+  const packs = useMemo(() => {
+    const nextByBank = getUpcomingMeetings().reduce((acc, meeting) => {
+      if (!acc[meeting.bank]) acc[meeting.bank] = meeting;
+      return acc;
+    }, {} as Record<string, ReturnType<typeof getUpcomingMeetings>[number]>);
+
+    return Object.values(nextByBank)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.bank.localeCompare(b.bank))
+      .map(m => ({
+        ...m,
+        data: computePackData(allItems, m.bank, m.date),
+      }));
+  }, [allItems]);
 
   const handlePrint = () => {
     if (printRef.current) {
@@ -102,7 +106,7 @@ export function MeetingPrepPack({ allItems }: MeetingPrepPackProps) {
 
       <div ref={printRef}>
         {packs.map(pack => (
-          <div key={pack.bank} className="rounded-lg border border-border bg-card p-5 space-y-4 mb-4 break-inside-avoid">
+          <div key={pack.id} className="rounded-lg border border-border bg-card p-5 space-y-4 mb-4 break-inside-avoid">
             <div className="flex items-center gap-2">
               <h1 className="text-sm font-bold">{pack.label}</h1>
               <SignalBadge label={pack.bank} variant="info" />

@@ -9,28 +9,10 @@ import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { RefreshCw, Loader2, FileText, Grid3X3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 
 /** All past meetings with actual data, sorted oldest → newest */
-const PAST_MEETINGS = [
-  { id: 'ecb-2025-03-06', bank: 'ECB', date: '2025-03-06', label: 'ECB Mar 2025 — Cut to 2.50%' },
-  { id: 'fed-2025-03-19', bank: 'FED', date: '2025-03-19', label: 'FOMC Mar 2025 — Hold at 4.25–4.50%' },
-  { id: 'ecb-2025-04-17', bank: 'ECB', date: '2025-04-17', label: 'ECB Apr 2025 — Cut to 2.25%' },
-  { id: 'fed-2025-05-07', bank: 'FED', date: '2025-05-07', label: 'FOMC May 2025 — Hold at 4.25–4.50%' },
-  { id: 'ecb-2025-06-05', bank: 'ECB', date: '2025-06-05', label: 'ECB Jun 2025 — Cut to 2.00%' },
-  { id: 'fed-2025-06-18', bank: 'FED', date: '2025-06-18', label: 'FOMC Jun 2025 — Cut to 4.00–4.25%' },
-  { id: 'ecb-2025-07-24', bank: 'ECB', date: '2025-07-24', label: 'ECB Jul 2025 — Hold at 2.00%' },
-  { id: 'fed-2025-07-30', bank: 'FED', date: '2025-07-30', label: 'FOMC Jul 2025 — Cut to 3.75–4.00%' },
-  { id: 'ecb-2025-09-11', bank: 'ECB', date: '2025-09-11', label: 'ECB Sep 2025 — Hold at 2.00%' },
-  { id: 'fed-2025-09-17', bank: 'FED', date: '2025-09-17', label: 'FOMC Sep 2025 — Cut to 3.50–3.75%' },
-  { id: 'fed-2025-10-29', bank: 'FED', date: '2025-10-29', label: 'FOMC Oct 2025 — Hold at 3.50–3.75%' },
-  { id: 'ecb-2025-10-30', bank: 'ECB', date: '2025-10-30', label: 'ECB Oct 2025 — Hold at 2.00%' },
-  { id: 'fed-2025-12-10', bank: 'FED', date: '2025-12-10', label: 'FOMC Dec 2025 — Cut to 3.25–3.50%' },
-  { id: 'ecb-2025-12-18', bank: 'ECB', date: '2025-12-18', label: 'ECB Dec 2025 — Hold at 2.00%' },
-  { id: 'fed-2026-01-29', bank: 'FED', date: '2026-01-29', label: 'FOMC Jan 2026 — Hold at 3.25–3.50%' },
-  { id: 'ecb-2026-02-05', bank: 'ECB', date: '2026-02-05', label: 'ECB Feb 2026 — Hold at 2.00%' },
-  { id: 'fed-2026-03-19', bank: 'FED', date: '2026-03-19', label: 'FOMC Mar 2026 — Hold at 3.50–3.75%' },
-  { id: 'ecb-2026-03-19', bank: 'ECB', date: '2026-03-19', label: 'ECB Mar 2026' },
-].sort((a, b) => a.date.localeCompare(b.date));
+const MEETINGS = CENTRAL_BANK_MEETINGS;
 
 const POLICY_SOURCES = [
   'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',
@@ -59,13 +41,13 @@ const TopicHeatmaps = () => {
 
   // Chronological order for display (oldest → newest)
   const filteredMeetings = useMemo(() => {
-    if (bankFilter === 'ALL') return PAST_MEETINGS;
-    return PAST_MEETINGS.filter(m => m.bank === bankFilter);
+    if (bankFilter === 'ALL') return MEETINGS;
+    return MEETINGS.filter(m => m.bank === bankFilter);
   }, [bankFilter]);
 
   const meetingTopicData = useMemo(() => {
     return filteredMeetings.map(meeting => {
-      const sameBankAll = PAST_MEETINGS
+      const sameBankAll = MEETINGS
         .filter(m => m.bank === meeting.bank)
         .sort((a, b) => a.date.localeCompare(b.date));
       const myIdx = sameBankAll.findIndex(m => m.id === meeting.id);
