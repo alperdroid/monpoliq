@@ -12,83 +12,15 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { MeetingPrepPack } from '@/components/meetings/MeetingPrepPack';
 import { MinutesDiffCloud } from '@/components/meetings/MinutesDiffCloud';
+import { CENTRAL_BANK_MEETINGS, isMeetingPast } from '@/data/meeting-schedule';
 
 /** Real central bank meeting dates with verified decisions */
-const REAL_MEETINGS = [
-  {
-    meeting_id: 'ecb-2025-10-30',
-    bank: 'ECB' as const,
-    meeting_date: '2025-10-30',
-    decision: 'Hold — Deposit Facility Rate at 2.00%',
-  },
-  {
-    meeting_id: 'fed-2025-10-29',
-    bank: 'FED' as const,
-    meeting_date: '2025-10-29',
-    decision: 'Cut 25bps — Fed Funds Rate to 3.75–4.00%',
-  },
-  {
-    meeting_id: 'ecb-2025-12-18',
-    bank: 'ECB' as const,
-    meeting_date: '2025-12-18',
-    decision: 'Hold — Deposit Facility Rate at 2.00%',
-  },
-  {
-    meeting_id: 'fed-2025-12-10',
-    bank: 'FED' as const,
-    meeting_date: '2025-12-10',
-    decision: 'Cut 25bps — Fed Funds Rate to 3.50–3.75%',
-  },
-  {
-    meeting_id: 'ecb-2026-02-05',
-    bank: 'ECB' as const,
-    meeting_date: '2026-02-05',
-    decision: 'Hold — Deposit Facility Rate at 2.00%',
-  },
-  {
-    meeting_id: 'fed-2026-01-29',
-    bank: 'FED' as const,
-    meeting_date: '2026-01-29',
-    decision: 'Hold — Fed Funds Rate at 3.50–3.75%',
-  },
-  {
-    meeting_id: 'ecb-2026-03-19',
-    bank: 'ECB' as const,
-    meeting_date: '2026-03-19',
-    decision: 'Hold — Deposit Facility Rate at 2.00%',
-  },
-  {
-    meeting_id: 'fed-2026-03-19',
-    bank: 'FED' as const,
-    meeting_date: '2026-03-19',
-    decision: 'Hold — Fed Funds Rate at 3.50–3.75%',
-  },
-  // Upcoming meetings
-  {
-    meeting_id: 'ecb-2026-04-30',
-    bank: 'ECB' as const,
-    meeting_date: '2026-04-30',
-    decision: null,
-  },
-  {
-    meeting_id: 'fed-2026-04-30',
-    bank: 'FED' as const,
-    meeting_date: '2026-04-30',
-    decision: null,
-  },
-  {
-    meeting_id: 'ecb-2026-06-11',
-    bank: 'ECB' as const,
-    meeting_date: '2026-06-11',
-    decision: null,
-  },
-  {
-    meeting_id: 'fed-2026-06-11',
-    bank: 'FED' as const,
-    meeting_date: '2026-06-11',
-    decision: null,
-  },
-];
+const REAL_MEETINGS = CENTRAL_BANK_MEETINGS.map(meeting => ({
+  meeting_id: meeting.id,
+  bank: meeting.bank,
+  meeting_date: meeting.date,
+  decision: meeting.decision,
+}));
 
 /** Link real sentiment items to a meeting as pre/post communications */
 function linkItemsToMeeting(
@@ -121,7 +53,7 @@ function buildToneEvolution(items: SentimentItem[], meetingDate: string) {
   const startStr = startTs.toISOString().split('T')[0];
 
   const relevant = items
-    .filter(i => i.item_date >= startStr && i.item_date <= meetingDate && Math.abs(i.net_score) > 0.001)
+    .filter(i => !i.is_statistical && i.item_date >= startStr && i.item_date <= meetingDate && (i.label || i.reasons?.length || Number.isFinite(i.net_score)))
     .sort((a, b) => a.item_date.localeCompare(b.item_date));
 
   if (relevant.length === 0) return [];
@@ -172,8 +104,7 @@ const MeetingCycles = () => {
       );
 
       // Auto-switch: meeting is past if decision is set OR 5+ days have elapsed since meeting date
-      const daysSinceMeeting = (Date.now() - new Date(meeting.meeting_date + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24);
-      const isPast = meeting.decision !== null || daysSinceMeeting >= 5;
+      const isPast = isMeetingPast({ id: meeting.meeting_id, bank: meeting.bank, date: meeting.meeting_date, label: meeting.meeting_id, decision: meeting.decision });
       const allComms = [...pre, ...post].sort((a, b) => a.item_date.localeCompare(b.item_date));
 
       return {
