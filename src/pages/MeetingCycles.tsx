@@ -120,7 +120,9 @@ const MeetingCycles = () => {
   }, [allItems]);
 
   const pastMeetings = meetings.filter(m => m.isPast);
-  const upcomingMeetings = meetings.filter(m => !m.isPast);
+  const upcomingMeetings = meetings
+    .filter(m => !m.isPast)
+    .sort((a, b) => a.meeting_date.localeCompare(b.meeting_date) || a.bank.localeCompare(b.bank));
 
   const runTopicAnalysis = async () => {
     setTagging(true);
