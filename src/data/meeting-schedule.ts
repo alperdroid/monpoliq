@@ -8,7 +8,7 @@ export interface CentralBankMeeting {
   decision: string | null;
 }
 
-export const CENTRAL_BANK_MEETINGS: CentralBankMeeting[] = [
+export const CENTRAL_BANK_MEETINGS = ([
   { id: 'ecb-2025-03-06', bank: 'ECB', date: '2025-03-06', label: 'ECB Mar 2025 — Cut to 2.50%', decision: 'Cut — Deposit Facility Rate to 2.50%' },
   { id: 'fed-2025-03-19', bank: 'FED', date: '2025-03-19', label: 'FOMC Mar 2025 — Hold at 4.25–4.50%', decision: 'Hold — Fed Funds Rate at 4.25–4.50%' },
   { id: 'ecb-2025-04-17', bank: 'ECB', date: '2025-04-17', label: 'ECB Apr 2025 — Cut to 2.25%', decision: 'Cut — Deposit Facility Rate to 2.25%' },
@@ -39,7 +39,7 @@ export const CENTRAL_BANK_MEETINGS: CentralBankMeeting[] = [
   { id: 'fed-2026-11-05', bank: 'FED', date: '2026-11-05', label: 'FOMC Nov 2026', decision: null },
   { id: 'fed-2026-12-17', bank: 'FED', date: '2026-12-17', label: 'FOMC Dec 2026', decision: null },
   { id: 'ecb-2026-12-17', bank: 'ECB', date: '2026-12-17', label: 'ECB Dec 2026', decision: null },
-].sort((a, b) => a.date.localeCompare(b.date) || a.bank.localeCompare(b.bank));
+] satisfies CentralBankMeeting[]).sort((a, b) => a.date.localeCompare(b.date) || a.bank.localeCompare(b.bank));
 
 export function isMeetingPast(meeting: CentralBankMeeting, now = new Date()): boolean {
   const daysSinceMeeting = (now.getTime() - new Date(`${meeting.date}T12:00:00`).getTime()) / (1000 * 60 * 60 * 24);
