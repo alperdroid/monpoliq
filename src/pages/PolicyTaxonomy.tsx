@@ -9,7 +9,8 @@ import { RefreshCw, Loader2, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 
-const MEETINGS = CENTRAL_BANK_MEETINGS;
+const todayISO = new Date().toISOString().slice(0, 10);
+const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date < todayISO);
 
 const POLICY_SOURCES = [
   'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',
