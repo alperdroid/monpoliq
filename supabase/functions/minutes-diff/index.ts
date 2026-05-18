@@ -17,24 +17,6 @@ serve(async (req) => {
 
     const { bank = "FED" } = await req.json().catch(() => ({ bank: "FED" }));
 
-    // Check cache
-    const cacheType = `minutes-diff-${bank}`;
-    const { data: cached } = await sb
-      .from("analysis_cache")
-      .select("*")
-      .eq("analysis_type", cacheType)
-      .eq("bank", bank)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (cached) {
-      const cacheAge = Date.now() - new Date(cached.created_at).getTime();
-      if (cacheAge < 24 * 60 * 60 * 1000) {
-        return new Response(JSON.stringify(cached.result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
-
     // Find minutes/accounts items
     const titlePattern = bank === "FED" ? "%Minutes%" : "%Account%";
     const { data: minutesItems } = await sb
@@ -53,6 +35,26 @@ serve(async (req) => {
 
     const current = minutesItems[0];
     const previous = minutesItems[1];
+    const cacheType = `minutes-diff-${bank}`;
+    const dataHash = `${bank}-${current.item_date}-${previous.item_date}`;
+
+    // Use cache only when it matches the latest available minutes/accounts pair.
+    const { data: cached } = await sb
+      .from("analysis_cache")
+      .select("*")
+      .eq("analysis_type", cacheType)
+      .eq("bank", bank)
+      .eq("data_hash", dataHash)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (cached) {
+      const cacheAge = Date.now() - new Date(cached.created_at).getTime();
+      if (cacheAge < 24 * 60 * 60 * 1000) {
+        return new Response(JSON.stringify(cached.result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     // Get all comms around each meeting for context
     const { data: contextItems } = await sb
@@ -167,7 +169,6 @@ Return a JSON object with this exact structure using the tool provided.`;
     };
 
     // Cache
-    const dataHash = `${bank}-${current.item_date}-${previous.item_date}`;
     await sb.from("analysis_cache").upsert({
       analysis_type: cacheType,
       bank,
