@@ -47,7 +47,6 @@ const TopicHeatmaps = () => {
 
   const meetingTopicData = useMemo(() => {
     return filteredMeetings.map(meeting => {
-      const sameBankAll = PAST_MEETINGS
       const sameBankAll = MEETINGS
         .filter(m => m.bank === meeting.bank)
         .sort((a, b) => a.date.localeCompare(b.date));
