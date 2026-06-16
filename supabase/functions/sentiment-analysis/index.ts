@@ -1573,14 +1573,8 @@ Deno.serve(async (req) => {
       }
 
       // Persist new items, then aggregate from FULL DB
-      // Deduplicate items by (bank, source, title, item_date) before persist
-      const dedupKey = (it: It) => `${it.bank}|${it.source}|${it.title}|${it.item_date}`;
-      const dedupSet = new Set<string>();
-      const dedupEi: It[] = [];
-      for (const it of ei) {
-        const k = dedupKey(it);
-        if (!dedupSet.has(k)) { dedupSet.add(k); dedupEi.push(it); }
-      }
+      // Deduplicate items by canonical URL / normalized title before persist
+      const dedupEi = dedupItems(ei);
       if (dedupEi.length < ei.length) console.log('ECB: deduped ' + ei.length + ' -> ' + dedupEi.length + ' items');
       if (dedupEi.length) {
         console.log('ECB: persisting ' + dedupEi.length + ' items to DB');
