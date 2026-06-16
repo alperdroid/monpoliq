@@ -61,29 +61,51 @@ serve(async (req) => {
     const scores = scoresRes.data || [];
 
     // ── 2. Compute data hash for caching ──
-    // Hash = count of items + latest item date + scores + geopolitical date suffix for daily updates
+    // Hash = count of items + latest item date + scores + DAILY suffix → guarantees a fresh AI run each calendar day
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
-    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}:v3`;
-    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
+    const todayISO = new Date().toISOString().split("T")[0];
+    const dailySuffix = `daily:${todayISO}:v5`;
+    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${dailySuffix}`;
 
-    // Check cache: return if same data hash AND less than 12h old (reduced for geopolitical events)
+    // Check cache: return ONLY if same data hash AND less than 6h old (daily refresh + intra-day shocks)
     const { data: cached } = await sb.from("prediction_cache")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (cached && cached.length > 0) {
+    const force = (() => { try { return new URL(req.url).searchParams.get("force") === "1"; } catch { return false; } })();
+    if (!force && cached && cached.length > 0) {
       const cacheAge = Date.now() - new Date(cached[0].created_at).getTime();
-      const TWELVE_HOURS = 12 * 60 * 60 * 1000; // Reduced from 24h for faster geopolitical updates
-      if (cached[0].data_hash === dataHash && cacheAge < TWELVE_HOURS) {
-        console.log("Returning cached prediction (same data, < 12h old)");
+      const SIX_HOURS = 6 * 60 * 60 * 1000;
+      if (cached[0].data_hash === dataHash && cacheAge < SIX_HOURS) {
+        console.log("Returning cached prediction (same data, < 6h old)");
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
+
+    // ── 2b. Pull live market-futures snapshot to factor into the prompt ──
+    let marketSnapshot = "";
+    try {
+      const mfUrl = `${supabaseUrl}/functions/v1/market-futures`;
+      const mfResp = await fetch(mfUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${supabaseKey}`, apikey: supabaseKey, "Content-Type": "application/json" },
+      });
+      if (mfResp.ok) {
+        const mfData = await mfResp.json();
+        const instruments = Array.isArray(mfData) ? mfData : (mfData?.instruments || []);
+        marketSnapshot = instruments.slice(0, 12).map((m: any) =>
+          `- ${m.name} (${m.bank}, ref ${m.reference_date}): px=${m.price}${m.yield_value != null ? `, yield=${m.yield_value}` : ""}${m.market_hike_prob != null ? `, mkt hike=${m.market_hike_prob}/hold=${m.market_hold_prob}/cut=${m.market_cut_prob}` : ""}${m.direction ? `, dir=${m.direction}` : ""}`
+        ).join("\n");
+      }
+    } catch (e) {
+      console.log("market-futures fetch failed:", e instanceof Error ? e.message : e);
+    }
+
 
     // Separate by bank
     const fedComms = comms.filter((i: any) => i.bank === "FED");
