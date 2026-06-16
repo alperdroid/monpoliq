@@ -243,6 +243,9 @@ ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${
 
 ${formatMinutesDiff(ecbMinutesDiff, "ECB")}
 
+## LIVE MARKET FUTURES SNAPSHOT (factor this into your reasoning)
+${marketSnapshot || "(market snapshot unavailable)"}
+
 ## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
 Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
 ECB 30-day sentiment: ${avg(ecbComms) ?? "N/A"}
