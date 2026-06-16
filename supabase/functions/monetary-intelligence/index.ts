@@ -194,13 +194,15 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
   }
 }
 
-Probabilities for each bank MUST sum to 1.0. Base your analysis on:
-1. Communication sentiment scores (negative = dovish, positive = hawkish)
-2. Statistical/economic data trends
-3. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
-4. Market expectations and positioning — dovish tone ≠ imminent cut
+Probabilities for each bank MUST sum to 1.0. Base your analysis on, in this priority order:
+1. Communication sentiment scores from this dataset (negative = dovish, positive = hawkish) — PRIMARY signal
+2. Statistical/economic data trends from this dataset — PRIMARY signal
+3. Live market futures snapshot (pricing of next decision, EUR/USD, US 10Y) — calibrate probabilities against market
+4. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
 5. Geopolitical risk assessment
-6. Minutes language shift analysis — newly added/removed phrases signal evolving policy priorities`;
+6. Minutes language shift analysis — newly added/removed phrases signal evolving policy priorities
+
+Re-run every calendar day with the latest data; never repeat yesterday's reasoning verbatim.`;
 
     // ── Minutes Diff context ──
     const fedMinutesDiff = minutesDiffFedRes.data?.result as any;
