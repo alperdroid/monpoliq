@@ -61,29 +61,51 @@ serve(async (req) => {
     const scores = scoresRes.data || [];
 
     // ── 2. Compute data hash for caching ──
-    // Hash = count of items + latest item date + scores + geopolitical date suffix for daily updates
+    // Hash = count of items + latest item date + scores + DAILY suffix → guarantees a fresh AI run each calendar day
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
-    const geoPoliticalSuffix = `geo:${new Date().toISOString().split("T")[0]}:v3`;
-    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${geoPoliticalSuffix}`;
+    const todayISO = new Date().toISOString().split("T")[0];
+    const dailySuffix = `daily:${todayISO}:v5`;
+    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${dailySuffix}`;
 
-    // Check cache: return if same data hash AND less than 12h old (reduced for geopolitical events)
+    // Check cache: return ONLY if same data hash AND less than 6h old (daily refresh + intra-day shocks)
     const { data: cached } = await sb.from("prediction_cache")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (cached && cached.length > 0) {
+    const force = (() => { try { return new URL(req.url).searchParams.get("force") === "1"; } catch { return false; } })();
+    if (!force && cached && cached.length > 0) {
       const cacheAge = Date.now() - new Date(cached[0].created_at).getTime();
-      const TWELVE_HOURS = 12 * 60 * 60 * 1000; // Reduced from 24h for faster geopolitical updates
-      if (cached[0].data_hash === dataHash && cacheAge < TWELVE_HOURS) {
-        console.log("Returning cached prediction (same data, < 12h old)");
+      const SIX_HOURS = 6 * 60 * 60 * 1000;
+      if (cached[0].data_hash === dataHash && cacheAge < SIX_HOURS) {
+        console.log("Returning cached prediction (same data, < 6h old)");
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
+
+    // ── 2b. Pull live market-futures snapshot to factor into the prompt ──
+    let marketSnapshot = "";
+    try {
+      const mfUrl = `${supabaseUrl}/functions/v1/market-futures`;
+      const mfResp = await fetch(mfUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${supabaseKey}`, apikey: supabaseKey, "Content-Type": "application/json" },
+      });
+      if (mfResp.ok) {
+        const mfData = await mfResp.json();
+        const instruments = Array.isArray(mfData) ? mfData : (mfData?.instruments || []);
+        marketSnapshot = instruments.slice(0, 12).map((m: any) =>
+          `- ${m.name} (${m.bank}, ref ${m.reference_date}): px=${m.price}${m.yield_value != null ? `, yield=${m.yield_value}` : ""}${m.market_hike_prob != null ? `, mkt hike=${m.market_hike_prob}/hold=${m.market_hold_prob}/cut=${m.market_cut_prob}` : ""}${m.direction ? `, dir=${m.direction}` : ""}`
+        ).join("\n");
+      }
+    } catch (e) {
+      console.log("market-futures fetch failed:", e instanceof Error ? e.message : e);
+    }
+
 
     // Separate by bank
     const fedComms = comms.filter((i: any) => i.bank === "FED");
@@ -172,13 +194,15 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation) mat
   }
 }
 
-Probabilities for each bank MUST sum to 1.0. Base your analysis on:
-1. Communication sentiment scores (negative = dovish, positive = hawkish)
-2. Statistical/economic data trends
-3. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
-4. Market expectations and positioning — dovish tone ≠ imminent cut
+Probabilities for each bank MUST sum to 1.0. Base your analysis on, in this priority order:
+1. Communication sentiment scores from this dataset (negative = dovish, positive = hawkish) — PRIMARY signal
+2. Statistical/economic data trends from this dataset — PRIMARY signal
+3. Live market futures snapshot (pricing of next decision, EUR/USD, US 10Y) — calibrate probabilities against market
+4. Sentiment score differential logic for EUR/USD (more dovish sentiment = currency weakens)
 5. Geopolitical risk assessment
-6. Minutes language shift analysis — newly added/removed phrases signal evolving policy priorities`;
+6. Minutes language shift analysis — newly added/removed phrases signal evolving policy priorities
+
+Re-run every calendar day with the latest data; never repeat yesterday's reasoning verbatim.`;
 
     // ── Minutes Diff context ──
     const fedMinutesDiff = minutesDiffFedRes.data?.result as any;
@@ -220,6 +244,9 @@ ${summarizeItems(ecbStats)}
 ${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
 
 ${formatMinutesDiff(ecbMinutesDiff, "ECB")}
+
+## LIVE MARKET FUTURES SNAPSHOT (factor this into your reasoning)
+${marketSnapshot || "(market snapshot unavailable)"}
 
 ## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
 Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
