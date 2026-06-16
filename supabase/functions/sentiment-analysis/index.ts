@@ -1415,10 +1415,12 @@ Deno.serve(async (req) => {
       }
 
       // Persist new items, then aggregate from FULL DB
-      if (fi.length) {
-        console.log('FED: persisting ' + fi.length + ' items to DB');
-        for (let i = 0; i < fi.length; i += 50) {
-          const batch = fi.slice(i, i + 50);
+      const fiDedup = dedupItems(fi);
+      if (fiDedup.length < fi.length) console.log('FED: deduped ' + fi.length + ' -> ' + fiDedup.length + ' items');
+      if (fiDedup.length) {
+        console.log('FED: persisting ' + fiDedup.length + ' items to DB');
+        for (let i = 0; i < fiDedup.length; i += 50) {
+          const batch = fiDedup.slice(i, i + 50);
           const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
             method: 'POST', headers: persistHd,
             body: JSON.stringify(batch.map(it => ({
