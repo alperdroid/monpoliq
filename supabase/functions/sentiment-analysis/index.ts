@@ -1652,8 +1652,9 @@ Deno.serve(async (req) => {
 
       // Persist new items, then aggregate from FULL DB
       // Deduplicate items by canonical URL / normalized title before persist
-      const dedupEi = dedupItems(ei);
+      let dedupEi = dedupItems(ei);
       if (dedupEi.length < ei.length) console.log('ECB: deduped ' + ei.length + ' -> ' + dedupEi.length + ' items');
+      dedupEi = await aiCrossLangDedup(dedupEi, aiKey);
       if (dedupEi.length) {
         console.log('ECB: persisting ' + dedupEi.length + ' items to DB');
         for (let i = 0; i < dedupEi.length; i += 50) {
