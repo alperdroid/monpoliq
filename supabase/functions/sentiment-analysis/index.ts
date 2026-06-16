@@ -30,8 +30,20 @@ function canonicalUrl(url: string): string {
   if (!url) return '';
   let u = url.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
   u = u.replace(/^www\./, '');
+  // Collapse duplicate slashes (e.g. ecb.europa.eu//press → ecb.europa.eu/press)
+  u = u.replace(/([^:])\/{2,}/g, '$1/');
+  // Strip query/fragment
+  u = u.split('?')[0].split('#')[0];
+  // Language path segments → __lang__
   u = u.replace(/\/(en|de|fr|es|it|nl|pt)\//g, '/__lang__/');
-  u = u.replace(/-\d{5,}$/, '');
+  // Bundesbank German↔English path equivalents
+  u = u
+    .replace(/\/presse\/reden\//g, '/press/speeches/')
+    .replace(/\/presse\/interviews\//g, '/press/interviews/')
+    .replace(/\/presse\/gastbeitraege\//g, '/press/contributions/')
+    .replace(/\/presse\//g, '/press/');
+  // Bundesbank trailing numeric IDs differ between DE/EN — strip them
+  u = u.replace(/-\d{4,}$/, '');
   u = u.replace(/\.(en|de|fr|es|it|nl|pt)\.(html?|pdf)$/i, '.$2');
   return u;
 }
@@ -39,14 +51,17 @@ function normalizedTitle(t: string): string {
   return htmlDecode(t).toLowerCase()
     .replace(/\(with q&a\)/g, '')
     .replace(/\s+\|\s+.*$/, '')
+    .replace(/—.*$/, '')        // drop em-dash subtitle (e.g. "— 06/11/2026")
+    .replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, '') // strip embedded dates
     .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 function dedupKey(it: { bank: string; source: string; item_date: string; title: string; url: string }): string {
   const urlKey = canonicalUrl(it.url);
-  if (urlKey) return `${it.bank}|${it.source}|${it.item_date}|U:${urlKey}`;
-  return `${it.bank}|${it.source}|${it.item_date}|T:${normalizedTitle(it.title)}`;
+  // KEY EXCLUDES source — same content may be tagged with different feed labels (e.g. "ECB Press" vs "ECB Press Conf")
+  if (urlKey) return `${it.bank}|${it.item_date}|U:${urlKey}`;
+  return `${it.bank}|${it.item_date}|T:${normalizedTitle(it.title)}`;
 }
 function preferItem(a: It, b: It): It {
   const aEn = /\/en\//.test(a.url || '') || /\.en\.(html?|pdf)/i.test(a.url || '');
@@ -55,6 +70,10 @@ function preferItem(a: It, b: It): It {
   const aQA = /q&amp;a|q&a|q & a/i.test(a.title);
   const bQA = /q&amp;a|q&a|q & a/i.test(b.title);
   if (aQA !== bQA) return aQA ? a : b;
+  // Prefer "Press" over "Press Conf" wrapper sources (cleaner canonical label)
+  const aConf = /press\s+conf/i.test(a.source || '');
+  const bConf = /press\s+conf/i.test(b.source || '');
+  if (aConf !== bConf) return aConf ? b : a;
   return (b.word_count || 0) > (a.word_count || 0) ? b : a;
 }
 function dedupItems(items: It[]): It[] {
@@ -66,6 +85,64 @@ function dedupItems(items: It[]): It[] {
     else map.set(k, preferItem(prev, it));
   }
   return Array.from(map.values());
+}
+
+// ── AI cross-language dedup (groups DE/EN twin speeches with different URLs/titles) ──
+async function aiCrossLangDedup(items: It[], apiKey: string): Promise<It[]> {
+  if (!apiKey || items.length < 2) return items;
+  const byDay = new Map<string, It[]>();
+  for (const it of items) {
+    const k = `${it.bank}|${it.item_date}`;
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k)!.push(it);
+  }
+  const removed = new Set<string>();
+  for (const [k, grp] of byDay) {
+    if (grp.length < 2) continue;
+    const hasDe = grp.some(g => /\/de\//.test(g.url) || /\.de\./.test(g.url));
+    const hasEn = grp.some(g => /\/en\//.test(g.url) || /\.en\./.test(g.url));
+    const hasMixedLabels = grp.some(g => /press\s+conf/i.test(g.source)) && grp.some(g => !/press\s+conf/i.test(g.source));
+    if (!hasDe && !hasEn && !hasMixedLabels) continue;
+    const numbered = grp.map((g, i) => `${i}: [${g.source}] ${htmlDecode(g.title)}`).join('\n');
+    try {
+      const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash-lite',
+          messages: [{
+            role: 'user',
+            content: `These are central-bank publications from the same day. Identify groups where multiple entries are the SAME underlying speech/press-release/event (e.g. German and English versions, or duplicate feed labels). Reply ONLY with a JSON array of arrays of indices, e.g. [[0,3],[2,5]]. Omit singletons. Translated titles count as the same item.\n\n${numbered}`
+          }],
+        }),
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const raw = (data.choices?.[0]?.message?.content || '').replace(/```json|```/g, '').trim();
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (!match) continue;
+      const groups: number[][] = JSON.parse(match[0]);
+      if (!Array.isArray(groups)) continue;
+      for (const g of groups) {
+        if (!Array.isArray(g) || g.length < 2) continue;
+        let best = grp[g[0]];
+        for (const idx of g.slice(1)) {
+          if (!grp[idx]) continue;
+          best = preferItem(best, grp[idx]);
+        }
+        for (const idx of g) {
+          if (grp[idx] && grp[idx] !== best) {
+            removed.add(`${grp[idx].bank}|${grp[idx].item_date}|${grp[idx].url}|${grp[idx].title}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`aiCrossLangDedup error for ${k}:`, e instanceof Error ? e.message : e);
+    }
+  }
+  if (!removed.size) return items;
+  console.log(`AI cross-lang dedup removed ${removed.size} items`);
+  return items.filter(it => !removed.has(`${it.bank}|${it.item_date}|${it.url}|${it.title}`));
 }
 
 // ── Statistical value scoring (continuous, [-1,1] scale) ──
