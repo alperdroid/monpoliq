@@ -19,6 +19,55 @@ interface It {
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
 }
 
+// ── Cross-language / variant-title dedup helpers ──
+function htmlDecode(s: string): string {
+  return (s || '')
+    .replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ');
+}
+function canonicalUrl(url: string): string {
+  if (!url) return '';
+  let u = url.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  u = u.replace(/^www\./, '');
+  u = u.replace(/\/(en|de|fr|es|it|nl|pt)\//g, '/__lang__/');
+  u = u.replace(/-\d{5,}$/, '');
+  u = u.replace(/\.(en|de|fr|es|it|nl|pt)\.(html?|pdf)$/i, '.$2');
+  return u;
+}
+function normalizedTitle(t: string): string {
+  return htmlDecode(t).toLowerCase()
+    .replace(/\(with q&a\)/g, '')
+    .replace(/\s+\|\s+.*$/, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function dedupKey(it: { bank: string; source: string; item_date: string; title: string; url: string }): string {
+  const urlKey = canonicalUrl(it.url);
+  if (urlKey) return `${it.bank}|${it.source}|${it.item_date}|U:${urlKey}`;
+  return `${it.bank}|${it.source}|${it.item_date}|T:${normalizedTitle(it.title)}`;
+}
+function preferItem(a: It, b: It): It {
+  const aEn = /\/en\//.test(a.url || '') || /\.en\.(html?|pdf)/i.test(a.url || '');
+  const bEn = /\/en\//.test(b.url || '') || /\.en\.(html?|pdf)/i.test(b.url || '');
+  if (aEn !== bEn) return aEn ? a : b;
+  const aQA = /q&amp;a|q&a|q & a/i.test(a.title);
+  const bQA = /q&amp;a|q&a|q & a/i.test(b.title);
+  if (aQA !== bQA) return aQA ? a : b;
+  return (b.word_count || 0) > (a.word_count || 0) ? b : a;
+}
+function dedupItems(items: It[]): It[] {
+  const map = new Map<string, It>();
+  for (const it of items) {
+    const k = dedupKey(it);
+    const prev = map.get(k);
+    if (!prev) map.set(k, it);
+    else map.set(k, preferItem(prev, it));
+  }
+  return Array.from(map.values());
+}
+
 // ── Statistical value scoring (continuous, [-1,1] scale) ──
 // Scores are normalized to [-1, 1] to match AI communication scores.
 // Weight is stored separately for aggregation weighting, NOT multiplied into the score.
