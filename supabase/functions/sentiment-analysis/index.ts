@@ -1492,8 +1492,9 @@ Deno.serve(async (req) => {
       }
 
       // Persist new items, then aggregate from FULL DB
-      const fiDedup = dedupItems(fi);
+      let fiDedup = dedupItems(fi);
       if (fiDedup.length < fi.length) console.log('FED: deduped ' + fi.length + ' -> ' + fiDedup.length + ' items');
+      fiDedup = await aiCrossLangDedup(fiDedup, aiKey);
       if (fiDedup.length) {
         console.log('FED: persisting ' + fiDedup.length + ' items to DB');
         for (let i = 0; i < fiDedup.length; i += 50) {
