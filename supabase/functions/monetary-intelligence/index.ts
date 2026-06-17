@@ -61,15 +61,18 @@ serve(async (req) => {
     const scores = scoresRes.data || [];
 
     // ── 2. Compute data hash for caching ──
-    // Hash = count of items + latest item date + scores + DAILY suffix → guarantees a fresh AI run each calendar day
+    // Hash includes recent (7d) item counts so fresh data invalidates cache quickly (less sticky)
+    const cutoff7d = new Date(); cutoff7d.setDate(cutoff7d.getDate() - 7);
+    const c7s = cutoff7d.toISOString().split("T")[0];
+    const recent7 = comms.filter((i: any) => i.item_date >= c7s).length + stats.filter((i: any) => i.item_date >= c7s).length;
     const latestCommDate = comms.length ? comms[0].item_date : "none";
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
     const todayISO = new Date().toISOString().split("T")[0];
-    const dailySuffix = `daily:${todayISO}:v5`;
-    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|${scoreHash}|${dailySuffix}`;
+    const dailySuffix = `daily:${todayISO}:v6`;
+    const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|r7:${recent7}|${scoreHash}|${dailySuffix}`;
 
-    // Check cache: return ONLY if same data hash AND less than 6h old (daily refresh + intra-day shocks)
+    // Check cache: return ONLY if same data hash AND less than 2h old (anti-stickiness)
     const { data: cached } = await sb.from("prediction_cache")
       .select("*")
       .order("created_at", { ascending: false })
@@ -78,9 +81,9 @@ serve(async (req) => {
     const force = (() => { try { return new URL(req.url).searchParams.get("force") === "1"; } catch { return false; } })();
     if (!force && cached && cached.length > 0) {
       const cacheAge = Date.now() - new Date(cached[0].created_at).getTime();
-      const SIX_HOURS = 6 * 60 * 60 * 1000;
-      if (cached[0].data_hash === dataHash && cacheAge < SIX_HOURS) {
-        console.log("Returning cached prediction (same data, < 6h old)");
+      const TWO_HOURS = 2 * 60 * 60 * 1000;
+      if (cached[0].data_hash === dataHash && cacheAge < TWO_HOURS) {
+        console.log("Returning cached prediction (same data, < 2h old)");
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -89,6 +92,7 @@ serve(async (req) => {
 
     // ── 2b. Pull live market-futures snapshot to factor into the prompt ──
     let marketSnapshot = "";
+    let marketInstruments: any[] = [];
     try {
       const mfUrl = `${supabaseUrl}/functions/v1/market-futures`;
       const mfResp = await fetch(mfUrl, {
@@ -97,14 +101,47 @@ serve(async (req) => {
       });
       if (mfResp.ok) {
         const mfData = await mfResp.json();
-        const instruments = Array.isArray(mfData) ? mfData : (mfData?.instruments || []);
-        marketSnapshot = instruments.slice(0, 12).map((m: any) =>
+        marketInstruments = Array.isArray(mfData) ? mfData : (mfData?.instruments || []);
+        marketSnapshot = marketInstruments.slice(0, 12).map((m: any) =>
           `- ${m.name} (${m.bank}, ref ${m.reference_date}): px=${m.price}${m.yield_value != null ? `, yield=${m.yield_value}` : ""}${m.market_hike_prob != null ? `, mkt hike=${m.market_hike_prob}/hold=${m.market_hold_prob}/cut=${m.market_cut_prob}` : ""}${m.direction ? `, dir=${m.direction}` : ""}`
         ).join("\n");
       }
     } catch (e) {
       console.log("market-futures fetch failed:", e instanceof Error ? e.message : e);
     }
+
+    // ── 2c. Days to next FED / ECB meeting (drives market-weight blending) ──
+    const MEETINGS_2026 = [
+      { bank: "FED", date: "2026-04-29" }, { bank: "ECB", date: "2026-04-30" },
+      { bank: "FED", date: "2026-06-11" }, { bank: "ECB", date: "2026-06-11" },
+      { bank: "ECB", date: "2026-07-23" }, { bank: "FED", date: "2026-07-30" },
+      { bank: "ECB", date: "2026-09-10" }, { bank: "FED", date: "2026-09-17" },
+      { bank: "ECB", date: "2026-10-29" }, { bank: "FED", date: "2026-11-05" },
+      { bank: "FED", date: "2026-12-17" }, { bank: "ECB", date: "2026-12-17" },
+    ];
+    const todayD = new Date(todayISO);
+    const daysTo = (bank: string) => {
+      const next = MEETINGS_2026.find(m => m.bank === bank && m.date >= todayISO);
+      if (!next) return 999;
+      return Math.round((new Date(next.date).getTime() - todayD.getTime()) / 86400000);
+    };
+    const fedDays = daysTo("FED");
+    const ecbDays = daysTo("ECB");
+    // Market weight ramps from 0.25 (>30d out) up to 0.75 (≤3d out)
+    const mktWeight = (d: number) => {
+      if (d >= 30) return 0.25;
+      if (d <= 3) return 0.75;
+      return Math.round((0.25 + (30 - d) / 27 * 0.50) * 100) / 100;
+    };
+    const fedMktW = mktWeight(fedDays);
+    const ecbMktW = mktWeight(ecbDays);
+    const marketProbs = (bank: string) => {
+      const inst = marketInstruments.find((m: any) => m.bank === bank && m.market_hike_prob != null);
+      if (!inst) return null;
+      return { hike: Number(inst.market_hike_prob) || 0, hold: Number(inst.market_hold_prob) || 0, cut: Number(inst.market_cut_prob) || 0 };
+    };
+    const fedMktProbs = marketProbs("FED");
+    const ecbMktProbs = marketProbs("ECB");
 
 
     // Separate by bank
