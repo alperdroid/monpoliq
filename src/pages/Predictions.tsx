@@ -12,6 +12,7 @@ import { MarketSentimentTable } from '@/components/predictions/MarketSentimentTa
 
 import {
   getCachedSentimentItems,
+  weightedAvgScore,
   type SentimentItem,
 } from '@/lib/api/sentiment';
 import {
@@ -26,9 +27,8 @@ function recentItems(items: SentimentItem[], days: number) {
 }
 
 function compute30dAvg(items: SentimentItem[]) {
-  const scored = items.filter(i => Math.abs(i.net_score) > 0.001);
-  if (!scored.length) return null;
-  return Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
+  const w = weightedAvgScore(items, { halfLifeDays: 21 });
+  return w ? w.avg : null;
 }
 
 const Predictions = () => {
