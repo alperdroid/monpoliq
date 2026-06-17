@@ -387,7 +387,24 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
           p.next_decision = "hold";
         }
       }
-      
+
+      // ── Blend with market-implied probabilities (weight scales with meeting distance) ──
+      const mkt = bank === "fed" ? fedMktProbs : ecbMktProbs;
+      const w = bank === "fed" ? fedMktW : ecbMktW;
+      if (mkt && (mkt.hike + mkt.hold + mkt.cut) > 0.5) {
+        p.hike_probability = (1 - w) * (p.hike_probability || 0) + w * mkt.hike;
+        p.hold_probability = (1 - w) * (p.hold_probability || 0) + w * mkt.hold;
+        p.cut_probability  = (1 - w) * (p.cut_probability  || 0) + w * mkt.cut;
+        const decided = ["hike","hold","cut"][
+          [p.hike_probability, p.hold_probability, p.cut_probability]
+            .reduce((mxI, v, i, a) => v > a[mxI] ? i : mxI, 0)
+        ];
+        p.next_decision = decided;
+        // Boost confidence as meeting approaches
+        const daysToM = bank === "fed" ? fedDays : ecbDays;
+        if (daysToM <= 14) p.confidence = Math.min(0.95, (p.confidence || 0.6) + 0.10);
+      }
+
       const sum = (p.hike_probability || 0) + (p.hold_probability || 0) + (p.cut_probability || 0);
       if (sum > 0 && Math.abs(sum - 1) > 0.01) {
         p.hike_probability = Math.round(((p.hike_probability || 0) / sum) * 100) / 100;
