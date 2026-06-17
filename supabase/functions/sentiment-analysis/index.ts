@@ -285,9 +285,13 @@ ENERGY / SUPPLY-SIDE RISKS:
 
 SCORING RULES:
 - Score from -1.0 (extremely dovish) to +1.0 (extremely hawkish), with 0.0 being neutral
-- DOVISH signals (-0.2 to -1.0): rate cuts, easing, weak growth concerns, disinflation, labor softening, dissent favoring cuts, downside risks, weaker activity, falling inflation forecasts
-- HAWKISH signals (+0.2 to +1.0): rate hikes, tightening, inflation persistence, strong economy, labor tightness, upside risks to inflation, supply-side threats to price stability
-- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate structural reform, banking supervision, counterfeit notes, appointments, green transition without policy implications)
+- DEFAULT TO NEUTRAL: if the conclusion is mixed, balanced, conditional, or not explicitly directional → score in [-0.15, +0.15].
+- Reserve scores beyond ±0.5 for unambiguous, explicit hike/cut signals, dissents, or strong directional guidance.
+- Do NOT inflate to hawkish just because the text mentions inflation, tariffs, supply shocks, or "vigilance" — score it hawkish ONLY if the speaker concludes tighter policy / longer-for-longer is warranted.
+- Symmetric calibration: mentions of disinflation, growth weakness, or downside risks should be scored dovish with the same threshold strictness.
+- DOVISH signals (-0.2 to -1.0): rate cuts, easing bias, weak growth concerns, disinflation, labor softening, dissent favoring cuts, downside risks, falling inflation forecasts
+- HAWKISH signals (+0.2 to +1.0): explicit rate hikes/holds-for-longer, tightening bias, persistent inflation concern with policy implication, upside risks to inflation linked to a policy response
+- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate structural reform, banking supervision, counterfeit notes, appointments, green transition without policy implications), data-dependent language without direction
 - Government deficit/fiscal policy discussions: score near 0.0 unless they explicitly discuss monetary policy responses
 - If the speech is NOT about monetary policy, score 0.0
 - Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
