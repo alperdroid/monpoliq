@@ -285,6 +285,13 @@ ${formatMinutesDiff(ecbMinutesDiff, "ECB")}
 ## LIVE MARKET FUTURES SNAPSHOT (factor this into your reasoning)
 ${marketSnapshot || "(market snapshot unavailable)"}
 
+## MEETING DISTANCE (calibrate confidence + market-weight accordingly)
+- Days to next FOMC: ${fedDays} → market blending weight: ${fedMktW}
+- Days to next ECB: ${ecbDays} → market blending weight: ${ecbMktW}
+- When a meeting is < 14 days away, market pricing should dominate. When > 30 days, communications dominate.
+${fedMktProbs ? `- FED market-implied probs: hike=${fedMktProbs.hike}, hold=${fedMktProbs.hold}, cut=${fedMktProbs.cut}` : ""}
+${ecbMktProbs ? `- ECB market-implied probs: hike=${ecbMktProbs.hike}, hold=${ecbMktProbs.hold}, cut=${ecbMktProbs.cut}` : ""}
+
 ## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
 Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
 ECB 30-day sentiment: ${avg(ecbComms) ?? "N/A"}
