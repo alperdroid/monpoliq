@@ -183,7 +183,15 @@ serve(async (req) => {
     }
 
     if (timeSeries.length < 24) {
-      throw new Error("Insufficient data for regression");
+      return new Response(
+        JSON.stringify({
+          error: "INSUFFICIENT_DATA",
+          message: `Need ≥24 monthly observations to estimate the Taylor Rule (have ${timeSeries.length}).`,
+          fallback: true,
+          bank,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     // Two-regime Taylor Rule: separate ZLB (rate < 0.5%) from normal periods
