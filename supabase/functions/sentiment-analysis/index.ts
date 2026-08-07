@@ -1706,6 +1706,7 @@ Deno.serve(async (req) => {
         }
       }
       await pruneDuplicateComms('FED', sbUrl, sbKey);
+      await rescoreZeroPolicyDocs('FED', sbUrl, sbKey, aiKey);
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED');
