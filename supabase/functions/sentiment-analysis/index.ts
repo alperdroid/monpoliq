@@ -896,6 +896,7 @@ Content: ${truncated}`;
           ai_headline: aiHeadline,
           dimension_composite: composite,
           weights: DIMENSION_WEIGHTS,
+          stance_adjustments: guard.notes.length ? { raw_policy_stance: rawStance, applied: guard.notes } : undefined,
           ai_headline_weight: AI_HEADLINE_WEIGHT,
           neutral_band: NEUTRAL_BAND,
           input_chars: truncated.length,
