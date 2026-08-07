@@ -11,6 +11,7 @@ import { weightedAggregate, blendedAggregate, documentTier } from '../_shared/sc
 import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
 import { partitionForScoring } from '../_shared/relevance-filter.ts';
 import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
+import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 
 
 
@@ -621,29 +622,61 @@ Respond with ONLY a JSON object (no markdown):
  "evidence": {"inflation_persistence": "<quote or empty>", "policy_stance": "<quote or empty>", "growth_labor_drag": "<quote or empty>"}}`;
 
 
-// ── Deterministic hold guard ────────────────────────────────────────────────
+// ── Deterministic hold guard + forward-guidance override ────────────────────
 // A decision to keep rates unchanged is a continuation, not a new directional
-// signal. If the quote the model scored policy_stance from is only the hold
-// announcement (no forward guidance words), the dimension is capped at ±0.2.
-// Dissents are then applied mechanically from the reported vote split.
+// signal. The policy_stance dimension is therefore capped at ±0.2 on hold
+// documents UNLESS the scored passage contains explicit forward-policy
+// language (see _shared/forward-guidance.ts) pointing in the same direction as
+// the score. Dissents are then applied mechanically from the vote split.
 const HOLD_ANNOUNCEMENT = /\b(maintain|maintaining|keep|keeping|leave|leaving|left|unchanged|no change)\b[^.]{0,80}\b(target range|rate|rates|policy rate|federal funds)\b|\b(target range|rates?)\b[^.]{0,40}\b(unchanged|at its current level)\b/i;
-const FORWARD_DIRECTION = /\b(for some time|higher for longer|longer than|not close to|further (hike|increase|easing|cuts?)|will need to|expect to (cut|raise)|additional (tightening|easing)|restrictive for|patient|pause before|next move|room to (cut|raise)|sufficiently restrictive)\b/i;
 const HOLD_TITLE = /statement|monetary policy decision|press conf|minutes|account/i;
+const HOLD_CAP = 0.2;
+
+/** Text around the quote, so guidance one sentence away still counts. */
+function quoteContext(quote: string, fullText: string, radius = 700): string {
+  if (!quote || !fullText) return quote || '';
+  const needle = quote.slice(0, 60);
+  const i = fullText.indexOf(needle);
+  if (i < 0) return quote;
+  return fullText.slice(Math.max(0, i - radius), i + needle.length + radius);
+}
 
 function applyHoldGuard(
   stance: number,
   quote: string,
   fullText: string,
   title: string,
-): { value: number; notes: string[] } {
+): { value: number; notes: string[]; guidance: GuidanceResult } {
   const notes: string[] = [];
-  if (!HOLD_TITLE.test(title)) return { value: stance, notes };
+  const guidance = detectForwardGuidance(quoteContext(quote, fullText));
+  if (!HOLD_TITLE.test(title)) return { value: stance, notes, guidance };
   let v = stance;
-  const bareHold = HOLD_ANNOUNCEMENT.test(quote) && !FORWARD_DIRECTION.test(quote);
-  if (bareHold && Math.abs(v) > 0.2) {
-    v = Math.sign(v) * 0.2;
-    notes.push('hold-announcement quote carries no forward guidance → capped at ±0.20');
+
+  const isHold = HOLD_ANNOUNCEMENT.test(quote);
+  if (isHold && Math.abs(v) > HOLD_CAP) {
+    const aligned =
+      guidance.found &&
+      guidance.direction !== 'ambiguous' &&
+      Math.sign(v) === (guidance.direction === 'hawkish' ? 1 : -1);
+    if (!aligned) {
+      v = Math.sign(v) * HOLD_CAP;
+      notes.push(
+        guidance.found
+          ? `forward guidance reads ${guidance.direction} but the stance score points the other way → capped at ±${HOLD_CAP.toFixed(2)}`
+          : `hold announcement with no explicit forward-policy language → capped at ±${HOLD_CAP.toFixed(2)}`,
+      );
+    } else {
+      // Only explicit guidance lifts the clamp; conditional guidance lifts it
+      // part-way (mid-point between the cap and the model's score).
+      if (guidance.strength < 1) {
+        v = Math.sign(v) * (HOLD_CAP + (Math.abs(v) - HOLD_CAP) * guidance.strength);
+        notes.push(`conditional ${guidance.direction} guidance ("${guidance.cues[0].phrase}") → clamp lifted partially`);
+      } else {
+        notes.push(`explicit ${guidance.direction} forward guidance ("${guidance.cues[0].phrase}") → clamp overridden`);
+      }
+    }
   }
+
   // Vote split, e.g. "by a 9 to 3 vote": dissenters move the stance against the
   // majority. Direction of dissent is read from nearby cut/hike wording.
   const vote = /\b(\d{1,2})\s*(?:to|-|–)\s*(\d{1,2})\s*vote\b/i.exec(fullText);
@@ -659,15 +692,16 @@ function applyHoldGuard(
     }
   }
   v = Math.round(Math.max(-1, Math.min(1, v)) * 1000) / 1000;
-  return { value: v, notes };
+  return { value: v, notes, guidance };
 }
+
 
 // ── Standardization layer (auditable, deterministic) ──
 // The model returns a headline score AND three sub-dimension scores. We do NOT
 // take the headline at face value: we recompute a deterministic composite from
 // the dimensions with fixed published weights and average the two. The stored
 // score is therefore reproducible from numbers the UI can show.
-export const SCORING_PROMPT_VERSION = 'v6.1-hold-guard-2026-08';
+export const SCORING_PROMPT_VERSION = 'v6.2-forward-guidance-2026-08';
 export const DIMENSION_WEIGHTS = {
   inflation_persistence: 0.45,
   policy_stance: 0.40,
@@ -897,6 +931,12 @@ Content: ${truncated}`;
           dimension_composite: composite,
           weights: DIMENSION_WEIGHTS,
           stance_adjustments: guard.notes.length ? { raw_policy_stance: rawStance, applied: guard.notes } : undefined,
+          forward_guidance: {
+            found: guard.guidance.found,
+            direction: guard.guidance.direction,
+            strength: guard.guidance.strength,
+            cues: guard.guidance.cues,
+          },
           ai_headline_weight: AI_HEADLINE_WEIGHT,
           neutral_band: NEUTRAL_BAND,
           input_chars: truncated.length,
