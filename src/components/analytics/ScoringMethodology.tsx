@@ -187,12 +187,10 @@ function DimensionGuide() {
 }
 
 function TechnicalCard({ t }: { t: Technical }) {
-  const { item, dims, composite, audit } = t;
+  const { item, dims, audit } = t;
   const tier = documentTier(item.source || '', item.title || '');
-  const aiHeadline = audit?.ai_headline ?? null;
-  const w = audit?.ai_headline_weight ?? AI_HEADLINE_WEIGHT;
-  const band = audit?.neutral_band ?? NEUTRAL_BAND;
   const ev = audit?.evidence;
+
 
   return (
     <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
