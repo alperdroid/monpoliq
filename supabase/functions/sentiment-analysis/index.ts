@@ -7,8 +7,10 @@
 // FOMC & ECB press conference transcripts now scraped and analyzed.
 // Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
 
-import { weightedAggregate } from '../_shared/scoring-weights.ts';
+import { weightedAggregate, blendedAggregate } from '../_shared/scoring-weights.ts';
 import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
+import { partitionForScoring } from '../_shared/relevance-filter.ts';
+import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 
 
 
