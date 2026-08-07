@@ -166,12 +166,42 @@ export function weightedAggregate(sub: WeightableItem[], bank?: string, now: Dat
 }
 
 // ── Layer 4: Aggregate = α·S_text + (1−α)·S_stats (mirrors the edge function) ──
+/** Decision date of the bank's most recent policy meeting, or null. */
+export function lastMeetingDate(bank: string, now: Date = new Date()): string | null {
+  const past = CENTRAL_BANK_MEETINGS
+    .filter(m => m.bank === bank.toUpperCase() && m.date <= now.toISOString().split('T')[0])
+    .map(m => m.date)
+    .sort();
+  return past.length ? past[past.length - 1] : null;
+}
+
+/**
+ * Communication window for a bank: the rolling N days, PLUS every Tier-1
+ * binding policy document published on or after the last decision. A rolling
+ * window alone can drop the standing policy signal (e.g. a hike two months ago)
+ * while keeping weeks of speeches, which mis-times the stance.
+ */
+export function commsWindow<T extends WeightableItem>(
+  items: T[],
+  bank: string,
+  days: number,
+  now: Date = new Date(),
+): T[] {
+  const cutoff = new Date(now.getTime() - days * DAY).toISOString().split('T')[0];
+  const lastMeeting = lastMeetingDate(bank, now);
+  return items.filter(i => {
+    if (i.bank !== bank.toUpperCase() || i.is_statistical) return false;
+    if (i.item_date >= cutoff) return true;
+    return !!lastMeeting && documentTier(i.source || '', i.title || '') === 1 && i.item_date >= lastMeeting;
+  });
+}
+
 // ── Realized-action anchor: the stance implied by what the bank actually DID ──
 // A 25bp move maps to ±0.35 on the stance scale, recency-weighted over the
 // trailing 180 days (120d half-life) and clamped to ±0.70. This keeps a bank
 // that hiked from ranking below a bank that merely held, regardless of how much
 // chatter each produced inside the rolling communication window.
-export const ANCHOR_OMEGA = 0.25;
+export const ANCHOR_OMEGA = 0.35;
 
 export interface PolicyAnchor {
   score: number;
@@ -190,7 +220,7 @@ export function policyActionAnchor(bank: string, now: Date = new Date()): Policy
     const age = daysBetween(now, new Date(a.date + 'T00:00:00Z'));
     if (age < 0 || age > 180) continue;
     if (!last || a.date > last.date) last = a;
-    num += (a.bps / 25) * 0.35 * Math.pow(0.5, age / 120);
+    num += (a.bps / 25) * 0.45 * Math.pow(0.5, age / 120);
     netBps += a.bps;
   }
   return {

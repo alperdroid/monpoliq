@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { ExternalLink, Mic, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, blendedAggregate, commsWindow, type WeightableItem } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 /** Pull the speaker out of a title: "Cook, Economic Outlook" / "Frank Elderson: Europe's …" */
@@ -100,7 +100,10 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
   const [bank, setBank] = useState<'FED' | 'ECB'>('FED');
   const now = useMemo(() => new Date(), []);
 
-  const comms = useMemo(() => windowItems(allItems, bank, 45, false), [allItems, bank]);
+  const comms = useMemo(
+    () => commsWindow(allItems as unknown as WeightableItem[], bank, 45, now) as unknown as SentimentItem[],
+    [allItems, bank, now],
+  );
   const stats = useMemo(() => windowItems(allItems, bank, 60, true), [allItems, bank]);
 
   // Same α-blend as the published aggregate, so contributions sum to that exact score.

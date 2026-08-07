@@ -26,7 +26,7 @@ import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
 import { ScoringMethodology } from '@/components/analytics/ScoringMethodology';
-import { blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+import { blendedAggregate, commsWindow, type WeightableItem } from '@/lib/scoring-weights';
 
 
 
@@ -90,8 +90,9 @@ const Dashboard = () => {
   const recentStats60 = recentItems(allItems.filter(i => i.is_statistical), 60);
   const recent7 = recentItems(allItems, 7);
 
-  const fed45Comms = recentComms45.filter(i => i.bank === 'FED');
-  const ecb45Comms = recentComms45.filter(i => i.bank === 'ECB');
+  const allComms = allItems.filter(i => !i.is_statistical);
+  const fed45Comms = commsWindow(allComms as unknown as WeightableItem[], 'FED', 45) as unknown as SentimentItem[];
+  const ecb45Comms = commsWindow(allComms as unknown as WeightableItem[], 'ECB', 45) as unknown as SentimentItem[];
   const fed60Stats = recentStats60.filter(i => i.bank === 'FED');
   const ecb60Stats = recentStats60.filter(i => i.bank === 'ECB');
   const fed7 = recent7.filter(i => i.bank === 'FED');
