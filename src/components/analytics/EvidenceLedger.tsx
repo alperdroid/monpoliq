@@ -72,7 +72,9 @@ function Context({ context, quote }: { context: string; quote: string }) {
   );
 }
 
-function RefBadge({ ref: r }: { ref: EvidenceRef | null }) {
+// `ref` is reserved by React on components, so the location is passed as `loc`.
+function RefBadge({ loc: r }: { loc: EvidenceRef | null }) {
+
   if (!r?.page) {
     return (
       <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
