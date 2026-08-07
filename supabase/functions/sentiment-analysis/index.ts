@@ -1364,16 +1364,11 @@ async function fetchEcbStats(cs: string, existingDbItems: It[] = []): Promise<It
   return deduplicateStatItems(items, existingDbItems);
 }
 
-// ── Aggregation (excludes zero-score neutral items) ──
-function ag(sub: It[]) {
-  const scored = sub.filter(i => Math.abs(i.net_score) > 0.001);
-  if (!scored.length) return { avg: 0, n: 0, dist: {} as Record<string, number>, sentiment: 'NEUTRAL' };
-  const avg = Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
-  const sentiment = avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
-  const dist: Record<string, number> = {};
-  for (const i of scored) dist[i.label] = (dist[i.label] || 0) + 1;
-  return { avg, n: scored.length, dist, sentiment };
+// ── Aggregation (time-decay × document tier × statistical reliability) ──
+function ag(sub: It[], bank?: string) {
+  return weightedAggregate(sub, bank);
 }
+
 
 // ── DB persistence ──
 async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2: ReturnType<typeof ag>) {
