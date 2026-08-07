@@ -748,7 +748,7 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score&bank=eq.${bank}&is_statistical=eq.false&net_score=eq.0&order=item_date.desc&limit=40`,
+      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score&bank=eq.${bank}&is_statistical=eq.false&net_score=eq.0&order=item_date.desc&limit=600`,
       { headers: hd },
     );
     if (!resp.ok) return 0;
