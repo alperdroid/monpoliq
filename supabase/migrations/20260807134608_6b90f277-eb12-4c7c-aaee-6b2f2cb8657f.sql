@@ -1,0 +1,1 @@
+DELETE FROM public.sentiment_items WHERE source = 'FRED' AND title NOT LIKE '%, ref %' AND item_date >= '2026-04-01';
