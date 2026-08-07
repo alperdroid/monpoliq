@@ -25,6 +25,7 @@ interface It {
   is_statistical:boolean; hawk_pts:number; dove_pts:number; net_score:number;
   label:string; word_count:number; reasons:string[];
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
+  policy_dimensions?:Record<string, unknown>|null;
 }
 
 // ── Cross-language / variant-title dedup helpers ──
