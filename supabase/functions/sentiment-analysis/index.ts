@@ -593,7 +593,18 @@ ANCHOR LADDER (identical for all three dimensions):
    NEGATIVE (−) = easing bias, cut delivered or signalled, policy seen as too tight, dissent for a cut.
    +1.0 example: a delivered hike or "we are not close to cutting"
    −1.0 example: a delivered cut or "further easing will be appropriate"
-   Note: a HOLD is not automatically 0 — read whether it is framed as vigilance (+) or as a pause before cuts (−).
+   HOLD RULES (apply strictly — a hold is a continuation, not a new signal):
+     • Announcing an unchanged rate, on its own, is 0.0. The words "maintain the target range"
+       or "keep rates unchanged" carry NO directional score by themselves.
+     • Only go beyond ±0.2 on a hold if the text adds explicit forward direction:
+       ±0.2 hedged direction ("we can be patient", "we are watching"),
+       ±0.5 unhedged direction ("rates will need to stay at these levels for some time" / "cuts are coming"),
+       ±0.8/±1.0 only if that direction is the dominant, repeated message of the document.
+     • Voting record adjustment: dissents in favour of cutting push this dimension DOWN
+       (−0.2 for one or two dissenters, −0.3 if three or more); dissents for hiking push it up
+       by the same amounts. Apply this after picking the anchor, then clamp to [−1, +1].
+     • Never score a hold positive merely because the current level is described as restrictive.
+
 
 3. growth_labor_drag — the state of demand and the labour market as the speaker describes it.
    POSITIVE (+) = economy resilient, labour market tight, demand robust (i.e. no case for easing).
@@ -609,12 +620,54 @@ Respond with ONLY a JSON object (no markdown):
  "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>},
  "evidence": {"inflation_persistence": "<quote or empty>", "policy_stance": "<quote or empty>", "growth_labor_drag": "<quote or empty>"}}`;
 
+
+// ── Deterministic hold guard ────────────────────────────────────────────────
+// A decision to keep rates unchanged is a continuation, not a new directional
+// signal. If the quote the model scored policy_stance from is only the hold
+// announcement (no forward guidance words), the dimension is capped at ±0.2.
+// Dissents are then applied mechanically from the reported vote split.
+const HOLD_ANNOUNCEMENT = /\b(maintain|maintaining|keep|keeping|leave|leaving|left|unchanged|no change)\b[^.]{0,80}\b(target range|rate|rates|policy rate|federal funds)\b|\b(target range|rates?)\b[^.]{0,40}\b(unchanged|at its current level)\b/i;
+const FORWARD_DIRECTION = /\b(for some time|higher for longer|longer than|not close to|further (hike|increase|easing|cuts?)|will need to|expect to (cut|raise)|additional (tightening|easing)|restrictive for|patient|pause before|next move|room to (cut|raise)|sufficiently restrictive)\b/i;
+const HOLD_TITLE = /statement|monetary policy decision|press conf|minutes|account/i;
+
+function applyHoldGuard(
+  stance: number,
+  quote: string,
+  fullText: string,
+  title: string,
+): { value: number; notes: string[] } {
+  const notes: string[] = [];
+  if (!HOLD_TITLE.test(title)) return { value: stance, notes };
+  let v = stance;
+  const bareHold = HOLD_ANNOUNCEMENT.test(quote) && !FORWARD_DIRECTION.test(quote);
+  if (bareHold && Math.abs(v) > 0.2) {
+    v = Math.sign(v) * 0.2;
+    notes.push('hold-announcement quote carries no forward guidance → capped at ±0.20');
+  }
+  // Vote split, e.g. "by a 9 to 3 vote": dissenters move the stance against the
+  // majority. Direction of dissent is read from nearby cut/hike wording.
+  const vote = /\b(\d{1,2})\s*(?:to|-|–)\s*(\d{1,2})\s*vote\b/i.exec(fullText);
+  if (vote) {
+    const dissent = Math.min(Number(vote[1]), Number(vote[2]));
+    if (dissent >= 1) {
+      const window = fullText.slice(Math.max(0, vote.index - 400), vote.index + 900);
+      const forCut = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(lower|cut|reduc)/i.test(window);
+      const forHike = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(higher|hike|increas|raise)/i.test(window);
+      const step = dissent >= 3 ? 0.3 : 0.2;
+      if (forCut && !forHike) { v -= step; notes.push(`${dissent} dissent(s) favouring easing → −${step.toFixed(2)}`); }
+      else if (forHike && !forCut) { v += step; notes.push(`${dissent} dissent(s) favouring tightening → +${step.toFixed(2)}`); }
+    }
+  }
+  v = Math.round(Math.max(-1, Math.min(1, v)) * 1000) / 1000;
+  return { value: v, notes };
+}
+
 // ── Standardization layer (auditable, deterministic) ──
 // The model returns a headline score AND three sub-dimension scores. We do NOT
 // take the headline at face value: we recompute a deterministic composite from
 // the dimensions with fixed published weights and average the two. The stored
 // score is therefore reproducible from numbers the UI can show.
-export const SCORING_PROMPT_VERSION = 'v5-anchored-2026-08';
+export const SCORING_PROMPT_VERSION = 'v6.1-hold-guard-2026-08';
 export const DIMENSION_WEIGHTS = {
   inflation_persistence: 0.45,
   policy_stance: 0.40,
@@ -794,6 +847,16 @@ Content: ${truncated}`;
         growth_labor_drag: cl(d.growth_labor_drag),
       };
 
+      const rawStance = dims.policy_stance;
+      const rawEv = parsed.evidence || {};
+      const guard = applyHoldGuard(
+        rawStance,
+        typeof rawEv.policy_stance === 'string' ? rawEv.policy_stance : '',
+        text || '',
+        title || '',
+      );
+      dims.policy_stance = guard.value;
+
       const aiHeadline = cl(parsed.score);
       const composite = cl(
         dims.inflation_persistence * DIMENSION_WEIGHTS.inflation_persistence +
@@ -833,6 +896,7 @@ Content: ${truncated}`;
           ai_headline: aiHeadline,
           dimension_composite: composite,
           weights: DIMENSION_WEIGHTS,
+          stance_adjustments: guard.notes.length ? { raw_policy_stance: rawStance, applied: guard.notes } : undefined,
           ai_headline_weight: AI_HEADLINE_WEIGHT,
           neutral_band: NEUTRAL_BAND,
           input_chars: truncated.length,
@@ -1239,7 +1303,7 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
 // unreadable fragments. This refetches the stored URL, extracts real prose and
 // rescores; a document that still cannot be read is parked at 0 with an honest
 // reason instead of an invented lean.
-async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false): Promise<number> {
+async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false, onlyStaleRubric = false): Promise<number> {
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
@@ -1253,12 +1317,20 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
       const audit = (r.policy_dimensions || {})['scoring_audit'] as { evidence_refs?: Record<string, unknown> } | undefined;
       return !!audit?.evidence_refs && Object.keys(audit.evidence_refs).length > 0;
     };
+    // Rows scored under an older rubric version must be re-read so the published
+    // score always reflects the current published methodology.
+    const staleRubric = (r: typeof rows[number]) => {
+      const audit = (r.policy_dimensions || {})['scoring_audit'] as { prompt_version?: string } | undefined;
+      return (audit?.prompt_version ?? '') !== SCORING_PROMPT_VERSION;
+    };
     const targets = rows
       .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections|minutes|account|statement|monetary policy/i.test(r.title)))
-      .filter(r => onlyMissingRefs
-        // Backfill pass: scored documents that carry no page/line citations yet.
-        ? !hasRefs(r) && Math.abs(Number(r.net_score) || 0) > 0.05
-        : suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
+      .filter(r => onlyStaleRubric
+        ? staleRubric(r) && Math.abs(Number(r.net_score) || 0) > 0.001
+        : onlyMissingRefs
+          // Backfill pass: scored documents that carry no page/line citations yet.
+          ? !hasRefs(r) && Math.abs(Number(r.net_score) || 0) > 0.05
+          : suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
       .slice(0, limit);
 
     let fixed = 0;
@@ -1267,7 +1339,7 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
       const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
       // A citation backfill must never destroy an existing score: if the re-read
       // comes back unscoreable, leave the stored row untouched.
-      if (onlyMissingRefs && !ai.dimensions) continue;
+      if ((onlyMissingRefs || onlyStaleRubric) && !ai.dimensions) continue;
 
       const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
         method: 'PATCH',
@@ -2154,7 +2226,7 @@ Deno.serve(async (req) => {
     if (body.mode === 'repair-transcripts') {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
-      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true);
+      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true, body.stale === true);
       return new Response(JSON.stringify({ mode: 'repair-transcripts', run_id: run.run_id, rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });

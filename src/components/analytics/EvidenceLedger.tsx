@@ -48,6 +48,7 @@ interface Audit {
   extraction?: { pages?: number; words?: number; doc_chars?: number; sampled?: boolean };
   provenance?: Provenance;
   input_chars?: number;
+  stance_adjustments?: { raw_policy_stance?: number; applied?: string[] };
   model?: string;
   prompt_version?: string;
 }
@@ -189,6 +190,21 @@ function EvidenceRow({ row }: { row: Row }) {
               )}
             </div>
           ))}
+
+          {audit?.stance_adjustments?.applied?.length ? (
+            <div className="rounded-md border border-border/70 bg-muted/40 p-2.5 space-y-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Policy-stance adjustments applied
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                raw reading {audit.stance_adjustments.raw_policy_stance?.toFixed(2)} → published{' '}
+                {snippets.find(s => s.key === 'policy_stance')?.value?.toFixed(2) ?? '—'}
+              </p>
+              <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
+                {audit.stance_adjustments.applied.map(a => <li key={a}>{a}</li>)}
+              </ul>
+            </div>
+          ) : null}
 
           {(audit?.prompt_version || pv) && (
             <div className="rounded-md border border-dashed border-border bg-muted/30 p-2.5 space-y-1">
