@@ -224,14 +224,114 @@ function extractText(html: string): string {
   return t;
 }
 
+// ── PDF text extraction ─────────────────────────────────────────────────────
+// FOMC transcripts are PDFs whose page content lives in Flate-compressed
+// streams. Reading only the uncompressed `(...)` literals returns font tables
+// and fragments — never the transcript — so the streams must be inflated first
+// and the text pulled out of the Tj/TJ show-text operators.
+async function inflate(bytes: Uint8Array): Promise<string | null> {
+  // PDF stream bodies carry trailing EOL bytes, and DecompressionStream errors
+  // on any trailing data — so trim the EOL and keep whatever inflated before an
+  // error rather than discarding the whole stream.
+  let end = bytes.length;
+  while (end > 0 && (bytes[end - 1] === 10 || bytes[end - 1] === 13)) end--;
+  const data = bytes.subarray(0, end);
+  if (!data.length) return null;
+  for (const fmt of ['deflate', 'deflate-raw'] as const) {
+    const ds = new DecompressionStream(fmt);
+    const reader = ds.readable.getReader();
+    const writer = ds.writable.getWriter();
+    const chunks: Uint8Array[] = [];
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) chunks.push(value);
+        }
+      } catch { /* keep what we already read */ }
+    })();
+    try {
+      await writer.write(data);
+      await writer.close();
+    } catch { /* trailing garbage / wrong format */ }
+    await pump;
+    if (chunks.length) {
+      const total = chunks.reduce((s, c) => s + c.length, 0);
+      const out = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) { out.set(c, off); off += c.length; }
+      return new TextDecoder('latin1').decode(out);
+    }
+  }
+  return null;
+}
+
+
+function showTextOf(content: string): string {
+  let text = '';
+  const re = /\((?:\\.|[^\\()])*\)|T\*|Td|TD|ET/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const s = m[0];
+    if (s.startsWith('(')) {
+      text += s.slice(1, -1)
+        .replace(/\\([nrt])/g, ' ')
+        .replace(/\\([0-7]{1,3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+        .replace(/\\(.)/g, '$1');
+    } else {
+      text += ' ';
+    }
+  }
+  return text;
+}
+
+export async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  const raw = new TextDecoder('latin1').decode(bytes);
+  let content = '';
+  const re = /stream\r?\n?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf('endstream', start);
+    if (end < 0) break;
+    const inflated = await inflate(bytes.slice(start, end));
+    if (inflated) content += inflated + '\n';
+    re.lastIndex = end + 'endstream'.length; // skip past the keyword's own "stream"
+  }
+  // Fall back to the uncompressed literals only if nothing inflated at all.
+  const src = content.length > 0 ? content : raw;
+  return showTextOf(src).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Readability gate. A document is only scoreable if the extracted text is
+ * actual prose: enough words, and a plausible density of English function
+ * words. Font tables, PDF operators and navigation chrome all fail this, and a
+ * failing document is skipped rather than guessed at by the model.
+ */
+const PROSE_WORDS = /\b(the|and|of|to|in|that|we|is|for|on|as|with|inflation|policy|rate|committee|economy|percent)\b/gi;
+
+export function isReadableProse(text: string, minWords = 300): boolean {
+  const words = text.split(/\s+/).filter(w => w.length > 1);
+  if (words.length < minWords) return false;
+  const hits = (text.match(PROSE_WORDS) || []).length;
+  return hits / words.length >= 0.05;
+}
+
 async function fetchPageText(url: string): Promise<string> {
   try {
-    const r = await sf(url, 12000);
+    const r = await sf(url, 15000);
     if (!r || !r.ok) return '';
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('pdf') || url.toLowerCase().endsWith('.pdf')) {
+      return await extractPdfText(new Uint8Array(await r.arrayBuffer()));
+    }
     const html = await r.text();
     return extractText(html);
   } catch { return ''; }
 }
+
 
 // ── XML helpers ──
 function cd(xml: string, tag: string): string {
@@ -370,18 +470,31 @@ async function scoreWithAI(
   source?: string,
 ): Promise<AIScore> {
   const isPolicy = isPolicyDocForScoring(title, source || '');
+
+  // Nothing is ever scored on unusable text: a document whose extraction failed
+  // is returned as unscored so the aggregate ignores it, instead of letting the
+  // model invent a lean it cannot support.
+  if (!isReadableProse(text, isPolicy ? 200 : 40)) {
+    return {
+      score: 0,
+      label: 'neutral',
+      reasoning: 'not scored — the source text could not be extracted as readable prose',
+    };
+  }
+
   let truncated: string;
-  if (text.length <= 6000) {
+  const budget = isPolicy ? 24000 : 6000;
+  if (text.length <= budget) {
     truncated = text;
   } else {
-    // For long documents (press conferences, minutes), sample beginning + middle + end
-    // Beginning needs to be large enough to capture rate decisions (typically 1500-2500 chars in)
-    const beginLen = isPolicy ? 4000 : 3000;
-    const midLen = isPolicy ? 2000 : 1500;
-    const endLen = isPolicy ? 2000 : 1500;
+    // Long documents (press conferences, minutes): sample beginning + middle + end.
+    // The opening carries the decision and guidance, the Q&A carries the nuance.
+    const beginLen = isPolicy ? 14000 : 3000;
+    const midLen = isPolicy ? 6000 : 1500;
+    const endLen = isPolicy ? 4000 : 1500;
     const mid = Math.floor(text.length / 2);
     truncated = text.slice(0, beginLen) +
-      '\n...[early section truncated]...\n' +
+      '\n...[middle section truncated]...\n' +
       text.slice(mid - Math.floor(midLen / 2), mid + Math.floor(midLen / 2)) +
       '\n...[late section truncated]...\n' +
       text.slice(-endLen);
@@ -390,14 +503,15 @@ async function scoreWithAI(
   // Add special instructions for policy documents
   let policyPreamble = '';
   if (isPolicy) {
-    policyPreamble = `\n\nIMPORTANT: This is an official central bank policy document. It CANNOT be neutral — it always contains policy signals. Read the full text carefully for:
-- Rate decisions (cut/hold/hike)
+    policyPreamble = `\n\nIMPORTANT: This is an official central bank policy document. Read the supplied text carefully and base the score ONLY on what it actually says:
+- Rate decisions (cut/hold/hike) and the vote split
 - Forward guidance language ("appropriate stance", "data-dependent", "further adjustment")
 - Risk assessments (upside/downside)
 - Dissent or disagreement among members
 - Inflation/growth outlook changes
-Score this firmly — policy documents should typically score ±0.2 to ±0.8.`;
+Quote-level evidence is required: the "reasoning" field must cite the specific wording from the text that drove the score. Such documents normally carry a clear signal (±0.2 to ±0.8), but NEVER assume a direction. If the supplied text is garbled, incomplete, or contains no policy content, return score 0 with reasoning stating that the text could not be analysed — do not guess a lean and do not justify a score by referring to these instructions.`;
   }
+
 
   const userMsg = `Bank: ${bank}
 Title: ${title}${policyPreamble}
@@ -839,6 +953,51 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
   }
 }
 
+// ── Repair pass: re-read transcripts/PDFs with the fixed extractor ───────────
+// Rows scored before the PDF content streams were inflated were graded on
+// unreadable fragments. This refetches the stored URL, extracts real prose and
+// rescores; a document that still cannot be read is parked at 0 with an honest
+// reason instead of an invented lean.
+async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12): Promise<number> {
+  try {
+    const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=400`,
+      { headers: hd },
+    );
+    if (!resp.ok) return 0;
+    const rows: { id: string; source: string; title: string; url: string; item_date: string; reasons: string[] }[] = await resp.json();
+    const suspect = /unavailable|truncated|redacted|garbled|could not|administrative|by their nature|assumed|without specific/i;
+    const targets = rows
+      .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections/i.test(r.title)))
+      .filter(r => suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
+      .slice(0, limit);
+    let fixed = 0;
+    for (const r of targets) {
+      const text = await fetchPageText(r.url);
+      const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
+      const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+        method: 'PATCH',
+        headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          net_score: ai.score,
+          label: ai.label,
+          hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
+          dove_pts: ai.score < 0 ? Math.round(-ai.score * 10) : 0,
+          reasons: ['ai:' + (ai.reasoning || 'rescored')],
+          word_count: text ? text.split(/\s+/).length : 0,
+          policy_dimensions: ai.dimensions ? { ...ai.dimensions, scoring_audit: ai.audit } : null,
+        }),
+      });
+      if (patch.ok) { fixed++; console.log(`${bank}: re-read "${r.title}" (${r.item_date}) → ${ai.score}`); }
+    }
+    return fixed;
+  } catch (e) {
+    console.log('transcript repair failed:', e instanceof Error ? e.message : e);
+    return 0;
+  }
+}
+
 
 // ── Load existing STATISTICAL items for dedup ──
 async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
@@ -1083,48 +1242,37 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
       }
     }
 
-    // 2. Try the press conference transcript PDF
+    // 2. Try the press conference transcript PDF — inflated content streams,
+    //    and only accepted when the extracted text is real prose.
     const pdfUrl = 'https://www.federalreserve.gov/mediacenter/files/FOMCpresconf' + dateStr + '.pdf';
-    const pdfResp = await sf(pdfUrl, 15000);
+    const pdfResp = await sf(pdfUrl, 20000);
     if (pdfResp && pdfResp.ok) {
       const ct = pdfResp.headers.get('content-type') || '';
       if (ct.includes('pdf')) {
-        // Extract text from PDF binary
-        const buf = await pdfResp.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        // Simple PDF text extraction: find text between BT/ET operators and parentheses
-        let pdfText = '';
-        const decoder = new TextDecoder('latin1');
-        const raw = decoder.decode(bytes);
-        const parenRe = /\(([^)]*)\)/g;
-        let pm;
-        while ((pm = parenRe.exec(raw)) !== null) {
-          const t = pm[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
-          if (t.length > 1) pdfText += t + ' ';
-        }
-        pdfText = pdfText.replace(/\s+/g, ' ').trim();
-        if (pdfText.length > 500) {
+        const pdfText = await extractPdfText(new Uint8Array(await pdfResp.arrayBuffer()));
+        if (isReadableProse(pdfText)) {
           console.log('FOMC Press Conf PDF found: ' + dateStr + ' (' + pdfText.length + ' chars)');
           foundItems.push({ title: 'FOMC Press Conference Transcript — ' + m + '/' + day + '/' + y, text: pdfText, date: y + '-' + m + '-' + day, url: pdfUrl });
         } else {
-          console.log('FOMC Press Conf PDF too short after extraction: ' + dateStr + ' (' + pdfText.length + ' chars)');
+          console.log('FOMC Press Conf PDF not readable prose: ' + dateStr + ' (' + pdfText.length + ' chars)');
         }
       }
     }
 
     // 3. Try the press conference HTML page as fallback
-    if (foundItems.length < 2) {
+    if (!foundItems.some(f => f.title.includes('Transcript'))) {
       const pcUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpressconf' + dateStr + '.htm';
       const pcResp = await sf(pcUrl, 12000);
       if (pcResp && pcResp.ok) {
         const pcHtml = await pcResp.text();
         if (!pcHtml.toLowerCase().includes('page not found') && pcHtml.length > 2000) {
           const pcText = extractText(pcHtml);
-          if (pcText.length > 1000 && !foundItems.some(f => f.title.includes('Transcript'))) {
+          if (isReadableProse(pcText)) {
             console.log('FOMC Press Conf HTML page found: ' + dateStr + ' (' + pcText.length + ' chars)');
             foundItems.push({ title: 'FOMC Press Conference Transcript — ' + m + '/' + day + '/' + y, text: pcText, date: y + '-' + m + '-' + day, url: pcUrl });
           }
         }
+
       }
     }
 
@@ -1152,19 +1300,10 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
         if (sepResp && sepResp.ok) {
           const ct = sepResp.headers.get('content-type') || '';
           if (ct.includes('pdf')) {
-            const buf = await sepResp.arrayBuffer();
-            const bytes = new Uint8Array(buf);
-            const decoder = new TextDecoder('latin1');
-            const raw = decoder.decode(bytes);
-            const parenRe2 = /\(([^)]*)\)/g;
-            let pm2;
-            while ((pm2 = parenRe2.exec(raw)) !== null) {
-              const t = pm2[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
-              if (t.length > 1) sepText += t + ' ';
-            }
-            sepText = sepText.replace(/\s+/g, ' ').trim();
+            sepText = await extractPdfText(new Uint8Array(await sepResp.arrayBuffer()));
             sepFinalUrl = sepPdfUrl;
           }
+
         }
       }
 
@@ -1713,7 +1852,18 @@ Deno.serve(async (req) => {
     const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
 
     // One-off / repeatable historical repair of the US statistical channel.
+    // Re-read transcripts/PDFs with the fixed extractor and rescore them.
+    if (body.mode === 'repair-transcripts') {
+      const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
+      const out: Record<string, number> = {};
+      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12);
+      return new Response(JSON.stringify({ mode: 'repair-transcripts', rescored: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (body.mode === 'backfill-fred') {
+
       const from = body.from || '2026-01-01';
       const items = fk ? await backfillFred(fk, from) : [];
       let saved = 0;
