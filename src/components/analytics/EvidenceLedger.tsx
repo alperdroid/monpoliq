@@ -49,6 +49,12 @@ interface Audit {
   provenance?: Provenance;
   input_chars?: number;
   stance_adjustments?: { raw_policy_stance?: number; applied?: string[] };
+  forward_guidance?: {
+    found?: boolean;
+    direction?: 'hawkish' | 'dovish' | 'ambiguous';
+    strength?: number;
+    cues?: { phrase: string; direction: string; sentence: string }[];
+  };
   model?: string;
   prompt_version?: string;
 }
