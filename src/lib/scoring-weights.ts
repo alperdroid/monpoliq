@@ -203,10 +203,38 @@ export function commsWindow<T extends WeightableItem>(
 // chatter each produced inside the rolling communication window.
 export const ANCHOR_OMEGA = 0.35;
 
+/** Published anchor parameters — shown in the UI so the number is reproducible. */
+export const ANCHOR_PARAMS = {
+  window_days: 180,
+  half_life_days: 120,
+  score_per_25bp: 0.45,
+  clamp: 0.7,
+  omega: ANCHOR_OMEGA,
+  formula: 'anchor = clamp(Σ (bps/25 × 0.45 × 0.5^(age/120)), ±0.70)',
+  calendar: 'src/data/meeting-schedule.ts (verified decision dates)',
+} as const;
+
+/** One realized decision and exactly what it contributed to the anchor. */
+export interface AnchorAction {
+  date: string;
+  bps: number;
+  age_days: number;
+  decay: number;
+  contribution: number;
+}
+
 export interface PolicyAnchor {
   score: number;
   net_bps: number;
   last: { date: string; bps: number } | null;
+  /** Provenance: the decisions used, their weights, and the parameters applied. */
+  provenance: {
+    params: typeof ANCHOR_PARAMS;
+    actions: AnchorAction[];
+    raw: number;
+    clamped: boolean;
+    computed_at: string;
+  };
 }
 
 export function policyActionAnchor(bank: string, now: Date = new Date()): PolicyAnchor {
@@ -216,19 +244,38 @@ export function policyActionAnchor(bank: string, now: Date = new Date()): Policy
   let num = 0;
   let netBps = 0;
   let last: { date: string; bps: number } | null = null;
+  const used: AnchorAction[] = [];
   for (const a of actions) {
     const age = daysBetween(now, new Date(a.date + 'T00:00:00Z'));
-    if (age < 0 || age > 180) continue;
+    if (age < 0 || age > ANCHOR_PARAMS.window_days) continue;
     if (!last || a.date > last.date) last = a;
-    num += (a.bps / 25) * 0.45 * Math.pow(0.5, age / 120);
+    const decay = Math.pow(0.5, age / ANCHOR_PARAMS.half_life_days);
+    const contribution = (a.bps / 25) * ANCHOR_PARAMS.score_per_25bp * decay;
+    num += contribution;
     netBps += a.bps;
+    used.push({
+      date: a.date,
+      bps: a.bps,
+      age_days: Math.round(age),
+      decay: Math.round(decay * 1000) / 1000,
+      contribution: Math.round(contribution * 1000) / 1000,
+    });
   }
+  const clampedScore = Math.max(-ANCHOR_PARAMS.clamp, Math.min(ANCHOR_PARAMS.clamp, num));
   return {
-    score: Math.round(Math.max(-0.7, Math.min(0.7, num)) * 1000) / 1000,
+    score: Math.round(clampedScore * 1000) / 1000,
     net_bps: netBps,
     last,
+    provenance: {
+      params: ANCHOR_PARAMS,
+      actions: used.sort((x, y) => (x.date < y.date ? 1 : -1)),
+      raw: Math.round(num * 1000) / 1000,
+      clamped: Math.abs(num) > ANCHOR_PARAMS.clamp,
+      computed_at: new Date().toISOString(),
+    },
   };
 }
+
 
 export interface BlendResult extends Aggregate {
 
