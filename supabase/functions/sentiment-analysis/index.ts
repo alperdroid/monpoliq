@@ -11,6 +11,7 @@ import { weightedAggregate, blendedAggregate, documentTier } from '../_shared/sc
 import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
 import { partitionForScoring } from '../_shared/relevance-filter.ts';
 import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
+import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 
 
 
