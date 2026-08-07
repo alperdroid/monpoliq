@@ -74,11 +74,16 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
   const cutoff30d = new Date();
   cutoff30d.setDate(cutoff30d.getDate() - 30);
   const cs30 = cutoff30d.toISOString().split('T')[0];
+  const activeCutoff = new Date();
+  activeCutoff.setDate(activeCutoff.getDate() - ACTIVE_WINDOW_DAYS);
+  const csActive = activeCutoff.toISOString().split('T')[0];
 
   return SPEAKER_REFS.map(ref => {
     const matched = items.filter(i => {
       const tl = i.title.toLowerCase();
-      return i.bank === ref.bank && ref.patterns.some(p => tl.includes(p));
+      if (i.bank !== ref.bank) return false;
+      if (ref.until && i.item_date > ref.until) return false;
+      return ref.patterns.some(p => tl.includes(p));
     });
 
     const scored = matched.filter(i => Math.abs(i.net_score) > 0.001);
@@ -87,7 +92,7 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
     const recent30Scored = recent30.filter(i => Math.abs(i.net_score) > 0.001);
     const recentAvg = recent30Scored.length ? Math.round(recent30Scored.reduce((s, i) => s + i.net_score, 0) / recent30Scored.length * 1000) / 1000 : 0;
     const toneChange = recent30Scored.length ? Math.round((recentAvg - avgTone) * 1000) / 1000 : 0;
-    const latest = matched[0]?.item_date || '';
+    const latest = matched.reduce((m, i) => (i.item_date > m ? i.item_date : m), '');
 
     return {
       name: ref.name,
@@ -100,8 +105,11 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
       latest_communication_date: latest,
       recent_tone_change: toneChange,
     };
-  }).filter(s => s.communication_count > 0);
+  })
+    // Current committee only: must have spoken inside the rolling activity window.
+    .filter(s => s.communication_count > 0 && s.latest_communication_date >= csActive);
 }
+
 
 const Speakers = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
