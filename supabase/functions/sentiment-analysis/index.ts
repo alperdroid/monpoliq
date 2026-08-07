@@ -739,6 +739,49 @@ async function pruneDuplicateComms(bank: string, sbUrl: string, sbKey: string): 
   }
 }
 
+// ── Repair pass: re-score binding policy documents stuck at 0 ────────────────
+// A decision/statement can never legitimately be 0. If an older row was left at
+// 0 by a failed AI call it is re-fetched from its stored URL and re-scored.
+const POLICY_TITLE_FOR_REPAIR = /monetary policy decision|monetary policy statement|fomc statement|rate decision|policy decision/i;
+
+async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string, aiKey: string): Promise<number> {
+  try {
+    const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score&bank=eq.${bank}&is_statistical=eq.false&net_score=eq.0&order=item_date.desc&limit=40`,
+      { headers: hd },
+    );
+    if (!resp.ok) return 0;
+    const rows: { id: string; source: string; title: string; url: string; item_date: string }[] = await resp.json();
+    const targets = rows.filter(r => r.url && POLICY_TITLE_FOR_REPAIR.test(`${r.source} ${r.title}`)).slice(0, 8);
+    let fixed = 0;
+    for (const r of targets) {
+      const text = await fetchPageText(r.url);
+      if (!text || text.length < 300) continue;
+      const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
+      if (Math.abs(ai.score) < 0.001) continue;
+      const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+        method: 'PATCH',
+        headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          net_score: ai.score,
+          label: ai.label,
+          hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
+          dove_pts: ai.score < 0 ? Math.round(-ai.score * 10) : 0,
+          reasons: ['ai:' + (ai.reasoning || 'rescored')],
+          word_count: text.split(/\s+/).length,
+        }),
+      });
+      if (patch.ok) { fixed++; console.log(`${bank}: rescored "${r.title}" (${r.item_date}) → ${ai.score}`); }
+    }
+    return fixed;
+  } catch (e) {
+    console.log('rescore repair failed:', e instanceof Error ? e.message : e);
+    return 0;
+  }
+}
+
+
 // ── Load existing STATISTICAL items for dedup ──
 async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
   try {
