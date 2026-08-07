@@ -667,7 +667,7 @@ function applyHoldGuard(
 // take the headline at face value: we recompute a deterministic composite from
 // the dimensions with fixed published weights and average the two. The stored
 // score is therefore reproducible from numbers the UI can show.
-export const SCORING_PROMPT_VERSION = 'v6-hold-neutral-2026-08';
+export const SCORING_PROMPT_VERSION = 'v6.1-hold-guard-2026-08';
 export const DIMENSION_WEIGHTS = {
   inflation_persistence: 0.45,
   policy_stance: 0.40,
