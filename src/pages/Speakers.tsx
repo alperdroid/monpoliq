@@ -138,7 +138,13 @@ const Speakers = () => {
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
+        <div>
+          <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Current committees only — members with no communication in the last {ACTIVE_WINDOW_DAYS} days drop off automatically.
+          </p>
+        </div>
+
 
         <span className="text-xs text-muted-foreground font-mono">
           {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
