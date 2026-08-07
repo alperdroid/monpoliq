@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { ExternalLink, FunctionSquare } from 'lucide-react';
+import { ChevronDown, ExternalLink, FunctionSquare, Gauge, LineChart, Quote, Scale } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { documentTier, TIER_LABEL, ANCHOR_OMEGA } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
@@ -9,6 +9,49 @@ import type { SentimentItem } from '@/lib/api/sentiment';
 const DIM_WEIGHTS = { inflation_persistence: 0.45, policy_stance: 0.40, growth_labor_drag: 0.15 } as const;
 const AI_HEADLINE_WEIGHT = 0.5;
 const NEUTRAL_BAND = 0.10;
+
+/** Plain-language definition of each sub-dimension, shown to the reader. */
+const DIMENSIONS = [
+  {
+    key: 'inflation_persistence' as const,
+    icon: LineChart,
+    label: 'Inflation persistence',
+    short: 'IP',
+    weight: DIM_WEIGHTS.inflation_persistence,
+    question: 'Where does the text put price pressure?',
+    hawk: 'inflation above target, broadening, expectations drifting up',
+    dove: 'disinflation on track, pressure fading, expectations anchored',
+  },
+  {
+    key: 'policy_stance' as const,
+    icon: Scale,
+    label: 'Policy stance',
+    short: 'PS',
+    weight: DIM_WEIGHTS.policy_stance,
+    question: 'How restrictive is policy said to be, or need to be?',
+    hawk: 'keep restrictive, higher-for-longer, hike, resist cutting',
+    dove: 'easing bias, cut delivered or signalled, policy seen as too tight',
+  },
+  {
+    key: 'growth_labor_drag' as const,
+    icon: Gauge,
+    label: 'Growth & labour',
+    short: 'GL',
+    weight: DIM_WEIGHTS.growth_labor_drag,
+    question: 'How strong are demand and the labour market described as?',
+    hawk: 'economy resilient, labour market tight, demand robust',
+    dove: 'growth slowing, unemployment rising, downside risk emphasised',
+  },
+];
+
+/** The fixed ladder the model must pick from — no free-hand numbers. */
+const ANCHORS = [
+  { v: '0.0', text: 'not addressed, or genuinely two-sided' },
+  { v: '±0.2', text: 'mentioned once, hedged or conditional' },
+  { v: '±0.5', text: 'stated as the speaker’s current assessment' },
+  { v: '±0.8', text: 'the dominant concern — repeated or quantified' },
+  { v: '±1.0', text: 'the binding reason for the decision itself' },
+];
 
 interface Audit {
   model?: string;
@@ -20,6 +63,7 @@ interface Audit {
   neutral_band?: number;
   input_chars?: number;
   published?: number;
+  evidence?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', string>>;
 }
 
 interface Technical {
@@ -66,20 +110,78 @@ function Bar({ value }: { value: number }) {
   );
 }
 
-function DimRow({ label, value, weight }: { label: string; value: number; weight: number }) {
+function DimRow({ label, value, weight, evidence }: { label: string; value: number; weight: number; evidence?: string }) {
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-      <div>
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] text-muted-foreground">{label}</span>
-          <span className="text-[11px] font-mono text-muted-foreground">× {weight.toFixed(2)}</span>
+    <div className="space-y-0.5">
+      <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+        <div>
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-muted-foreground">{label}</span>
+            <span className="text-[11px] font-mono text-muted-foreground">× {weight.toFixed(2)}</span>
+          </div>
+          <Bar value={value} />
         </div>
-        <Bar value={value} />
+        <span className={cn('text-[12px] font-mono font-semibold w-14 text-right',
+          value > 0 ? 'text-signal-hawkish' : value < 0 ? 'text-signal-dovish' : 'text-signal-neutral')}>
+          {sign(value, 2)}
+        </span>
       </div>
-      <span className={cn('text-[12px] font-mono font-semibold w-14 text-right',
-        value > 0 ? 'text-signal-hawkish' : value < 0 ? 'text-signal-dovish' : 'text-signal-neutral')}>
-        {sign(value, 2)}
-      </span>
+      {evidence && (
+        <p className="flex gap-1 text-[11px] leading-snug text-muted-foreground pl-0.5">
+          <Quote className="w-2.5 h-2.5 mt-1 shrink-0" />
+          <span className="italic">“{evidence}”</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Reader-facing explainer: what the three dimensions are and how they get a number. */
+function DimensionGuide() {
+  return (
+    <div className="space-y-3">
+      <div className="grid md:grid-cols-3 gap-2">
+        {DIMENSIONS.map(d => (
+          <div key={d.key} className="rounded-lg border border-border bg-background/60 p-3 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <d.icon className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="text-[13px] font-semibold">{d.label}</span>
+              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                {Math.round(d.weight * 100)}% of composite
+              </span>
+            </div>
+            <p className="text-[12px] text-muted-foreground leading-snug">{d.question}</p>
+            <div className="space-y-1 pt-0.5">
+              <p className="text-[11px] leading-snug">
+                <span className="font-semibold text-signal-hawkish">Positive → hawkish:</span>{' '}
+                <span className="text-muted-foreground">{d.hawk}</span>
+              </p>
+              <p className="text-[11px] leading-snug">
+                <span className="font-semibold text-signal-dovish">Negative → dovish:</span>{' '}
+                <span className="text-muted-foreground">{d.dove}</span>
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-border bg-muted/40 p-3">
+        <p className="text-[12px] font-semibold mb-2">
+          How strong is the signal? Every dimension uses the same fixed ladder
+        </p>
+        <div className="space-y-1">
+          {ANCHORS.map(a => (
+            <div key={a.v} className="flex items-baseline gap-2">
+              <span className="w-11 shrink-0 text-right font-mono text-[12px] font-semibold">{a.v}</span>
+              <span className="text-[12px] text-muted-foreground leading-snug">{a.text}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
+          The reader is told which rung was picked and the sentence it was picked from, so a score can be
+          challenged on the evidence rather than taken on trust.
+        </p>
+      </div>
     </div>
   );
 }
@@ -90,6 +192,7 @@ function TechnicalCard({ t }: { t: Technical }) {
   const aiHeadline = audit?.ai_headline ?? null;
   const w = audit?.ai_headline_weight ?? AI_HEADLINE_WEIGHT;
   const band = audit?.neutral_band ?? NEUTRAL_BAND;
+  const ev = audit?.evidence;
 
   return (
     <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
@@ -114,10 +217,10 @@ function TechnicalCard({ t }: { t: Technical }) {
       </div>
 
       {dims ? (
-        <div className="space-y-1.5">
-          <DimRow label="Inflation persistence" value={dims.inflation_persistence} weight={DIM_WEIGHTS.inflation_persistence} />
-          <DimRow label="Policy stance" value={dims.policy_stance} weight={DIM_WEIGHTS.policy_stance} />
-          <DimRow label="Growth / labour resilience" value={dims.growth_labor_drag} weight={DIM_WEIGHTS.growth_labor_drag} />
+        <div className="space-y-2">
+          <DimRow label="Inflation persistence" value={dims.inflation_persistence} weight={DIM_WEIGHTS.inflation_persistence} evidence={ev?.inflation_persistence} />
+          <DimRow label="Policy stance" value={dims.policy_stance} weight={DIM_WEIGHTS.policy_stance} evidence={ev?.policy_stance} />
+          <DimRow label="Growth / labour resilience" value={dims.growth_labor_drag} weight={DIM_WEIGHTS.growth_labor_drag} evidence={ev?.growth_labor_drag} />
         </div>
       ) : (
         <p className="text-[12px] text-muted-foreground">
@@ -155,12 +258,14 @@ function TechnicalCard({ t }: { t: Technical }) {
 }
 
 /**
- * Technical transparency panel: exposes the numeric inputs behind every
- * AI-scored communication and the fixed published formula that turns them into
- * the stored score, so any number on the dashboard can be recomputed by hand.
+ * Technical transparency panel: explains the three sub-dimensions in plain
+ * language, publishes the fixed anchor ladder used to score them, and exposes
+ * the numeric inputs behind every AI-scored communication so any number on the
+ * dashboard can be recomputed by hand.
  */
 export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) {
   const [bank, setBank] = useState<'FED' | 'ECB'>('FED');
+  const [showFormula, setShowFormula] = useState(false);
 
   const items = useMemo(() => {
     const cutoff = new Date();
@@ -185,9 +290,9 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-sm text-[12px]">
-              Every communication is read with deterministic decoding (temperature 0) and returns three
-              sub-dimension scores plus a headline score. The published score is a fixed formula over those
-              numbers — never the raw model opinion alone — so it is reproducible and auditable.
+              Every communication is read with deterministic decoding (temperature 0) and rated on three
+              defined dimensions using a fixed anchor ladder, each backed by a quote from the text. The
+              published score is a fixed formula over those numbers — never the raw model opinion alone.
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -200,14 +305,35 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
         </div>
       </div>
 
-      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 font-mono text-[12px] leading-relaxed space-y-0.5">
-        <div>1. dimensions: inflation_persistence (IP), policy_stance (PS), growth_labour (GL) ∈ [−1, +1]</div>
-        <div>2. composite = 0.45·IP + 0.40·PS + 0.15·GL</div>
-        <div>3. item score = 0.50·model_headline + 0.50·composite, zeroed inside ±0.10</div>
-        <div>4. item weight = 2^(−age/half-life) × document tier (T1 1.0 / T2 0.7 / T3 0.4 / T4 0.1), any non-chair speaker capped at 10% of total weight</div>
-        <div>5. narrative = α·text + (1−α)·statistics, α from channel freshness (0.35–0.85)</div>
-        <div>6. published aggregate = {(1 - ANCHOR_OMEGA).toFixed(2)}·narrative + {ANCHOR_OMEGA.toFixed(2)}·realized-action anchor</div>
-      </div>
+      <p className="text-[12px] text-muted-foreground leading-snug">
+        Each communication is read for three things: <span className="font-semibold text-foreground">inflation
+        persistence</span>, <span className="font-semibold text-foreground">policy stance</span> and{' '}
+        <span className="font-semibold text-foreground">growth &amp; labour</span>. Each gets a score from
+        −1 (clearly dovish) through 0 (not addressed) to +1 (clearly hawkish), and the three are combined
+        with fixed weights.
+      </p>
+
+      <DimensionGuide />
+
+      <button
+        type="button"
+        onClick={() => setShowFormula(v => !v)}
+        className="flex items-center gap-1.5 text-[12px] font-medium text-primary hover:underline"
+      >
+        <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', showFormula && 'rotate-180')} />
+        {showFormula ? 'Hide the full formula' : 'Show the full formula, step by step'}
+      </button>
+
+      {showFormula && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 font-mono text-[12px] leading-relaxed space-y-0.5">
+          <div>1. dimensions: IP, PS, GL scored on the anchor ladder above, each in [−1, +1]</div>
+          <div>2. composite = 0.45·IP + 0.40·PS + 0.15·GL</div>
+          <div>3. item score = 0.50·model_headline + 0.50·composite, zeroed inside ±0.10</div>
+          <div>4. item weight = 2^(−age/half-life) × document tier (T1 1.0 / T2 0.7 / T3 0.4 / T4 0.1), any non-chair speaker capped at 10% of total weight</div>
+          <div>5. narrative = α·text + (1−α)·statistics, α from channel freshness (0.35–0.85)</div>
+          <div>6. published aggregate = {(1 - ANCHOR_OMEGA).toFixed(2)}·narrative + {ANCHOR_OMEGA.toFixed(2)}·realized-action anchor</div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-3">
         {items.length === 0 ? (
