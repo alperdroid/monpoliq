@@ -166,10 +166,50 @@ export function weightedAggregate(sub: WeightableItem[], bank?: string, now: Dat
 }
 
 // ── Layer 4: Aggregate = α·S_text + (1−α)·S_stats (mirrors the edge function) ──
+// ── Realized-action anchor: the stance implied by what the bank actually DID ──
+// A 25bp move maps to ±0.35 on the stance scale, recency-weighted over the
+// trailing 180 days (120d half-life) and clamped to ±0.70. This keeps a bank
+// that hiked from ranking below a bank that merely held, regardless of how much
+// chatter each produced inside the rolling communication window.
+export const ANCHOR_OMEGA = 0.25;
+
+export interface PolicyAnchor {
+  score: number;
+  net_bps: number;
+  last: { date: string; bps: number } | null;
+}
+
+export function policyActionAnchor(bank: string, now: Date = new Date()): PolicyAnchor {
+  const actions = CENTRAL_BANK_MEETINGS
+    .filter(m => m.bank === bank.toUpperCase() && typeof m.bps === 'number')
+    .map(m => ({ date: m.date, bps: m.bps as number }));
+  let num = 0;
+  let netBps = 0;
+  let last: { date: string; bps: number } | null = null;
+  for (const a of actions) {
+    const age = daysBetween(now, new Date(a.date + 'T00:00:00Z'));
+    if (age < 0 || age > 180) continue;
+    if (!last || a.date > last.date) last = a;
+    num += (a.bps / 25) * 0.35 * Math.pow(0.5, age / 120);
+    netBps += a.bps;
+  }
+  return {
+    score: Math.round(Math.max(-0.7, Math.min(0.7, num)) * 1000) / 1000,
+    net_bps: netBps,
+    last,
+  };
+}
+
 export interface BlendResult extends Aggregate {
+
   alpha: number;
   text: { avg: number; n: number };
   stats: { avg: number; n: number };
+  /** Weight of the realized-action anchor in the headline score. */
+  omega: number;
+  anchor: PolicyAnchor;
+  /** Pure text+stats narrative score, before the realized-action anchor. */
+  narrative: number;
 }
 
 function freshestAge(items: WeightableItem[], now: Date): number {
@@ -206,11 +246,15 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
     bank,
     now,
   );
-  const avg = Math.round((alpha * t.avg + (1 - alpha) * s.avg) * 1000) / 1000;
+  const narrative = Math.round((alpha * t.avg + (1 - alpha) * s.avg) * 1000) / 1000;
+  const anchor = policyActionAnchor(bank || 'FED', now);
+  const omega = ANCHOR_OMEGA;
+  const avg = Math.round(((1 - omega) * narrative + omega * anchor.score) * 1000) / 1000;
   const dist: Record<string, number> = { ...t.dist };
   for (const [k, v] of Object.entries(s.dist)) dist[k] = (dist[k] || 0) + v;
   return {
     avg, n: t.n + s.n, dist, sentiment: sentimentLabel(avg), half_life_days: t.half_life_days,
-    alpha, text: { avg: t.avg, n: t.n }, stats: { avg: s.avg, n: s.n },
+    alpha, omega, anchor, narrative,
+    text: { avg: t.avg, n: t.n }, stats: { avg: s.avg, n: s.n },
   };
 }

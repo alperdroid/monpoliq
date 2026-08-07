@@ -25,6 +25,7 @@ import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
+import { ScoringMethodology } from '@/components/analytics/ScoringMethodology';
 import { blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
 
 
@@ -217,6 +218,9 @@ const Dashboard = () => {
               {fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
             </p>
             <p className="text-[9px] text-muted-foreground">{fed45Comms.length} comms (45d) + {fed60Stats.length} stats (60d)</p>
+            <p className="text-[9px] text-muted-foreground font-mono">
+              narrative {fedBlend.narrative > 0 ? '+' : ''}{fedBlend.narrative.toFixed(3)} · action anchor {fedBlend.anchor.score > 0 ? '+' : ''}{fedBlend.anchor.score.toFixed(3)} (ω {fedBlend.omega.toFixed(2)}, net {fedBlend.anchor.net_bps > 0 ? '+' : ''}{fedBlend.anchor.net_bps}bp/180d)
+            </p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Comms Only (45d)</span>
@@ -234,6 +238,9 @@ const Dashboard = () => {
               {ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
             </p>
             <p className="text-[9px] text-muted-foreground">{ecb45Comms.length} comms (45d) + {ecb60Stats.length} stats (60d)</p>
+            <p className="text-[9px] text-muted-foreground font-mono">
+              narrative {ecbBlend.narrative > 0 ? '+' : ''}{ecbBlend.narrative.toFixed(3)} · action anchor {ecbBlend.anchor.score > 0 ? '+' : ''}{ecbBlend.anchor.score.toFixed(3)} (ω {ecbBlend.omega.toFixed(2)}, net {ecbBlend.anchor.net_bps > 0 ? '+' : ''}{ecbBlend.anchor.net_bps}bp/180d)
+            </p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Comms Only (45d)</span>
@@ -272,6 +279,9 @@ const Dashboard = () => {
 
       {/* Score attribution — verify which speaker / release drove the score */}
       <ScoreAttribution allItems={allItems} />
+
+      {/* Technical inputs behind every AI-scored communication */}
+      <ScoringMethodology allItems={allItems} />
 
 
       {/* Stance Decomposition Waterfall */}
