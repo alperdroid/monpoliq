@@ -88,17 +88,28 @@ export async function runSentimentAnalysis(
  * Fetch the latest cached sentiment items from the database.
  */
 export async function getCachedSentimentItems(bank?: 'FED' | 'ECB'): Promise<SentimentItem[]> {
-  let query = supabase
-    .from('sentiment_items')
-    .select('*')
-    .order('item_date', { ascending: false });
+  // PostgREST caps a response at 1000 rows — page through so the full history
+  // (statistical backfill included) reaches the charts.
+  const PAGE = 1000;
+  const all: SentimentItem[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let query = supabase
+      .from('sentiment_items')
+      .select('*')
+      .order('item_date', { ascending: false })
+      .range(from, from + PAGE - 1);
 
-  if (bank) query = query.eq('bank', bank);
+    if (bank) query = query.eq('bank', bank);
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return (data || []) as unknown as SentimentItem[];
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    const rows = (data || []) as unknown as SentimentItem[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
 }
+
 
 /**
  * Fetch the latest cached dual scores from the database.
