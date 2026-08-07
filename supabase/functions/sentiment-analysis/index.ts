@@ -467,13 +467,35 @@ async function fetchPageText(url: string): Promise<string> {
     const r = await sf(url, 15000);
     if (!r || !r.ok) return '';
     const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (ct.includes('pdf') || url.toLowerCase().endsWith('.pdf')) {
-      return await extractPdfText(new Uint8Array(await r.arrayBuffer()));
+    const isPdf = ct.includes('pdf') || url.toLowerCase().endsWith('.pdf');
+    let text: string;
+    let bytes = 0;
+    if (isPdf) {
+      const raw = new Uint8Array(await r.arrayBuffer());
+      bytes = raw.length;
+      text = await extractPdfText(raw);
+    } else {
+      const html = await r.text();
+      bytes = html.length;
+      text = extractText(html);
     }
-    const html = await r.text();
-    return extractText(html);
+    // Register how this exact text version was produced so the score written
+    // from it can cite the fetch, the reader and the parser settings used.
+    if (text) {
+      EXTRACTIONS.set(await textFingerprint(text), {
+        url,
+        extractor: isPdf ? 'pdf' : 'html',
+        extractor_version: isPdf ? EXTRACTOR_VERSION : HTML_EXTRACTOR_VERSION,
+        http_status: r.status,
+        content_type: ct || 'unknown',
+        source_bytes: bytes,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+    return text;
   } catch { return ''; }
 }
+
 
 
 // ── XML helpers ──
