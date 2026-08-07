@@ -25,6 +25,8 @@ import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
+import { blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+
 
 
 /** Filter items to last N days */
@@ -42,24 +44,30 @@ function computeAvg(items: SentimentItem[]) {
   return Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
 }
 
-/** Group items by month for chart data */
+/**
+ * Group items by month using the SAME methodology as the headline aggregate:
+ * α · S_text + (1 − α) · S_stats with time-decay and document-tier weighting
+ * inside each channel. A plain mean would let the (far more numerous) macro
+ * releases drown out communications and would not match the live score.
+ */
 function monthlyAverages(items: SentimentItem[], bank?: string) {
   const filtered = (bank ? items.filter(i => i.bank === bank) : items).filter(i => Math.abs(i.net_score) > 0.001);
-  const byMonth: Record<string, { sum: number; count: number }> = {};
+  const byMonth: Record<string, SentimentItem[]> = {};
   for (const it of filtered) {
     const month = it.item_date.slice(0, 7);
-    if (!byMonth[month]) byMonth[month] = { sum: 0, count: 0 };
-    byMonth[month].sum += it.net_score;
-    byMonth[month].count++;
+    (byMonth[month] ||= []).push(it);
   }
   return Object.entries(byMonth)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, { sum, count }]) => ({
-      month,
-      avg: Math.round((sum / count) * 1000) / 1000,
-      count,
-    }));
+    .map(([month, monthItems]) => {
+      // Evaluate each month as of its own end date so decay is applied within-month.
+      const asOf = new Date(`${month}-01T00:00:00Z`);
+      asOf.setUTCMonth(asOf.getUTCMonth() + 1);
+      const blended = blendedAggregate(monthItems as unknown as WeightableItem[], bank, asOf);
+      return { month, avg: blended.avg, count: monthItems.length };
+    });
 }
+
 
 
 const Dashboard = () => {
@@ -88,17 +96,20 @@ const Dashboard = () => {
   const fed7 = recent7.filter(i => i.bank === 'FED');
   const ecb7 = recent7.filter(i => i.bank === 'ECB');
 
-  // Aggregate scores (comms 45d + stats 60d combined)
+  // Aggregate scores (comms 45d + stats 60d) — α-blended, decay & tier weighted
   const fedAggAll = [...fed45Comms, ...fed60Stats];
   const ecbAggAll = [...ecb45Comms, ...ecb60Stats];
-  const fedAggAvg = computeAvg(fedAggAll);
-  const ecbAggAvg = computeAvg(ecbAggAll);
+  const fedBlend = blendedAggregate(fedAggAll as unknown as WeightableItem[], 'FED');
+  const ecbBlend = blendedAggregate(ecbAggAll as unknown as WeightableItem[], 'ECB');
+  const fedAggAvg = fedAggAll.length ? fedBlend.avg : null;
+  const ecbAggAvg = ecbAggAll.length ? ecbBlend.avg : null;
 
-  // Separate scores
-  const fedCommAvg = computeAvg(fed45Comms);
-  const ecbCommAvg = computeAvg(ecb45Comms);
-  const fedStatAvg = computeAvg(fed60Stats);
-  const ecbStatAvg = computeAvg(ecb60Stats);
+  // Separate channel scores (same weighting, single channel each)
+  const fedCommAvg = fed45Comms.length ? fedBlend.text.avg : null;
+  const ecbCommAvg = ecb45Comms.length ? ecbBlend.text.avg : null;
+  const fedStatAvg = fed60Stats.length ? fedBlend.stats.avg : null;
+  const ecbStatAvg = ecb60Stats.length ? ecbBlend.stats.avg : null;
+
 
   // 1.5-year monthly fluctuation data
   const eighteenMonthsAgo = new Date();
