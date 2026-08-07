@@ -306,12 +306,20 @@ SCORING RULES:
 - Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
 - Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
 
+ENTITY-LEVEL SUB-DIMENSIONS (Layer 2) — score each independently on the same -1..+1 scale:
+- inflation_persistence: price pressures, wage growth, inflation expectations. Positive = pressures persistent/rising; negative = fading.
+- policy_stance: how restrictive vs accommodative the speaker frames current/needed policy. Positive = restrictive/tighter-for-longer; negative = easing bias.
+- growth_labor_drag: growth and labour market risk. Positive = economy resilient/tight labour market; negative = weakening growth, rising unemployment, recession risk.
+Use 0.0 for a dimension the text does not address. The headline score should be consistent with the dimensions you report.
+
 Respond with ONLY a JSON object (no markdown):
-{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>"}`;
+{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>",
+ "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>}}`;
 interface AIScore {
   score: number;
   label: string;
   reasoning: string;
+  dimensions?: { inflation_persistence: number; policy_stance: number; growth_labor_drag: number };
 }
 
 // Detect if an item is a major policy document that needs stronger AI model
