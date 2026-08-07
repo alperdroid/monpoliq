@@ -900,6 +900,67 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
   return results;
 }
 
+/**
+ * Historical backfill of the US statistical channel.
+ * The live fetch only keeps the newest vintage of each series, so months where our
+ * scraper was broken end up with no statistical items at all. ALFRED's
+ * `output_type=4` returns each observation's FIRST release together with the real
+ * publication date (`realtime_start`), which lets us rebuild the true history.
+ */
+async function backfillFred(key: string, fromDate: string): Promise<It[]> {
+  const today = new Date().toISOString().split('T')[0];
+  const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
+  // period -> { value, released } per series, ordered oldest → newest
+  const hist: Record<string, { period: string; value: number; released: string }[]> = {};
+
+  await Promise.allSettled(uniqueSeriesIds.map(async id => {
+    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${key}` +
+      `&file_type=json&output_type=4&realtime_start=2024-01-01&observation_start=2023-01-01&sort_order=asc`;
+    const r = await sf(url, 20000);
+    if (!r || !r.ok) return;
+    const d = await r.json();
+    const rows: { period: string; value: number; released: string }[] = [];
+    for (const o of (d.observations || [])) {
+      if (o.value === '.' || o.value === undefined) continue;
+      const v = parseFloat(o.value);
+      if (!isFinite(v)) continue;
+      const released = (o.realtime_start && o.realtime_start !== '1776-07-04') ? o.realtime_start : o.date;
+      rows.push({ period: o.date, value: v, released: released > today ? today : released });
+    }
+    hist[id] = rows;
+  }));
+
+  const out: It[] = [];
+  for (const s of FR) {
+    const rows = hist[s.id];
+    if (!rows || rows.length < 14) continue;
+    for (let i = 13; i < rows.length; i++) {
+      const cur = rows[i];
+      if (cur.released < fromDate || cur.released > today) continue;
+      const v = [cur.value, ...rows.slice(0, i).reverse().map(r => r.value)]; // newest → oldest
+      let val: number | null = null;
+      if (s.tr === 'lv') val = v[0];
+      else if (s.tr === 'd1' && v.length >= 2) val = v[0] - v[1];
+      else if (s.tr === 'p1' && v.length >= 2 && v[1] !== 0) val = ((v[0] - v[1]) / Math.abs(v[1])) * 100;
+      else if (s.tr === 'p12' && v.length >= 13 && v[12] !== 0) val = ((v[0] - v[12]) / Math.abs(v[12])) * 100;
+      if (val === null || !isFinite(val)) continue;
+      const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
+      out.push({
+        bank: 'FED', source: 'FRED', item_date: cur.released,
+        title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ', ref ' + cur.period + ')',
+        url: 'https://fred.stlouisfed.org/series/' + s.id,
+        is_statistical: true, hawk_pts: 0, dove_pts: 0,
+        net_score: r2.net_score, label: r2.label, word_count: 0,
+        reasons: ['fred', 'backfill', 'released:' + cur.released, 'period:' + cur.period],
+        stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
+      } as It);
+    }
+  }
+  console.log(`FRED backfill: ${out.length} historical statistical items since ${fromDate}`);
+  return out;
+}
+
+
 
 // ── FOMC Minutes ──
 const KNOWN_FOMC_DATES = [
