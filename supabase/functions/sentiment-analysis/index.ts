@@ -1250,7 +1250,7 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
 // unreadable fragments. This refetches the stored URL, extracts real prose and
 // rescores; a document that still cannot be read is parked at 0 with an honest
 // reason instead of an invented lean.
-async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false): Promise<number> {
+async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false, onlyStaleRubric = false): Promise<number> {
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
@@ -1264,12 +1264,20 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
       const audit = (r.policy_dimensions || {})['scoring_audit'] as { evidence_refs?: Record<string, unknown> } | undefined;
       return !!audit?.evidence_refs && Object.keys(audit.evidence_refs).length > 0;
     };
+    // Rows scored under an older rubric version must be re-read so the published
+    // score always reflects the current published methodology.
+    const staleRubric = (r: typeof rows[number]) => {
+      const audit = (r.policy_dimensions || {})['scoring_audit'] as { prompt_version?: string } | undefined;
+      return (audit?.prompt_version ?? '') !== SCORING_PROMPT_VERSION;
+    };
     const targets = rows
       .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections|minutes|account|statement|monetary policy/i.test(r.title)))
-      .filter(r => onlyMissingRefs
-        // Backfill pass: scored documents that carry no page/line citations yet.
-        ? !hasRefs(r) && Math.abs(Number(r.net_score) || 0) > 0.05
-        : suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
+      .filter(r => onlyStaleRubric
+        ? staleRubric(r) && Math.abs(Number(r.net_score) || 0) > 0.001
+        : onlyMissingRefs
+          // Backfill pass: scored documents that carry no page/line citations yet.
+          ? !hasRefs(r) && Math.abs(Number(r.net_score) || 0) > 0.05
+          : suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
       .slice(0, limit);
 
     let fixed = 0;
@@ -1278,7 +1286,7 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
       const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
       // A citation backfill must never destroy an existing score: if the re-read
       // comes back unscoreable, leave the stored row untouched.
-      if (onlyMissingRefs && !ai.dimensions) continue;
+      if ((onlyMissingRefs || onlyStaleRubric) && !ai.dimensions) continue;
 
       const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
         method: 'PATCH',
@@ -2165,7 +2173,7 @@ Deno.serve(async (req) => {
     if (body.mode === 'repair-transcripts') {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
-      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true);
+      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true, body.stale === true);
       return new Response(JSON.stringify({ mode: 'repair-transcripts', run_id: run.run_id, rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
