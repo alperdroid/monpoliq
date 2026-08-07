@@ -2155,10 +2155,11 @@ Deno.serve(async (req) => {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
       for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true);
-      return new Response(JSON.stringify({ mode: 'repair-transcripts', rescored: out }), {
+      return new Response(JSON.stringify({ mode: 'repair-transcripts', run_id: run.run_id, rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }
+
 
     if (body.mode === 'backfill-fred') {
 
