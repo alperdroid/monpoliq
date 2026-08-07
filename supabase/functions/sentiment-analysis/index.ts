@@ -1654,6 +1654,32 @@ Deno.serve(async (req) => {
 
     const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
 
+    // One-off / repeatable historical repair of the US statistical channel.
+    if (body.mode === 'backfill-fred') {
+      const from = body.from || '2026-01-01';
+      const items = fk ? await backfillFred(fk, from) : [];
+      let saved = 0;
+      for (let i = 0; i < items.length; i += 50) {
+        const batch = items.slice(i, i + 50);
+        const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+          method: 'POST', headers: persistHd,
+          body: JSON.stringify(batch.map(it => ({
+            bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+            url: it.url || '', is_statistical: it.is_statistical,
+            hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+            label: it.label, word_count: it.word_count, reasons: it.reasons,
+            stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+          }))),
+        });
+        if (resp.ok) saved += batch.length;
+        else console.error('backfill persist error:', resp.status, await resp.text());
+      }
+      return new Response(JSON.stringify({ mode: 'backfill-fred', from, found: items.length, saved }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+
+
     if (bank === 'both' || bank === 'FED') {
       const existing = await loadExistingItems('FED', sbUrl, sbKey);
       console.log('FED: ' + existing.size + ' existing items in DB');
