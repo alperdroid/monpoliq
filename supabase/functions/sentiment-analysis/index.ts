@@ -708,14 +708,14 @@ async function scoreWithAI(
 
   let truncated: string;
   const budget = isPolicy ? 24000 : 6000;
+  const beginLen = isPolicy ? 14000 : 3000;
+  const midLen = isPolicy ? 6000 : 1500;
+  const endLen = isPolicy ? 4000 : 1500;
   if (text.length <= budget) {
     truncated = text;
   } else {
     // Long documents (press conferences, minutes): sample beginning + middle + end.
     // The opening carries the decision and guidance, the Q&A carries the nuance.
-    const beginLen = isPolicy ? 14000 : 3000;
-    const midLen = isPolicy ? 6000 : 1500;
-    const endLen = isPolicy ? 4000 : 1500;
     const mid = Math.floor(text.length / 2);
     truncated = text.slice(0, beginLen) +
       '\n...[middle section truncated]...\n' +
@@ -723,6 +723,12 @@ async function scoreWithAI(
       '\n...[late section truncated]...\n' +
       text.slice(-endLen);
   }
+
+  // Identity of the exact text version scored, plus how it was obtained.
+  const textSha = await textFingerprint(text);
+  const extractionMeta = EXTRACTIONS.get(textSha);
+  const run = currentRun();
+
 
   // Add special instructions for policy documents
   let policyPreamble = '';
