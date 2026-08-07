@@ -24,6 +24,8 @@ import { StanceDecomposition } from '@/components/analytics/StanceDecomposition'
 import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
+import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
+
 
 /** Filter items to last N days */
 function recentItems(items: SentimentItem[], days: number) {
@@ -256,6 +258,10 @@ const Dashboard = () => {
 
       {/* CIE: Communication vs Model Gap */}
       <CIEWidget allItems={allItems} aiPrediction={aiPrediction} isPredictionLoading={isPredictionLoading} />
+
+      {/* Score attribution — verify which speaker / release drove the score */}
+      <ScoreAttribution allItems={allItems} />
+
 
       {/* Stance Decomposition Waterfall */}
       <div className="grid lg:grid-cols-2 gap-4">

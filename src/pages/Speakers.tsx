@@ -10,9 +10,20 @@ import { Search, User } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
 
-/** Known speaker reference data — metrics computed from real items */
-const SPEAKER_REFS = [
-  { name: 'Jerome Powell', patterns: ['powell'], role: 'Chair', institution: 'Federal Reserve Board', bank: 'FED' },
+/**
+ * Known speaker reference data — metrics computed from real items.
+ * `until` marks a departure date: items after it are ignored and the member is
+ * dropped from the roster. Independently, anyone with no communication in the
+ * last ACTIVE_WINDOW_DAYS is treated as no longer on the committee, so the
+ * roster prunes itself month over month without manual edits.
+ */
+const ACTIVE_WINDOW_DAYS = 120;
+
+const SPEAKER_REFS: { name: string; patterns: string[]; role: string; institution: string; bank: string; until?: string }[] = [
+  // Jerome Powell left the Board — kept only for historical matching up to his departure.
+  { name: 'Jerome Powell', patterns: ['powell'], role: 'Chair (former)', institution: 'Federal Reserve Board', bank: 'FED', until: '2026-06-01' },
+  { name: 'Michael Barr', patterns: ['barr'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
+
   { name: 'Christopher Waller', patterns: ['waller'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
   { name: 'Michelle Bowman', patterns: ['bowman'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
   { name: 'John Williams', patterns: ['williams'], role: 'President', institution: 'Fed Reserve Bank of New York', bank: 'FED' },
@@ -63,11 +74,16 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
   const cutoff30d = new Date();
   cutoff30d.setDate(cutoff30d.getDate() - 30);
   const cs30 = cutoff30d.toISOString().split('T')[0];
+  const activeCutoff = new Date();
+  activeCutoff.setDate(activeCutoff.getDate() - ACTIVE_WINDOW_DAYS);
+  const csActive = activeCutoff.toISOString().split('T')[0];
 
   return SPEAKER_REFS.map(ref => {
     const matched = items.filter(i => {
       const tl = i.title.toLowerCase();
-      return i.bank === ref.bank && ref.patterns.some(p => tl.includes(p));
+      if (i.bank !== ref.bank) return false;
+      if (ref.until && i.item_date > ref.until) return false;
+      return ref.patterns.some(p => tl.includes(p));
     });
 
     const scored = matched.filter(i => Math.abs(i.net_score) > 0.001);
@@ -76,7 +92,7 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
     const recent30Scored = recent30.filter(i => Math.abs(i.net_score) > 0.001);
     const recentAvg = recent30Scored.length ? Math.round(recent30Scored.reduce((s, i) => s + i.net_score, 0) / recent30Scored.length * 1000) / 1000 : 0;
     const toneChange = recent30Scored.length ? Math.round((recentAvg - avgTone) * 1000) / 1000 : 0;
-    const latest = matched[0]?.item_date || '';
+    const latest = matched.reduce((m, i) => (i.item_date > m ? i.item_date : m), '');
 
     return {
       name: ref.name,
@@ -89,8 +105,11 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
       latest_communication_date: latest,
       recent_tone_change: toneChange,
     };
-  }).filter(s => s.communication_count > 0);
+  })
+    // Current committee only: must have spoken inside the rolling activity window.
+    .filter(s => s.communication_count > 0 && s.latest_communication_date >= csActive);
 }
+
 
 const Speakers = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
@@ -119,7 +138,14 @@ const Speakers = () => {
   return (
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
+        <div>
+          <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Current committees only — members with no communication in the last {ACTIVE_WINDOW_DAYS} days drop off automatically.
+          </p>
+        </div>
+
+
         <span className="text-xs text-muted-foreground font-mono">
           {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
         </span>
