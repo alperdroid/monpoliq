@@ -228,25 +228,12 @@ function TechnicalCard({ t }: { t: Technical }) {
         </p>
       )}
 
-      <div className="rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
-        {composite !== null && (
-          <div>composite = 0.45·IP + 0.40·PS + 0.15·GL = <span className="font-semibold">{sign(composite)}</span></div>
-        )}
-        {aiHeadline !== null && (
-          <div>model headline = <span className="font-semibold">{sign(aiHeadline)}</span></div>
-        )}
-        {aiHeadline !== null && composite !== null && (
-          <div>
-            published = {w.toFixed(2)}·{sign(aiHeadline)} + {(1 - w).toFixed(2)}·{sign(composite)}
-            {' '}→ <span className="font-semibold">{sign(item.net_score)}</span> (neutral band ±{band.toFixed(2)})
-          </div>
-        )}
-        <div className="text-muted-foreground">
-          {audit?.model ? `model ${audit.model} · temp ${audit.temperature ?? 0} · prompt ${audit.prompt_version}` : 'model metadata recorded from the next scoring run'}
-          {audit?.input_chars ? ` · ${audit.input_chars.toLocaleString()} chars analysed` : ''}
-          {item.word_count ? ` · ${item.word_count.toLocaleString()} words in source` : ''}
+      {item.word_count ? (
+        <div className="text-[11px] text-muted-foreground">
+          {item.word_count.toLocaleString()} words in source
         </div>
-      </div>
+      ) : null}
+
 
       {item.reasons?.length > 0 && (
         <p className="text-[12px] text-muted-foreground italic">
