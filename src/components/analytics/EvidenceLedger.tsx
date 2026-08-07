@@ -139,7 +139,7 @@ function EvidenceRow({ row }: { row: Row }) {
             <div key={s.key} className="rounded-md border border-border/70 bg-card p-2.5 space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[12px] font-semibold">{s.label}</span>
-                <RefBadge ref={s.ref} />
+                <RefBadge loc={s.ref} />
                 <span className="ml-auto flex items-baseline gap-1.5">
                   <span className={cn('font-mono text-[12px] font-semibold',
                     s.value > 0 ? 'text-signal-hawkish' : s.value < 0 ? 'text-signal-dovish' : 'text-signal-neutral')}>
