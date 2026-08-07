@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { ExternalLink, Mic, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, blendedAggregate, commsWindow, type WeightableItem } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 /** Pull the speaker out of a title: "Cook, Economic Outlook" / "Frank Elderson: Europe's …" */
@@ -100,7 +100,10 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
   const [bank, setBank] = useState<'FED' | 'ECB'>('FED');
   const now = useMemo(() => new Date(), []);
 
-  const comms = useMemo(() => windowItems(allItems, bank, 45, false), [allItems, bank]);
+  const comms = useMemo(
+    () => commsWindow(allItems as unknown as WeightableItem[], bank, 45, now) as unknown as SentimentItem[],
+    [allItems, bank, now],
+  );
   const stats = useMemo(() => windowItems(allItems, bank, 60, true), [allItems, bank]);
 
   // Same α-blend as the published aggregate, so contributions sum to that exact score.
@@ -110,18 +113,24 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
   );
   const alpha = blend.alpha;
 
+  // The narrative channels share (1 − ω); the remaining ω is the realized policy
+  // action (hike/cut/hold), which the text channels cannot override.
+  const omega = blend.omega;
+  const narrativeWeight = 1 - omega;
+
   const commContribs = useMemo(
-    () => contributions(comms, bank, now, alpha),
-    [comms, bank, now, alpha],
+    () => contributions(comms, bank, now, alpha * narrativeWeight),
+    [comms, bank, now, alpha, narrativeWeight],
   );
   const statContribs = useMemo(
-    () => contributions(stats, bank, now, 1 - alpha),
-    [stats, bank, now, alpha],
+    () => contributions(stats, bank, now, (1 - alpha) * narrativeWeight),
+    [stats, bank, now, alpha, narrativeWeight],
   );
 
   const commTotal = commContribs.reduce((s, c) => s + c.contribution, 0);
   const statTotal = statContribs.reduce((s, c) => s + c.contribution, 0);
-  const netTotal = Math.round((commTotal + statTotal) * 1000) / 1000;
+  const anchorTotal = Math.round(omega * blend.anchor.score * 1000) / 1000;
+  const netTotal = Math.round((commTotal + statTotal + anchorTotal) * 1000) / 1000;
   const sign = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(3)}`;
 
   return (
@@ -136,6 +145,9 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
               Each item's contribution = its score × its weight (time decay × document tier or statistical
               reliability), divided by the sum of that channel's weights, then scaled by the channel's blend
               weight (α = {alpha.toFixed(2)} on communications, {(1 - alpha).toFixed(2)} on statistics).
+              A further {omega.toFixed(2)} of the headline is the realized policy action anchor (what the bank
+              actually did at its last decisions, recency-weighted over 180 days), so a bank that hiked cannot
+              be ranked below a bank that held purely on commentary volume.
               All contributions therefore sum exactly to the published aggregate score for the bank.
             </TooltipContent>
           </Tooltip>
@@ -155,6 +167,22 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
             </Button>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          Realized policy action anchor
+        </span>
+        <span className="text-[11px] font-mono text-muted-foreground">
+          {blend.anchor.last
+            ? `last decision ${blend.anchor.last.date}: ${blend.anchor.last.bps > 0 ? '+' : ''}${blend.anchor.last.bps}bp · net ${blend.anchor.net_bps > 0 ? '+' : ''}${blend.anchor.net_bps}bp / 180d`
+            : 'no decision in the last 180 days'}
+        </span>
+        <span className="text-[11px] font-mono text-muted-foreground">ω {omega.toFixed(2)} × {sign(blend.anchor.score)}</span>
+        <span className={cn('ml-auto text-[13px] font-mono font-bold',
+          anchorTotal > 0 ? 'text-signal-hawkish' : anchorTotal < 0 ? 'text-signal-dovish' : 'text-signal-neutral')}>
+          {sign(anchorTotal)}
+        </span>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">

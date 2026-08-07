@@ -25,7 +25,8 @@ import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
-import { blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+import { ScoringMethodology } from '@/components/analytics/ScoringMethodology';
+import { blendedAggregate, commsWindow, type WeightableItem } from '@/lib/scoring-weights';
 
 
 
@@ -89,8 +90,9 @@ const Dashboard = () => {
   const recentStats60 = recentItems(allItems.filter(i => i.is_statistical), 60);
   const recent7 = recentItems(allItems, 7);
 
-  const fed45Comms = recentComms45.filter(i => i.bank === 'FED');
-  const ecb45Comms = recentComms45.filter(i => i.bank === 'ECB');
+  const allComms = allItems.filter(i => !i.is_statistical);
+  const fed45Comms = commsWindow(allComms as unknown as WeightableItem[], 'FED', 45) as unknown as SentimentItem[];
+  const ecb45Comms = commsWindow(allComms as unknown as WeightableItem[], 'ECB', 45) as unknown as SentimentItem[];
   const fed60Stats = recentStats60.filter(i => i.bank === 'FED');
   const ecb60Stats = recentStats60.filter(i => i.bank === 'ECB');
   const fed7 = recent7.filter(i => i.bank === 'FED');
@@ -217,6 +219,9 @@ const Dashboard = () => {
               {fedAggAvg !== null ? (fedAggAvg > 0 ? '+' : '') + fedAggAvg.toFixed(3) : '—'}
             </p>
             <p className="text-[9px] text-muted-foreground">{fed45Comms.length} comms (45d) + {fed60Stats.length} stats (60d)</p>
+            <p className="text-[9px] text-muted-foreground font-mono">
+              narrative {fedBlend.narrative > 0 ? '+' : ''}{fedBlend.narrative.toFixed(3)} · action anchor {fedBlend.anchor.score > 0 ? '+' : ''}{fedBlend.anchor.score.toFixed(3)} (ω {fedBlend.omega.toFixed(2)}, net {fedBlend.anchor.net_bps > 0 ? '+' : ''}{fedBlend.anchor.net_bps}bp/180d)
+            </p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">FED Comms Only (45d)</span>
@@ -234,6 +239,9 @@ const Dashboard = () => {
               {ecbAggAvg !== null ? (ecbAggAvg > 0 ? '+' : '') + ecbAggAvg.toFixed(3) : '—'}
             </p>
             <p className="text-[9px] text-muted-foreground">{ecb45Comms.length} comms (45d) + {ecb60Stats.length} stats (60d)</p>
+            <p className="text-[9px] text-muted-foreground font-mono">
+              narrative {ecbBlend.narrative > 0 ? '+' : ''}{ecbBlend.narrative.toFixed(3)} · action anchor {ecbBlend.anchor.score > 0 ? '+' : ''}{ecbBlend.anchor.score.toFixed(3)} (ω {ecbBlend.omega.toFixed(2)}, net {ecbBlend.anchor.net_bps > 0 ? '+' : ''}{ecbBlend.anchor.net_bps}bp/180d)
+            </p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground">ECB Comms Only (45d)</span>
@@ -272,6 +280,9 @@ const Dashboard = () => {
 
       {/* Score attribution — verify which speaker / release drove the score */}
       <ScoreAttribution allItems={allItems} />
+
+      {/* Technical inputs behind every AI-scored communication */}
+      <ScoringMethodology allItems={allItems} />
 
 
       {/* Stance Decomposition Waterfall */}

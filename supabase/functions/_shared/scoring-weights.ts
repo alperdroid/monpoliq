@@ -17,9 +17,61 @@ export interface WeightableItem {
 
 // Verified policy meeting calendar (decision dates) — mirrors src/data/meeting-schedule.ts
 export const MEETINGS_2026: Record<string, string[]> = {
-  FED: ['2025-12-10', '2026-01-29', '2026-03-19', '2026-04-29', '2026-06-11', '2026-07-30', '2026-09-17', '2026-11-05', '2026-12-17'],
+  FED: ['2025-12-10', '2026-01-28', '2026-03-18', '2026-04-29', '2026-06-17', '2026-07-29', '2026-09-16', '2026-10-28', '2026-12-09'],
   ECB: ['2025-12-18', '2026-02-05', '2026-03-19', '2026-04-30', '2026-06-11', '2026-07-23', '2026-09-10', '2026-10-29', '2026-12-17'],
 };
+
+/**
+ * Realized policy actions in basis points (+ hike / − cut / 0 hold).
+ * Mirrors the `bps` field in src/data/meeting-schedule.ts.
+ */
+export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
+  FED: [
+    { date: '2025-06-18', bps: -25 }, { date: '2025-07-30', bps: -25 },
+    { date: '2025-09-17', bps: -25 }, { date: '2025-10-29', bps: 0 },
+    { date: '2025-12-10', bps: -25 }, { date: '2026-01-28', bps: 0 },
+    { date: '2026-03-18', bps: 0 }, { date: '2026-04-29', bps: 0 },
+    { date: '2026-06-17', bps: 0 }, { date: '2026-07-29', bps: 0 },
+  ],
+  ECB: [
+    { date: '2025-03-06', bps: -25 }, { date: '2025-04-17', bps: -25 },
+    { date: '2025-06-05', bps: -25 }, { date: '2025-07-24', bps: 0 },
+    { date: '2025-09-11', bps: 0 }, { date: '2025-10-30', bps: 0 },
+    { date: '2025-12-18', bps: 0 }, { date: '2026-02-05', bps: 0 },
+    { date: '2026-03-19', bps: 0 }, { date: '2026-04-30', bps: 0 },
+    { date: '2026-06-11', bps: 25 }, { date: '2026-07-23', bps: 0 },
+  ],
+};
+
+/** Weight of the realized-action anchor inside the headline aggregate. */
+export const ANCHOR_OMEGA = 0.35;
+
+/**
+ * Realized-action anchor: the stance implied by what the bank actually DID,
+ * recency-weighted over the trailing 180 days (120d half-life). A 25bp move
+ * maps to ±0.35 on the stance scale; the anchor is clamped to ±0.70.
+ * This is what keeps a bank that hiked from scoring below a bank that held.
+ */
+export function policyActionAnchor(
+  bank: string,
+  now: Date = new Date(),
+): { score: number; net_bps: number; last: { date: string; bps: number } | null } {
+  const actions = POLICY_ACTIONS[bank.toUpperCase()] || [];
+  let num = 0;
+  let netBps = 0;
+  let last: { date: string; bps: number } | null = null;
+  for (const a of actions) {
+    const age = (now.getTime() - new Date(a.date + 'T00:00:00Z').getTime()) / 86400000;
+    if (age < 0 || age > 180) continue;
+    if (!last || a.date > last.date) last = a;
+    const w = Math.pow(0.5, age / 120);
+    num += (a.bps / 25) * 0.45 * w;
+    netBps += a.bps;
+  }
+  const score = Math.round(Math.max(-0.7, Math.min(0.7, num)) * 1000) / 1000;
+  return { score, net_bps: netBps, last };
+}
+
 
 
 const DAY = 86400000;
@@ -210,7 +262,11 @@ export interface BlendResult extends Aggregate {
   alpha: number;
   text: { avg: number; n: number };
   stats: { avg: number; n: number };
+  omega: number;
+  anchor: { score: number; net_bps: number; last: { date: string; bps: number } | null };
+  narrative: number;
 }
+
 
 function freshestAge(items: WeightableItem[], now: Date): number {
   let best = Infinity;
@@ -255,7 +311,10 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
     bank,
     now,
   );
-  const avg = Math.round((alpha * t.avg + (1 - alpha) * s.avg) * 1000) / 1000;
+  const narrative = Math.round((alpha * t.avg + (1 - alpha) * s.avg) * 1000) / 1000;
+  const anchor = policyActionAnchor(bank || 'FED', now);
+  const omega = ANCHOR_OMEGA;
+  const avg = Math.round(((1 - omega) * narrative + omega * anchor.score) * 1000) / 1000;
   const dist: Record<string, number> = { ...t.dist };
   for (const [k, v] of Object.entries(s.dist)) dist[k] = (dist[k] || 0) + v;
   return {
@@ -266,7 +325,11 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
     half_life_days: t.half_life_days,
     tier_mix: t.tier_mix,
     alpha,
+    omega,
+    anchor,
+    narrative,
     text: { avg: t.avg, n: t.n },
+
     stats: { avg: s.avg, n: s.n },
   };
 }

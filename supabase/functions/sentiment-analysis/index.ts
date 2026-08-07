@@ -315,12 +315,42 @@ Use 0.0 for a dimension the text does not address. The headline score should be 
 Respond with ONLY a JSON object (no markdown):
 {"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>",
  "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>}}`;
+// ── Standardization layer (auditable, deterministic) ──
+// The model returns a headline score AND three sub-dimension scores. We do NOT
+// take the headline at face value: we recompute a deterministic composite from
+// the dimensions with fixed published weights and average the two. The stored
+// score is therefore reproducible from numbers the UI can show.
+export const SCORING_PROMPT_VERSION = 'v4-2026-08';
+export const DIMENSION_WEIGHTS = {
+  inflation_persistence: 0.45,
+  policy_stance: 0.40,
+  growth_labor_drag: 0.15,
+} as const;
+/** Blend of the model's own headline vs the dimension composite. */
+export const AI_HEADLINE_WEIGHT = 0.5;
+/** Scores inside this band are published as exactly neutral. */
+export const NEUTRAL_BAND = 0.10;
+
 interface AIScore {
   score: number;
   label: string;
   reasoning: string;
   dimensions?: { inflation_persistence: number; policy_stance: number; growth_labor_drag: number };
+  /** Technical audit trail for the UI: how the published score was derived. */
+  audit?: {
+    model: string;
+    prompt_version: string;
+    temperature: number;
+    ai_headline: number;
+    dimension_composite: number;
+    weights: typeof DIMENSION_WEIGHTS;
+    ai_headline_weight: number;
+    neutral_band: number;
+    input_chars: number;
+    published: number;
+  };
 }
+
 
 // Detect if an item is a major policy document that needs stronger AI model
 function isPolicyDocForScoring(title: string, source: string): boolean {
@@ -391,6 +421,9 @@ Content: ${truncated}`;
         },
         body: JSON.stringify({
           model,
+          // Deterministic decoding: the same document must always produce the
+          // same score, otherwise the published number is not reproducible.
+          temperature: 0,
           messages: [
             { role: 'system', content: AI_SCORING_PROMPT },
             { role: 'user', content: userMsg },
@@ -409,21 +442,46 @@ Content: ${truncated}`;
       content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
       const parsed = JSON.parse(content);
-      const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
-      const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
       const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
       const d = parsed.dimensions || {};
+      const dims = {
+        inflation_persistence: cl(d.inflation_persistence),
+        policy_stance: cl(d.policy_stance),
+        growth_labor_drag: cl(d.growth_labor_drag),
+      };
+
+      const aiHeadline = cl(parsed.score);
+      const composite = cl(
+        dims.inflation_persistence * DIMENSION_WEIGHTS.inflation_persistence +
+        dims.policy_stance * DIMENSION_WEIGHTS.policy_stance +
+        dims.growth_labor_drag * DIMENSION_WEIGHTS.growth_labor_drag,
+      );
+      const hasDims = Math.abs(dims.inflation_persistence) + Math.abs(dims.policy_stance) + Math.abs(dims.growth_labor_drag) > 0.001;
+      let score = hasDims
+        ? cl(AI_HEADLINE_WEIGHT * aiHeadline + (1 - AI_HEADLINE_WEIGHT) * composite)
+        : aiHeadline;
+      if (Math.abs(score) < NEUTRAL_BAND) score = 0;
+      const label = score > 0 ? 'hawkish' : score < 0 ? 'dovish' : 'neutral';
 
       return {
-        score: Math.round(score * 1000) / 1000,
+        score,
         label,
         reasoning: parsed.reasoning || '',
-        dimensions: {
-          inflation_persistence: cl(d.inflation_persistence),
-          policy_stance: cl(d.policy_stance),
-          growth_labor_drag: cl(d.growth_labor_drag),
+        dimensions: dims,
+        audit: {
+          model,
+          prompt_version: SCORING_PROMPT_VERSION,
+          temperature: 0,
+          ai_headline: aiHeadline,
+          dimension_composite: composite,
+          weights: DIMENSION_WEIGHTS,
+          ai_headline_weight: AI_HEADLINE_WEIGHT,
+          neutral_band: NEUTRAL_BAND,
+          input_chars: truncated.length,
+          published: score,
         },
       };
+
     } catch (e) {
       console.error(`AI score parse error (attempt ${attempt + 1}/${attempts}):`, e);
       lastErr = 'AI scoring error';
@@ -1760,7 +1818,7 @@ Deno.serve(async (req) => {
             word_count: c.text.split(/\s+/).length,
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}) },
           });
         }
       }
@@ -1945,7 +2003,7 @@ Deno.serve(async (req) => {
             word_count: c.text.split(/\s+/).length,
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}) },
           });
         }
       }
