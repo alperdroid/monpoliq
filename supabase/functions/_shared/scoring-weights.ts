@@ -313,7 +313,7 @@ export interface BlendResult extends Aggregate {
   text: { avg: number; n: number };
   stats: { avg: number; n: number };
   omega: number;
-  anchor: { score: number; net_bps: number; last: { date: string; bps: number } | null };
+  anchor: PolicyAnchor;
   narrative: number;
 }
 
