@@ -2133,7 +2133,12 @@ Deno.serve(async (req) => {
     const rawBank = (body.bank || 'both').toLowerCase();
     const bank = rawBank === 'fed' ? 'FED' : rawBank === 'ecb' ? 'ECB' : 'both';
     const days = body.days || 365;
-    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days);
+    // Stamp every score written by this invocation with one traceable run id.
+    const run = beginRun(
+      body.mode === 'repair-transcripts' && body.refs === true ? 'repair-citations' : (body.mode || 'scrape'),
+    );
+    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days + ' run=' + run.run_id + ' mode=' + run.mode);
+
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
     const fk = Deno.env.get('FRED_API_KEY') || '';
