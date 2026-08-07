@@ -20,7 +20,10 @@ const daysBetween = (a: Date, b: Date) => (a.getTime() - b.getTime()) / DAY;
 
 /** Half-life shortens near a decision and resets right after one. */
 export function dynamicHalfLife(bank: string, now: Date = new Date()): number {
-  const dates = (MEETINGS_2026[bank.toUpperCase() as 'FED' | 'ECB'] || []).map(d => new Date(d + 'T00:00:00Z'));
+  const dates = CENTRAL_BANK_MEETINGS
+    .filter(m => m.bank === bank.toUpperCase())
+    .map(m => new Date(m.date + 'T00:00:00Z'));
+
   if (!dates.length) return 21;
   let toNext = Infinity;
   let sinceLast = Infinity;
