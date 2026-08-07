@@ -46,31 +46,81 @@ export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
 /** Weight of the realized-action anchor inside the headline aggregate. */
 export const ANCHOR_OMEGA = 0.35;
 
+/** Published anchor parameters — mirrored in src/lib/scoring-weights.ts. */
+export const ANCHOR_PARAMS = {
+  window_days: 180,
+  half_life_days: 120,
+  score_per_25bp: 0.45,
+  clamp: 0.7,
+  omega: ANCHOR_OMEGA,
+  formula: 'anchor = clamp(Σ (bps/25 × 0.45 × 0.5^(age/120)), ±0.70)',
+  calendar: '_shared/scoring-weights.ts POLICY_ACTIONS (verified decision dates)',
+} as const;
+
+export interface AnchorAction {
+  date: string;
+  bps: number;
+  age_days: number;
+  decay: number;
+  contribution: number;
+}
+
+export interface PolicyAnchor {
+  score: number;
+  net_bps: number;
+  last: { date: string; bps: number } | null;
+  provenance: {
+    params: typeof ANCHOR_PARAMS;
+    actions: AnchorAction[];
+    raw: number;
+    clamped: boolean;
+    computed_at: string;
+  };
+}
+
 /**
  * Realized-action anchor: the stance implied by what the bank actually DID,
  * recency-weighted over the trailing 180 days (120d half-life). A 25bp move
- * maps to ±0.35 on the stance scale; the anchor is clamped to ±0.70.
- * This is what keeps a bank that hiked from scoring below a bank that held.
+ * maps to ±0.45 per 25bp before decay; the anchor is clamped to ±0.70. Each
+ * contributing decision is returned so the number can be re-derived by hand.
  */
-export function policyActionAnchor(
-  bank: string,
-  now: Date = new Date(),
-): { score: number; net_bps: number; last: { date: string; bps: number } | null } {
+export function policyActionAnchor(bank: string, now: Date = new Date()): PolicyAnchor {
   const actions = POLICY_ACTIONS[bank.toUpperCase()] || [];
   let num = 0;
   let netBps = 0;
   let last: { date: string; bps: number } | null = null;
+  const used: AnchorAction[] = [];
   for (const a of actions) {
     const age = (now.getTime() - new Date(a.date + 'T00:00:00Z').getTime()) / 86400000;
-    if (age < 0 || age > 180) continue;
+    if (age < 0 || age > ANCHOR_PARAMS.window_days) continue;
     if (!last || a.date > last.date) last = a;
-    const w = Math.pow(0.5, age / 120);
-    num += (a.bps / 25) * 0.45 * w;
+    const decay = Math.pow(0.5, age / ANCHOR_PARAMS.half_life_days);
+    const contribution = (a.bps / 25) * ANCHOR_PARAMS.score_per_25bp * decay;
+    num += contribution;
     netBps += a.bps;
+    used.push({
+      date: a.date,
+      bps: a.bps,
+      age_days: Math.round(age),
+      decay: Math.round(decay * 1000) / 1000,
+      contribution: Math.round(contribution * 1000) / 1000,
+    });
   }
-  const score = Math.round(Math.max(-0.7, Math.min(0.7, num)) * 1000) / 1000;
-  return { score, net_bps: netBps, last };
+  const score = Math.round(Math.max(-ANCHOR_PARAMS.clamp, Math.min(ANCHOR_PARAMS.clamp, num)) * 1000) / 1000;
+  return {
+    score,
+    net_bps: netBps,
+    last,
+    provenance: {
+      params: ANCHOR_PARAMS,
+      actions: used.sort((x, y) => (x.date < y.date ? 1 : -1)),
+      raw: Math.round(num * 1000) / 1000,
+      clamped: Math.abs(num) > ANCHOR_PARAMS.clamp,
+      computed_at: new Date().toISOString(),
+    },
+  };
 }
+
 
 
 
