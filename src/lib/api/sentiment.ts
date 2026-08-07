@@ -147,47 +147,28 @@ export async function getCommunicationItems(bank?: 'FED' | 'ECB'): Promise<Senti
 }
 
 // ─────────────────────────────────────────────────────────────
-// Weighted aggregation: recency (half-life 21d) × role × source
-// Used by Predictions page to make the 30d score less sticky
-// and to better reflect Chair / official-decision signals.
+// Weighted aggregation (Layer 3 normalization):
+//   dynamic time-decay half-life × contextual document tier ×
+//   statistical reliability weight
+// Mirrors the edge-function aggregation so UI values match the
+// stored scores. See src/lib/scoring-weights.ts.
 // ─────────────────────────────────────────────────────────────
-const ROLE_WEIGHTS: Array<[RegExp, number]> = [
-  [/chair|president|lagarde|powell/i, 2.0],
-  [/vice[- ]?chair|vice[- ]?president|de guindos|jefferson/i, 1.5],
-  [/governor|board member|executive board/i, 1.1],
-  [/member|council/i, 0.9],
-];
-const SOURCE_WEIGHTS: Array<[RegExp, number]> = [
-  [/press conf|monetary policy statement|decision|fomc statement/i, 2.0],
-  [/minutes|account/i, 1.6],
-  [/speech|remarks|testimony/i, 1.0],
-  [/interview|media/i, 0.7],
-  [/blog|research bulletin/i, 0.6],
-];
-
-function pickWeight(text: string, table: Array<[RegExp, number]>, fallback = 1.0): number {
-  for (const [re, w] of table) if (re.test(text)) return w;
-  return fallback;
-}
-
 export function weightedAvgScore(
   items: SentimentItem[],
-  opts: { halfLifeDays?: number; now?: Date } = {},
-): { avg: number; n: number } | null {
+  opts: { halfLifeDays?: number; now?: Date; bank?: string } = {},
+): { avg: number; n: number; halfLifeDays: number } | null {
+  const now = opts.now ?? new Date();
+  const bank = opts.bank ?? items[0]?.bank ?? 'FED';
+  const halfLife = opts.halfLifeDays ?? dynamicHalfLife(bank, now);
   const scored = items.filter(i => Math.abs(i.net_score) > 0.001);
   if (!scored.length) return null;
-  const halfLife = opts.halfLifeDays ?? 21;
-  const now = opts.now ?? new Date();
   let num = 0, den = 0;
   for (const it of scored) {
-    const ageDays = Math.max(0, (now.getTime() - new Date(it.item_date).getTime()) / 86400000);
-    const recency = Math.pow(0.5, ageDays / halfLife);
-    const role = pickWeight(it.title || '', ROLE_WEIGHTS, 1.0);
-    const source = pickWeight(it.source || '', SOURCE_WEIGHTS, 1.0);
-    const w = recency * role * source;
+    const w = itemWeight(it as unknown as WeightableItem, halfLife, now);
     num += it.net_score * w;
     den += w;
   }
   if (den === 0) return null;
-  return { avg: Math.round((num / den) * 1000) / 1000, n: scored.length };
+  return { avg: Math.round((num / den) * 1000) / 1000, n: scored.length, halfLifeDays: halfLife };
 }
+
