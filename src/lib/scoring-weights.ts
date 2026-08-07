@@ -115,3 +115,53 @@ export function weightedAggregate(sub: WeightableItem[], bank?: string, now: Dat
   const avg = den > 0 ? Math.round((num / den) * 1000) / 1000 : 0;
   return { avg, n: scored.length, dist, sentiment: sentimentLabel(avg), half_life_days: halfLife };
 }
+
+// ── Layer 4: Aggregate = α·S_text + (1−α)·S_stats (mirrors the edge function) ──
+export interface BlendResult extends Aggregate {
+  alpha: number;
+  text: { avg: number; n: number };
+  stats: { avg: number; n: number };
+}
+
+function freshestAge(items: WeightableItem[], now: Date): number {
+  let best = Infinity;
+  for (const i of items) {
+    const age = Math.max(0, daysBetween(now, new Date(i.item_date + 'T00:00:00Z')));
+    if (age < best) best = age;
+  }
+  return best;
+}
+
+export function dynamicAlpha(
+  textItems: WeightableItem[],
+  statItems: WeightableItem[],
+  bank?: string,
+  now: Date = new Date(),
+): number {
+  if (!textItems.length) return 0;
+  if (!statItems.length) return 1;
+  const gap = Math.max(-14, Math.min(14, freshestAge(statItems, now) - freshestAge(textItems, now)));
+  let alpha = 0.6 + (gap / 14) * 0.2;
+  if (bank && dynamicHalfLife(bank, now) <= 10) alpha += 0.05;
+  return Math.round(Math.max(0.35, Math.min(0.85, alpha)) * 100) / 100;
+}
+
+export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date = new Date()): BlendResult {
+  const textItems = all.filter(i => !i.is_statistical);
+  const statItems = all.filter(i => i.is_statistical);
+  const t = weightedAggregate(textItems, bank, now);
+  const s = weightedAggregate(statItems, bank, now);
+  const alpha = dynamicAlpha(
+    textItems.filter(i => Math.abs(i.net_score) > 0.001),
+    statItems.filter(i => Math.abs(i.net_score) > 0.001),
+    bank,
+    now,
+  );
+  const avg = Math.round((alpha * t.avg + (1 - alpha) * s.avg) * 1000) / 1000;
+  const dist: Record<string, number> = { ...t.dist };
+  for (const [k, v] of Object.entries(s.dist)) dist[k] = (dist[k] || 0) + v;
+  return {
+    avg, n: t.n + s.n, dist, sentiment: sentimentLabel(avg), half_life_days: t.half_life_days,
+    alpha, text: { avg: t.avg, n: t.n }, stats: { avg: s.avg, n: s.n },
+  };
+}
