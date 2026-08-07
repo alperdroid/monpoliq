@@ -139,6 +139,7 @@ const Speakers = () => {
     <div className="space-y-4 animate-slide-in">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
+
         <span className="text-xs text-muted-foreground font-mono">
           {isLoading ? 'Loading...' : `${filtered.length} speakers found`}
         </span>
