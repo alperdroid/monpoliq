@@ -620,6 +620,48 @@ Respond with ONLY a JSON object (no markdown):
  "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>},
  "evidence": {"inflation_persistence": "<quote or empty>", "policy_stance": "<quote or empty>", "growth_labor_drag": "<quote or empty>"}}`;
 
+
+// ── Deterministic hold guard ────────────────────────────────────────────────
+// A decision to keep rates unchanged is a continuation, not a new directional
+// signal. If the quote the model scored policy_stance from is only the hold
+// announcement (no forward guidance words), the dimension is capped at ±0.2.
+// Dissents are then applied mechanically from the reported vote split.
+const HOLD_ANNOUNCEMENT = /\b(maintain|maintaining|keep|keeping|leave|leaving|left|unchanged|no change)\b[^.]{0,80}\b(target range|rate|rates|policy rate|federal funds)\b|\b(target range|rates?)\b[^.]{0,40}\b(unchanged|at its current level)\b/i;
+const FORWARD_DIRECTION = /\b(for some time|higher for longer|longer than|not close to|further (hike|increase|easing|cuts?)|will need to|expect to (cut|raise)|additional (tightening|easing)|restrictive for|patient|pause before|next move|room to (cut|raise)|sufficiently restrictive)\b/i;
+const HOLD_TITLE = /statement|monetary policy decision|press conf|minutes|account/i;
+
+function applyHoldGuard(
+  stance: number,
+  quote: string,
+  fullText: string,
+  title: string,
+): { value: number; notes: string[] } {
+  const notes: string[] = [];
+  if (!HOLD_TITLE.test(title)) return { value: stance, notes };
+  let v = stance;
+  const bareHold = HOLD_ANNOUNCEMENT.test(quote) && !FORWARD_DIRECTION.test(quote);
+  if (bareHold && Math.abs(v) > 0.2) {
+    v = Math.sign(v) * 0.2;
+    notes.push('hold-announcement quote carries no forward guidance → capped at ±0.20');
+  }
+  // Vote split, e.g. "by a 9 to 3 vote": dissenters move the stance against the
+  // majority. Direction of dissent is read from nearby cut/hike wording.
+  const vote = /\b(\d{1,2})\s*(?:to|-|–)\s*(\d{1,2})\s*vote\b/i.exec(fullText);
+  if (vote) {
+    const dissent = Math.min(Number(vote[1]), Number(vote[2]));
+    if (dissent >= 1) {
+      const window = fullText.slice(Math.max(0, vote.index - 400), vote.index + 900);
+      const forCut = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(lower|cut|reduc)/i.test(window);
+      const forHike = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(higher|hike|increas|raise)/i.test(window);
+      const step = dissent >= 3 ? 0.3 : 0.2;
+      if (forCut && !forHike) { v -= step; notes.push(`${dissent} dissent(s) favouring easing → −${step.toFixed(2)}`); }
+      else if (forHike && !forCut) { v += step; notes.push(`${dissent} dissent(s) favouring tightening → +${step.toFixed(2)}`); }
+    }
+  }
+  v = Math.round(Math.max(-1, Math.min(1, v)) * 1000) / 1000;
+  return { value: v, notes };
+}
+
 // ── Standardization layer (auditable, deterministic) ──
 // The model returns a headline score AND three sub-dimension scores. We do NOT
 // take the headline at face value: we recompute a deterministic composite from
@@ -804,6 +846,16 @@ Content: ${truncated}`;
         policy_stance: cl(d.policy_stance),
         growth_labor_drag: cl(d.growth_labor_drag),
       };
+
+      const rawStance = dims.policy_stance;
+      const rawEv = parsed.evidence || {};
+      const guard = applyHoldGuard(
+        rawStance,
+        typeof rawEv.policy_stance === 'string' ? rawEv.policy_stance : '',
+        text || '',
+        title || '',
+      );
+      dims.policy_stance = guard.value;
 
       const aiHeadline = cl(parsed.score);
       const composite = cl(
