@@ -381,5 +381,19 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
     text: { avg: t.avg, n: t.n },
 
     stats: { avg: s.avg, n: s.n },
+    provenance: {
+      formula: 'headline = (1-ω)·[α·comms + (1-α)·stats] + ω·anchor',
+      alpha,
+      omega,
+      comms_avg: t.avg,
+      comms_n: t.n,
+      stats_avg: s.avg,
+      stats_n: s.n,
+      narrative,
+      anchor_score: anchor.score,
+      half_life_days: t.half_life_days,
+      computed_at: new Date().toISOString(),
+    },
   };
 }
+
