@@ -26,10 +26,11 @@ function recentItems(items: SentimentItem[], days: number) {
   return items.filter(i => i.item_date >= cs);
 }
 
-function compute30dAvg(items: SentimentItem[]) {
-  const w = weightedAvgScore(items, { halfLifeDays: 21 });
+function compute30dAvg(items: SentimentItem[], bank?: string) {
+  const w = weightedAvgScore(items, { bank });
   return w ? w.avg : null;
 }
+
 
 const Predictions = () => {
   const { data: aiPrediction, isLoading } = useQuery({
@@ -56,8 +57,9 @@ const Predictions = () => {
   const fedStats30 = recent30.filter(i => i.bank === 'FED' && i.is_statistical);
   const ecbStats30 = recent30.filter(i => i.bank === 'ECB' && i.is_statistical);
 
-  const fed30Avg = compute30dAvg(recent30.filter(i => i.bank === 'FED'));
-  const ecb30Avg = compute30dAvg(recent30.filter(i => i.bank === 'ECB'));
+  const fed30Avg = compute30dAvg(recent30.filter(i => i.bank === 'FED'), 'FED');
+  const ecb30Avg = compute30dAvg(recent30.filter(i => i.bank === 'ECB'), 'ECB');
+
 
   return (
     <div className="space-y-6 animate-slide-in max-w-3xl">

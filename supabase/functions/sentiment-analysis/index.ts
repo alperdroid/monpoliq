@@ -5,6 +5,12 @@
 // Fed Funds excluded (it's the target variable, not a predictor).
 // Duplicate inflation prints within same month → counted once.
 // FOMC & ECB press conference transcripts now scraped and analyzed.
+// Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
+
+import { weightedAggregate } from '../_shared/scoring-weights.ts';
+import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
+
+
 
 const CH = {
   'Access-Control-Allow-Origin': '*',
@@ -1358,16 +1364,11 @@ async function fetchEcbStats(cs: string, existingDbItems: It[] = []): Promise<It
   return deduplicateStatItems(items, existingDbItems);
 }
 
-// ── Aggregation (excludes zero-score neutral items) ──
-function ag(sub: It[]) {
-  const scored = sub.filter(i => Math.abs(i.net_score) > 0.001);
-  if (!scored.length) return { avg: 0, n: 0, dist: {} as Record<string, number>, sentiment: 'NEUTRAL' };
-  const avg = Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
-  const sentiment = avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
-  const dist: Record<string, number> = {};
-  for (const i of scored) dist[i.label] = (dist[i.label] || 0) + 1;
-  return { avg, n: scored.length, dist, sentiment };
+// ── Aggregation (time-decay × document tier × statistical reliability) ──
+function ag(sub: It[], bank?: string) {
+  return weightedAggregate(sub, bank);
 }
+
 
 // ── DB persistence ──
 async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2: ReturnType<typeof ag>) {
@@ -1442,6 +1443,9 @@ Deno.serve(async (req) => {
 
       const fi: It[] = [];
       if (fr.status === 'fulfilled') fi.push(...fr.value);
+      // Re-score macro prints as standardized surprises vs market consensus
+      if (aiKey && fi.length) await applyConsensusSurprise(fi, aiKey);
+
 
       // Combine all communication sources
       const allRawComms: RawComm[] = [];
@@ -1520,7 +1524,7 @@ Deno.serve(async (req) => {
         }
       }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
-      const s1 = ag(allFedItems.filter(i => !i.is_statistical)), s2 = ag(allFedItems);
+      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED'), s2 = ag(allFedItems, 'FED');
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
@@ -1551,6 +1555,9 @@ Deno.serve(async (req) => {
 
       const ei: It[] = [];
       if (st.status === 'fulfilled') ei.push(...st.value);
+      // Re-score macro prints as standardized surprises vs market consensus
+      if (aiKey && ei.length) await applyConsensusSurprise(ei, aiKey);
+
 
       const allRawComms: RawComm[] = rawComms.status === 'fulfilled' ? rawComms.value : [];
       
@@ -1686,7 +1693,7 @@ Deno.serve(async (req) => {
         }
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
-      const s1 = ag(allEcbItems.filter(i => !i.is_statistical)), s2 = ag(allEcbItems);
+      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB'), s2 = ag(allEcbItems, 'ECB');
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
