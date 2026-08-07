@@ -63,19 +63,28 @@ ${listed}
 Reply ONLY with a JSON array: [{"i":0,"consensus":2.1,"sigma":0.15}, ...]`;
 
   try {
-    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-3.6-flash',
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!resp.ok) {
-      console.error('consensus fetch failed:', resp.status, await resp.text().catch(() => ''));
-      return out;
+    let resp: Response | null = null;
+    // Rate limits on the gateway are common; retry once with backoff.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'google/gemini-3.6-flash',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (resp.ok) break;
+      const status = resp.status;
+      const body = await resp.text().catch(() => '');
+      console.error(`consensus fetch failed (attempt ${attempt + 1}): ${status} ${body.slice(0, 200)}`);
+      if (status !== 429 && status < 500) return out;
+      if (attempt < 2) await new Promise(r => setTimeout(r, 2500 * (attempt + 1)));
+      resp = null;
     }
+    if (!resp || !resp.ok) return out;
     const data = await resp.json();
+
     const raw = (data.choices?.[0]?.message?.content || '').replace(/```json|```/g, '').trim();
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) return out;
