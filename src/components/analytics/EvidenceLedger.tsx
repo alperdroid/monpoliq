@@ -160,11 +160,36 @@ function EvidenceRow({ row }: { row: Row }) {
             </div>
           ))}
 
-          {audit?.model && (
-            <p className="font-mono text-[10px] text-muted-foreground">
-              extracted text → {audit.model} · prompt {audit.prompt_version}
-            </p>
+          {(audit?.model || pv) && (
+            <div className="rounded-md border border-dashed border-border bg-muted/30 p-2.5 space-y-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Provenance — this score's exact inputs
+              </p>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px] text-muted-foreground">
+                {audit?.model && <ProvRow k="model" v={`${audit.model} · prompt ${audit.prompt_version ?? '—'} · temp 0`} />}
+                {pv?.text_sha256 && <ProvRow k="text version (sha256)" v={pv.text_sha256} />}
+                {pv?.extractor_version && <ProvRow k="reader" v={`${pv.extractor ?? '?'} · ${pv.extractor_version}`} />}
+                {pv?.parser_settings && (
+                  <ProvRow
+                    k="parser settings"
+                    v={`page_sep ${pv.parser_settings.page_sep} · prose ≥${pv.parser_settings.prose_stream_min_words}w · gate ≥${pv.prose_gate_min_words ?? '?'}w`}
+                  />
+                )}
+                {pv?.sampling && (
+                  <ProvRow
+                    k="sampling"
+                    v={pv.sampling.sampled
+                      ? `${pv.sampling.sent_chars?.toLocaleString()} / ${pv.text_chars?.toLocaleString()} chars (${pv.sampling.begin}+${pv.sampling.middle}+${pv.sampling.end})`
+                      : `full text · ${pv.text_chars?.toLocaleString()} chars`}
+                  />
+                )}
+                {pv?.http_status ? <ProvRow k="fetch" v={`HTTP ${pv.http_status} · ${pv.content_type ?? '—'}`} /> : null}
+                {pv?.run_id && <ProvRow k="run" v={`${pv.run_mode ?? 'run'} · ${pv.run_id.slice(0, 8)} · attempt ${pv.attempt ?? 1}`} />}
+                {pv?.scored_at && <ProvRow k="scored at" v={new Date(pv.scored_at).toISOString().replace('T', ' ').slice(0, 16) + 'Z'} />}
+              </dl>
+            </div>
           )}
+
         </div>
       )}
     </div>
