@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { ExternalLink, Mic, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, type WeightableItem } from '@/lib/scoring-weights';
+import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 /** Pull the speaker out of a title: "Cook, Economic Outlook" / "Frank Elderson: Europe's …" */
@@ -23,7 +23,7 @@ interface Contribution {
   share: number; // 0..1 share of total absolute influence
 }
 
-function contributions(items: SentimentItem[], bank: string, now: Date): Contribution[] {
+function contributions(items: SentimentItem[], bank: string, now: Date, channelWeight = 1): Contribution[] {
   const scored = items.filter(i => Math.abs(i.net_score) > 0.001);
   if (!scored.length) return [];
   const halfLife = dynamicHalfLife(bank, now);
@@ -37,7 +37,7 @@ function contributions(items: SentimentItem[], bank: string, now: Date): Contrib
   return weighted
     .map(w => ({
       ...w,
-      contribution: Math.round((w.contribution / den) * 1000) / 1000,
+      contribution: Math.round((w.contribution / den) * channelWeight * 1000) / 1000,
       share: Math.abs(w.contribution) / absTotal,
     }))
     .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
@@ -100,14 +100,29 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
   const [bank, setBank] = useState<'FED' | 'ECB'>('FED');
   const now = useMemo(() => new Date(), []);
 
+  const comms = useMemo(() => windowItems(allItems, bank, 45, false), [allItems, bank]);
+  const stats = useMemo(() => windowItems(allItems, bank, 60, true), [allItems, bank]);
+
+  // Same α-blend as the published aggregate, so contributions sum to that exact score.
+  const blend = useMemo(
+    () => blendedAggregate([...comms, ...stats] as unknown as WeightableItem[], bank, now),
+    [comms, stats, bank, now],
+  );
+  const alpha = blend.alpha;
+
   const commContribs = useMemo(
-    () => contributions(windowItems(allItems, bank, 45, false), bank, now),
-    [allItems, bank, now],
+    () => contributions(comms, bank, now, alpha),
+    [comms, bank, now, alpha],
   );
   const statContribs = useMemo(
-    () => contributions(windowItems(allItems, bank, 60, true), bank, now),
-    [allItems, bank, now],
+    () => contributions(stats, bank, now, 1 - alpha),
+    [stats, bank, now, alpha],
   );
+
+  const commTotal = commContribs.reduce((s, c) => s + c.contribution, 0);
+  const statTotal = statContribs.reduce((s, c) => s + c.contribution, 0);
+  const netTotal = Math.round((commTotal + statTotal) * 1000) / 1000;
+  const sign = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(3)}`;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-sm">
@@ -119,11 +134,20 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
             </TooltipTrigger>
             <TooltipContent className="max-w-xs text-[12px]">
               Each item's contribution = its score × its weight (time decay × document tier or statistical
-              reliability), divided by the sum of all weights. Contributions add up to the published score,
-              so you can verify exactly which speaker or release drove it.
+              reliability), divided by the sum of that channel's weights, then scaled by the channel's blend
+              weight (α = {alpha.toFixed(2)} on communications, {(1 - alpha).toFixed(2)} on statistics).
+              All contributions therefore sum exactly to the published aggregate score for the bank.
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">Net</span>
+          <span className={cn('text-[13px] font-mono font-bold',
+            netTotal > 0.1 ? 'text-signal-hawkish' : netTotal < -0.1 ? 'text-signal-dovish' : 'text-signal-neutral')}>
+            {sign(netTotal)}
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono">= aggregate {sign(blend.avg)}</span>
+        </div>
         <div className="flex gap-1.5">
           {(['FED', 'ECB'] as const).map(b => (
             <Button key={b} size="sm" variant={bank === b ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setBank(b)}>
@@ -140,11 +164,20 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
             <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
               Top speaker contributions (45d)
             </p>
+            <span className="ml-auto text-[11px] font-mono font-semibold">{sign(commTotal)}</span>
           </div>
           {commContribs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground py-4">No scored communications in this window.</p>
           ) : (
-            commContribs.slice(0, 6).map((c, i) => <Row key={i} c={c} kind="comm" />)
+            <>
+              {commContribs.slice(0, 6).map((c, i) => <Row key={i} c={c} kind="comm" />)}
+              {commContribs.length > 6 && (
+                <p className="text-[10px] text-muted-foreground font-mono pt-1">
+                  + {commContribs.length - 6} more items ={' '}
+                  {sign(commContribs.slice(6).reduce((s, c) => s + c.contribution, 0))}
+                </p>
+              )}
+            </>
           )}
         </div>
 
@@ -154,11 +187,20 @@ export function ScoreAttribution({ allItems }: { allItems: SentimentItem[] }) {
             <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
               Top statistical contributions (60d)
             </p>
+            <span className="ml-auto text-[11px] font-mono font-semibold">{sign(statTotal)}</span>
           </div>
           {statContribs.length === 0 ? (
             <p className="text-[12px] text-muted-foreground py-4">No scored statistical releases in this window.</p>
           ) : (
-            statContribs.slice(0, 6).map((c, i) => <Row key={i} c={c} kind="stat" />)
+            <>
+              {statContribs.slice(0, 6).map((c, i) => <Row key={i} c={c} kind="stat" />)}
+              {statContribs.length > 6 && (
+                <p className="text-[10px] text-muted-foreground font-mono pt-1">
+                  + {statContribs.length - 6} more items ={' '}
+                  {sign(statContribs.slice(6).reduce((s, c) => s + c.contribution, 0))}
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
