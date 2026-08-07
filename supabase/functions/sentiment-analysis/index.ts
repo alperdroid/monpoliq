@@ -606,6 +606,14 @@ Content: ${truncated}`;
       if (Math.abs(score) < NEUTRAL_BAND) score = 0;
       const label = score > 0 ? 'hawkish' : score < 0 ? 'dovish' : 'neutral';
 
+      const ev = parsed.evidence || {};
+      const q = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 240) : '');
+      const evidence = {
+        inflation_persistence: q(ev.inflation_persistence),
+        policy_stance: q(ev.policy_stance),
+        growth_labor_drag: q(ev.growth_labor_drag),
+      };
+
       return {
         score,
         label,
@@ -622,7 +630,9 @@ Content: ${truncated}`;
           neutral_band: NEUTRAL_BAND,
           input_chars: truncated.length,
           published: score,
+          evidence,
         },
+
       };
 
     } catch (e) {
