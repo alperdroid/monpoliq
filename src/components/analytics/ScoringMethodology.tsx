@@ -320,7 +320,7 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
         </div>
       )}
 
-      <AggregateProvenance allItems={allItems} bank={bank} />
+
 
 
       <div className="grid lg:grid-cols-2 gap-3">
