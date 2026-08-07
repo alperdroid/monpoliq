@@ -25,6 +25,8 @@ import { CrossBankSpread } from '@/components/analytics/CrossBankSpread';
 import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
+import { blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+
 
 
 /** Filter items to last N days */
