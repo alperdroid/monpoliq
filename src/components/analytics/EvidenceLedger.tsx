@@ -198,7 +198,7 @@ function EvidenceRow({ row }: { row: Row }) {
               </p>
               <p className="text-[11px] text-muted-foreground">
                 raw reading {audit.stance_adjustments.raw_policy_stance?.toFixed(2)} → published{' '}
-                {dims?.policy_stance?.toFixed(2)}
+                {snippets.find(s => s.key === 'policy_stance')?.value?.toFixed(2) ?? '—'}
               </p>
               <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
                 {audit.stance_adjustments.applied.map(a => <li key={a}>{a}</li>)}
