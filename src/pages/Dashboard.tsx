@@ -26,6 +26,8 @@ import { SurpriseIndex } from '@/components/analytics/SurpriseIndex';
 import { ChangePointSection } from '@/components/analytics/ChangePointTimeline';
 import { ScoreAttribution } from '@/components/analytics/ScoreAttribution';
 import { ScoringMethodology } from '@/components/analytics/ScoringMethodology';
+import { EvidenceLedger } from '@/components/analytics/EvidenceLedger';
+
 import { blendedAggregate, commsWindow, type WeightableItem } from '@/lib/scoring-weights';
 
 
@@ -283,6 +285,10 @@ const Dashboard = () => {
 
       {/* Technical inputs behind every AI-scored communication */}
       <ScoringMethodology allItems={allItems} />
+
+      {/* Extracted snippets with page/line references behind each score */}
+      <EvidenceLedger allItems={allItems} />
+
 
 
       {/* Stance Decomposition Waterfall */}
