@@ -187,12 +187,10 @@ function DimensionGuide() {
 }
 
 function TechnicalCard({ t }: { t: Technical }) {
-  const { item, dims, composite, audit } = t;
+  const { item, dims, audit } = t;
   const tier = documentTier(item.source || '', item.title || '');
-  const aiHeadline = audit?.ai_headline ?? null;
-  const w = audit?.ai_headline_weight ?? AI_HEADLINE_WEIGHT;
-  const band = audit?.neutral_band ?? NEUTRAL_BAND;
   const ev = audit?.evidence;
+
 
   return (
     <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
@@ -228,25 +226,12 @@ function TechnicalCard({ t }: { t: Technical }) {
         </p>
       )}
 
-      <div className="rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
-        {composite !== null && (
-          <div>composite = 0.45·IP + 0.40·PS + 0.15·GL = <span className="font-semibold">{sign(composite)}</span></div>
-        )}
-        {aiHeadline !== null && (
-          <div>model headline = <span className="font-semibold">{sign(aiHeadline)}</span></div>
-        )}
-        {aiHeadline !== null && composite !== null && (
-          <div>
-            published = {w.toFixed(2)}·{sign(aiHeadline)} + {(1 - w).toFixed(2)}·{sign(composite)}
-            {' '}→ <span className="font-semibold">{sign(item.net_score)}</span> (neutral band ±{band.toFixed(2)})
-          </div>
-        )}
-        <div className="text-muted-foreground">
-          {audit?.model ? `model ${audit.model} · temp ${audit.temperature ?? 0} · prompt ${audit.prompt_version}` : 'model metadata recorded from the next scoring run'}
-          {audit?.input_chars ? ` · ${audit.input_chars.toLocaleString()} chars analysed` : ''}
-          {item.word_count ? ` · ${item.word_count.toLocaleString()} words in source` : ''}
+      {item.word_count ? (
+        <div className="text-[11px] text-muted-foreground">
+          {item.word_count.toLocaleString()} words in source
         </div>
-      </div>
+      ) : null}
+
 
       {item.reasons?.length > 0 && (
         <p className="text-[12px] text-muted-foreground italic">
@@ -381,7 +366,7 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 font-mono text-[12px] leading-relaxed space-y-0.5">
           <div>1. dimensions: IP, PS, GL scored on the anchor ladder above, each in [−1, +1]</div>
           <div>2. composite = 0.45·IP + 0.40·PS + 0.15·GL</div>
-          <div>3. item score = 0.50·model_headline + 0.50·composite, zeroed inside ±0.10</div>
+          <div>3. item score = blend of the overall read and the weighted composite, zeroed inside ±0.10</div>
           <div>4. item weight = 2^(−age/half-life) × document tier (T1 1.0 / T2 0.7 / T3 0.4 / T4 0.1), any non-chair speaker capped at 10% of total weight</div>
           <div>5. narrative = α·text + (1−α)·statistics, α from channel freshness (0.35–0.85)</div>
           <div>6. published aggregate = {(1 - ANCHOR_OMEGA).toFixed(2)}·narrative + {ANCHOR_OMEGA.toFixed(2)}·realized-action anchor</div>
