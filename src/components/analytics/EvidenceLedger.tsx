@@ -156,7 +156,7 @@ function EvidenceRow({ row }: { row: Row }) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             {ex?.pages ? <span>{ex.pages.toLocaleString()} page{ex.pages === 1 ? '' : 's'} extracted</span> : null}
             {ex?.words ? <span>{ex.words.toLocaleString()} words</span> : null}
-            {audit?.input_chars ? <span>{audit.input_chars.toLocaleString()} chars sent to the reader model</span> : null}
+            {audit?.input_chars ? <span>{audit.input_chars.toLocaleString()} chars analysed</span> : null}
             {ex?.sampled ? <span className="text-signal-neutral">document sampled (opening · middle · close)</span> : null}
             {item.url && (
               <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary">
@@ -190,7 +190,7 @@ function EvidenceRow({ row }: { row: Row }) {
             </div>
           ))}
 
-          {(audit?.model || pv) && (
+          {(audit?.prompt_version || pv) && (
             <div className="rounded-md border border-dashed border-border bg-muted/30 p-2.5 space-y-1">
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
                 Provenance — this score's exact inputs
