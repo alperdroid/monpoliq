@@ -5,6 +5,12 @@
 // Fed Funds excluded (it's the target variable, not a predictor).
 // Duplicate inflation prints within same month → counted once.
 // FOMC & ECB press conference transcripts now scraped and analyzed.
+// Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
+
+import { weightedAggregate } from '../_shared/scoring-weights.ts';
+import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
+
+
 
 const CH = {
   'Access-Control-Allow-Origin': '*',
