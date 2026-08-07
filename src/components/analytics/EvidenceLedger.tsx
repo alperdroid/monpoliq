@@ -23,14 +23,42 @@ interface EvidenceRef {
   pages?: number;
 }
 
+/** Full provenance chain written alongside every score by the scoring run. */
+interface Provenance {
+  text_sha256?: string;
+  text_chars?: number;
+  extractor?: string;
+  extractor_version?: string;
+  parser_settings?: { page_sep?: string; prose_stream_min_words?: number };
+  prose_gate_min_words?: number;
+  sampling?: { budget?: number; begin?: number; middle?: number; end?: number; sampled?: boolean; sent_chars?: number };
+  source_url?: string;
+  http_status?: number;
+  content_type?: string;
+  fetched_at?: string;
+  run_id?: string;
+  run_mode?: string;
+  attempt?: number;
+  scored_at?: string;
+}
+
 interface Audit {
   evidence?: Partial<Record<DimKey, string>>;
   evidence_refs?: Partial<Record<DimKey, EvidenceRef>>;
   extraction?: { pages?: number; words?: number; doc_chars?: number; sampled?: boolean };
+  provenance?: Provenance;
   input_chars?: number;
   model?: string;
   prompt_version?: string;
 }
+
+const ProvRow = ({ k, v }: { k: string; v: string }) => (
+  <div className="flex gap-1.5">
+    <dt className="shrink-0 opacity-70">{k}:</dt>
+    <dd className="break-all">{v}</dd>
+  </div>
+);
+
 
 interface Row {
   item: SentimentItem;
