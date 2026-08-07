@@ -1898,6 +1898,7 @@ Deno.serve(async (req) => {
         }
       }
       await pruneDuplicateComms('ECB', sbUrl, sbKey);
+      await rescoreZeroPolicyDocs('ECB', sbUrl, sbKey, aiKey);
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB');
