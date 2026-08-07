@@ -845,7 +845,35 @@ Content: ${truncated}`;
             doc_chars: text.length,
             sampled: truncated.length < text.length,
           },
+          provenance: {
+            text_sha256: textSha,
+            text_chars: text.length,
+            extractor: extractionMeta?.extractor ?? 'unknown',
+            extractor_version: extractionMeta?.extractor_version ?? 'n/a',
+            parser_settings: PARSER_SETTINGS,
+            prose_gate_min_words: isPolicy
+              ? PARSER_SETTINGS.prose_gate_min_words.policy
+              : PARSER_SETTINGS.prose_gate_min_words.other,
+            sampling: {
+              budget,
+              begin: beginLen,
+              middle: midLen,
+              end: endLen,
+              sampled: truncated.length < text.length,
+              sent_chars: truncated.length,
+            },
+            source_url: extractionMeta?.url,
+            http_status: extractionMeta?.http_status,
+            content_type: extractionMeta?.content_type,
+            fetched_at: extractionMeta?.fetched_at,
+            run_id: run.run_id,
+            run_mode: run.mode,
+            run_started_at: run.started_at,
+            attempt: attempt + 1,
+            scored_at: new Date().toISOString(),
+          },
         },
+
       };
 
 
