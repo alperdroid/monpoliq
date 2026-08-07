@@ -1493,14 +1493,28 @@ Deno.serve(async (req) => {
       const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
       console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
 
-      // Score new items with AI
-      if (newComms.length > 0 && aiKey) {
+      // Layer 1 — drop administrative/operational noise before the NLP pass
+      const fedPart = partitionForScoring(newComms.map(c => ({ ...c, source: c.source, text: c.text })));
+      console.log('FED layer1: ' + fedPart.scorable.length + ' scorable, ' + fedPart.noise.length + ' filtered as noise');
+      for (const { doc: c, verdict } of fedPart.noise) {
+        fi.push({
+          bank: 'FED', source: c.source, item_date: c.date, title: c.title, url: c.url,
+          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
+          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
+          stat_metric: null, stat_value: null, stat_weight: 0,
+          policy_dimensions: { relevance: verdict.relevance },
+        });
+      }
+
+      // Layer 2 — semantic scoring with entity-level sub-dimensions
+      const fedScorable = fedPart.scorable;
+      if (fedScorable.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
+          fedScorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
-        for (let i = 0; i < newComms.length; i++) {
-          const c = newComms[i];
+        for (let i = 0; i < fedScorable.length; i++) {
+          const { doc: c, verdict } = fedScorable[i];
           const s = scores[i];
           fi.push({
             bank: 'FED', source: c.source, item_date: c.date,
@@ -1511,8 +1525,9 @@ Deno.serve(async (req) => {
             net_score: s.score,
             label: s.label,
             word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning],
+            reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
           });
         }
       }
@@ -1521,6 +1536,8 @@ Deno.serve(async (req) => {
       let fiDedup = dedupItems(fi);
       if (fiDedup.length < fi.length) console.log('FED: deduped ' + fi.length + ' -> ' + fiDedup.length + ' items');
       fiDedup = await aiCrossLangDedup(fiDedup, aiKey);
+      // Layer 3 — normalize each speaker against their own historical baseline
+      fiDedup = await applySpeakerCalibration(fiDedup, 'FED', sbUrl, sbKey);
       if (fiDedup.length) {
         console.log('FED: persisting ' + fiDedup.length + ' items to DB');
         for (let i = 0; i < fiDedup.length; i += 50) {
@@ -1533,6 +1550,7 @@ Deno.serve(async (req) => {
               hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
               label: it.label, word_count: it.word_count, reasons: it.reasons,
               stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+              ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
             }))),
           });
           if (!resp.ok) {
@@ -1542,7 +1560,10 @@ Deno.serve(async (req) => {
         }
       }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
-      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED'), s2 = ag(allFedItems, 'FED');
+      // Layer 4 — α·S_text + (1−α)·S_stats
+      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED');
+      const s2 = blendedAggregate(allFedItems, 'FED');
+      console.log('FED layer4: alpha=' + s2.alpha + ' text=' + s2.text.avg + ' stats=' + s2.stats.avg + ' blended=' + s2.avg);
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
