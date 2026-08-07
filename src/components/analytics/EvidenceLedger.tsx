@@ -123,6 +123,8 @@ function EvidenceRow({ row }: { row: Row }) {
   const { item, audit, snippets } = row;
   const tier = documentTier(item.source || '', item.title || '');
   const ex = audit?.extraction;
+  const pv = audit?.provenance;
+
 
   return (
     <div className="rounded-lg border border-border bg-background/60">
