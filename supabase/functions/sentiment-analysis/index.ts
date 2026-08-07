@@ -7,7 +7,7 @@
 // FOMC & ECB press conference transcripts now scraped and analyzed.
 // Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
 
-import { weightedAggregate, blendedAggregate } from '../_shared/scoring-weights.ts';
+import { weightedAggregate, blendedAggregate, documentTier } from '../_shared/scoring-weights.ts';
 import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
 import { partitionForScoring } from '../_shared/relevance-filter.ts';
 import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
@@ -649,19 +649,85 @@ async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Pr
     const data = await resp.json();
     // Skip items with 0 score from policy documents — they need re-scoring
     // BUT always keep FOMC SEP as existing — they're scored by delta comparison, not AI
-    const policySourceKeywords = ['minutes', 'press conf', 'statement', 'accounts', 'account'];
+    const policyKeywords = ['minutes', 'press conf', 'statement', 'accounts', 'account', 'monetary policy decision', 'rate decision'];
     return new Set((data || [])
       .filter((d: any) => {
         const src = (d.source || '').toLowerCase();
         // FOMC SEP items are scored by delta, never re-score with generic AI
         if (src.includes('fomc sep')) return true;
-        const isPolicyDoc = policySourceKeywords.some(k => src.includes(k));
+        const hay = `${src} ${(d.title || '').toLowerCase()}`;
+        const isPolicyDoc = policyKeywords.some(k => hay.includes(k));
         // If it's a policy doc with 0 score, don't mark as existing so it gets re-fetched
         if (isPolicyDoc && Math.abs(Number(d.net_score) || 0) < 0.001) return false;
         return true;
       })
       .map((d: any) => `${d.title}|${d.item_date}`));
   } catch { return new Set(); }
+}
+
+// ── Cross-source duplicate pruning in the DB ─────────────────────────────────
+// The insert conflict key is (bank, source, title, item_date), so the SAME
+// document arriving under two feed labels (e.g. "FOMC Statement — 07/29/2026"
+// via the FOMC feed and "Federal Reserve issues FOMC statement" via Fed Press)
+// lands as two rows and gets double counted. Group semantically and keep one.
+const POLICY_DECISION_CLASS = /fomc statement|issues fomc statement|monetary policy decisions/i;
+const NOT_DECISION = /press conference|q&amp;a|q&a|minutes|account|transcript/i;
+
+function commGroupKey(it: { bank: string; source: string; item_date: string; title: string; url: string }): string {
+  const hay = `${it.source} ${it.title}`;
+  if (POLICY_DECISION_CLASS.test(hay) && !NOT_DECISION.test(hay)) {
+    return `${it.bank}|${it.item_date}|CLASS:policy-decision`;
+  }
+  const u = canonicalUrl(it.url);
+  if (u) return `${it.bank}|${it.item_date}|U:${u}`;
+  return `${it.bank}|${it.item_date}|T:${normalizedTitle(it.title)}`;
+}
+
+interface DbRow { id: string; bank: string; source: string; item_date: string; title: string; url: string; net_score: number; word_count: number }
+
+function preferDbRow(a: DbRow, b: DbRow): DbRow {
+  const aScored = Math.abs(Number(a.net_score) || 0) > 0.001;
+  const bScored = Math.abs(Number(b.net_score) || 0) > 0.001;
+  if (aScored !== bScored) return aScored ? a : b;           // never keep an unscored twin
+  const aT = documentTier(a.source || '', a.title || '');
+  const bT = documentTier(b.source || '', b.title || '');
+  if (aT !== bT) return aT < bT ? a : b;                      // more binding document wins
+  const aEn = /\/en\//.test(a.url || '');
+  const bEn = /\/en\//.test(b.url || '');
+  if (aEn !== bEn) return aEn ? a : b;
+  return (b.word_count || 0) > (a.word_count || 0) ? b : a;   // richer text wins
+}
+
+/** Delete cross-source duplicates of the same document from the DB. */
+async function pruneDuplicateComms(bank: string, sbUrl: string, sbKey: string): Promise<number> {
+  try {
+    const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
+    const resp = await fetch(
+      `${sbUrl}/rest/v1/sentiment_items?select=id,bank,source,item_date,title,url,net_score,word_count&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=2000`,
+      { headers: hd },
+    );
+    if (!resp.ok) return 0;
+    const rows: DbRow[] = await resp.json();
+    const keep = new Map<string, DbRow>();
+    const drop: string[] = [];
+    for (const r of rows) {
+      const k = commGroupKey(r);
+      const prev = keep.get(k);
+      if (!prev) { keep.set(k, r); continue; }
+      const win = preferDbRow(prev, r);
+      keep.set(k, win);
+      drop.push(win.id === prev.id ? r.id : prev.id);
+    }
+    for (let i = 0; i < drop.length; i += 50) {
+      const ids = drop.slice(i, i + 50).map(id => `"${id}"`).join(',');
+      await fetch(`${sbUrl}/rest/v1/sentiment_items?id=in.(${ids})`, { method: 'DELETE', headers: hd });
+    }
+    if (drop.length) console.log(`${bank}: pruned ${drop.length} cross-source duplicate communications`);
+    return drop.length;
+  } catch (e) {
+    console.log('prune failed:', e instanceof Error ? e.message : e);
+    return 0;
+  }
 }
 
 // ── Load existing STATISTICAL items for dedup ──
@@ -1587,6 +1653,7 @@ Deno.serve(async (req) => {
           }
         }
       }
+      await pruneDuplicateComms('FED', sbUrl, sbKey);
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED');
@@ -1777,6 +1844,7 @@ Deno.serve(async (req) => {
           }
         }
       }
+      await pruneDuplicateComms('ECB', sbUrl, sbKey);
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB');
