@@ -477,6 +477,9 @@ interface AIScore {
     neutral_band: number;
     input_chars: number;
     published: number;
+    /** Verbatim snippet the model scored each dimension from. */
+    evidence?: { inflation_persistence: string; policy_stance: string; growth_labor_drag: string };
+
   };
 }
 
