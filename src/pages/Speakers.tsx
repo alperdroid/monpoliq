@@ -10,9 +10,20 @@ import { Search, User } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
 
-/** Known speaker reference data — metrics computed from real items */
-const SPEAKER_REFS = [
-  { name: 'Jerome Powell', patterns: ['powell'], role: 'Chair', institution: 'Federal Reserve Board', bank: 'FED' },
+/**
+ * Known speaker reference data — metrics computed from real items.
+ * `until` marks a departure date: items after it are ignored and the member is
+ * dropped from the roster. Independently, anyone with no communication in the
+ * last ACTIVE_WINDOW_DAYS is treated as no longer on the committee, so the
+ * roster prunes itself month over month without manual edits.
+ */
+const ACTIVE_WINDOW_DAYS = 120;
+
+const SPEAKER_REFS: { name: string; patterns: string[]; role: string; institution: string; bank: string; until?: string }[] = [
+  // Jerome Powell left the Board — kept only for historical matching up to his departure.
+  { name: 'Jerome Powell', patterns: ['powell'], role: 'Chair (former)', institution: 'Federal Reserve Board', bank: 'FED', until: '2026-06-01' },
+  { name: 'Michael Barr', patterns: ['barr'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
+
   { name: 'Christopher Waller', patterns: ['waller'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
   { name: 'Michelle Bowman', patterns: ['bowman'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
   { name: 'John Williams', patterns: ['williams'], role: 'President', institution: 'Fed Reserve Bank of New York', bank: 'FED' },
