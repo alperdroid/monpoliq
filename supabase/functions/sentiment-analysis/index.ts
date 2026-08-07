@@ -931,6 +931,12 @@ Content: ${truncated}`;
           dimension_composite: composite,
           weights: DIMENSION_WEIGHTS,
           stance_adjustments: guard.notes.length ? { raw_policy_stance: rawStance, applied: guard.notes } : undefined,
+          forward_guidance: {
+            found: guard.guidance.found,
+            direction: guard.guidance.direction,
+            strength: guard.guidance.strength,
+            cues: guard.guidance.cues,
+          },
           ai_headline_weight: AI_HEADLINE_WEIGHT,
           neutral_band: NEUTRAL_BAND,
           input_chars: truncated.length,
