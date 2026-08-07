@@ -288,7 +288,7 @@ function showTextOf(content: string): string {
 
 export async function extractPdfText(bytes: Uint8Array): Promise<string> {
   const raw = new TextDecoder('latin1').decode(bytes);
-  let content = '';
+  const pages: string[] = [];
   const re = /stream\r?\n?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
@@ -296,13 +296,102 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
     const end = raw.indexOf('endstream', start);
     if (end < 0) break;
     const inflated = await inflate(bytes.slice(start, end));
-    if (inflated) content += inflated + '\n';
+    if (inflated) pages.push(inflated);
     re.lastIndex = end + 'endstream'.length; // skip past the keyword's own "stream"
   }
   // Fall back to the uncompressed literals only if nothing inflated at all.
-  const src = content.length > 0 ? content : raw;
-  return showTextOf(src).replace(/\s+/g, ' ').trim();
+  if (pages.length === 0) return showTextOf(raw).replace(/[^\S\f]+/g, ' ').trim();
+  // Keep only the streams that decode to prose. A PDF also carries font tables
+  // and image data as streams; dropping them means the surviving blocks line up
+  // with the document's real pages, so PAGE_SEP (\f) yields a citable page
+  // number for every quote instead of an opaque character offset.
+  const prose = pages
+    .map(p => showTextOf(p).replace(/[^\S\f]+/g, ' ').trim())
+    .filter(p => {
+      if (p.length < 40) return false;
+      const words = p.split(/\s+/).filter(w => w.length > 1);
+      if (words.length < 12) return false;
+      return (p.match(/[A-Za-z ]/g) || []).length / p.length > 0.75;
+    });
+  return (prose.length > 0 ? prose : pages.map(p => showTextOf(p).replace(/[^\S\f]+/g, ' ').trim()).filter(Boolean))
+    .join(PAGE_SEP);
 }
+
+
+/** Real page boundary marker inside extracted document text. */
+export const PAGE_SEP = '\f';
+
+export interface EvidenceRef {
+  /** 1-based page number (PDFs); 1 for single-page HTML documents. */
+  page: number;
+  /** 1-based sentence-line index within that page. */
+  line: number;
+  /** Character offset of the quote inside the full extracted text. */
+  char_start: number;
+  /** The full sentence-line the quote sits in, for context. */
+  context: string;
+  /** Total pages in the extracted document. */
+  pages: number;
+}
+
+const normalize = (s: string) => s.toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const splitLines = (s: string) => s.split(/(?<=[.?!])\s+/).map(l => l.trim()).filter(Boolean);
+
+/**
+ * Locate a verbatim evidence quote inside the extracted document text and
+ * return a citable page/line reference. The model often stitches several
+ * sentences together with "...", so each fragment is tried separately, longest
+ * first. Matching runs on normalized text (case, quotes and punctuation are
+ * ignored) and the normalized hit is mapped back to the sentence-line it sits
+ * in. If nothing can be matched the reference is omitted rather than guessed.
+ */
+export function locateEvidence(quote: string, fullText: string): EvidenceRef | null {
+  if (!quote || !fullText) return null;
+  const fragments = [quote, ...quote.split(/\.\.\.|…/)]
+    .map(f => normalize(f))
+    .filter(f => f.length >= 15)
+    .sort((a, b) => b.length - a.length);
+  if (fragments.length === 0) return null;
+
+  const pages = fullText.split(PAGE_SEP);
+  let consumed = 0;
+  for (let p = 0; p < pages.length; p++) {
+    const pageText = pages[p];
+    const lines = splitLines(pageText);
+    // Normalized page text plus the normalized start offset of every line, so a
+    // quote spanning a sentence break still resolves to its opening line.
+    const normLines = lines.map(normalize);
+    const starts: number[] = [];
+    let acc = 0;
+    for (const nl of normLines) { starts.push(acc); acc += nl.length + 1; }
+    const normPage = normLines.join(' ');
+
+    for (const frag of fragments) {
+      const keys = [frag, frag.slice(0, 60), frag.slice(0, 30)];
+      let hit = -1;
+      for (const k of keys) {
+        if (k.length < 15) continue;
+        hit = normPage.indexOf(k);
+        if (hit >= 0) break;
+      }
+      if (hit < 0) continue;
+      let line = 0;
+      for (let i = 0; i < starts.length; i++) if (starts[i] <= hit) line = i;
+      const rawAt = pageText.indexOf(lines[line]);
+      return {
+        page: p + 1,
+        line: line + 1,
+        char_start: consumed + (rawAt >= 0 ? rawAt : 0),
+        context: lines.slice(line, line + 2).join(' ').slice(0, 600),
+        pages: pages.length,
+      };
+    }
+    consumed += pageText.length + PAGE_SEP.length;
+  }
+  return null;
+}
+
+
 
 /**
  * Readability gate. A document is only scoreable if the extracted text is
@@ -479,9 +568,13 @@ interface AIScore {
     published: number;
     /** Verbatim snippet the model scored each dimension from. */
     evidence?: { inflation_persistence: string; policy_stance: string; growth_labor_drag: string };
-
+    /** Page/line reference of each snippet inside the extracted document. */
+    evidence_refs?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', EvidenceRef>>;
+    /** Extraction provenance for the panel: pages found, words extracted, chars sent. */
+    extraction?: { pages: number; words: number; doc_chars: number; sampled: boolean };
   };
 }
+
 
 
 // Detect if an item is a major policy document that needs stronger AI model
@@ -616,6 +709,12 @@ Content: ${truncated}`;
         policy_stance: q(ev.policy_stance),
         growth_labor_drag: q(ev.growth_labor_drag),
       };
+      // Cite each quote back to where it actually sits in the source document.
+      const evidence_refs: Record<string, EvidenceRef> = {};
+      for (const k of Object.keys(evidence) as (keyof typeof evidence)[]) {
+        const ref = evidence[k] ? locateEvidence(evidence[k], text) : null;
+        if (ref) evidence_refs[k] = ref;
+      }
 
       return {
         score,
@@ -634,9 +733,16 @@ Content: ${truncated}`;
           input_chars: truncated.length,
           published: score,
           evidence,
+          evidence_refs,
+          extraction: {
+            pages: text.split(PAGE_SEP).length,
+            words: text.split(/\s+/).filter(Boolean).length,
+            doc_chars: text.length,
+            sampled: truncated.length < text.length,
+          },
         },
-
       };
+
 
     } catch (e) {
       console.error(`AI score parse error (attempt ${attempt + 1}/${attempts}):`, e);
@@ -1000,24 +1106,36 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
 // unreadable fragments. This refetches the stored URL, extracts real prose and
 // rescores; a document that still cannot be read is parked at 0 with an honest
 // reason instead of an invented lean.
-async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12): Promise<number> {
+async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false): Promise<number> {
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=400`,
+      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=400`,
       { headers: hd },
     );
     if (!resp.ok) return 0;
-    const rows: { id: string; source: string; title: string; url: string; item_date: string; reasons: string[] }[] = await resp.json();
+    const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; reasons: string[]; policy_dimensions?: Record<string, unknown> }[] = await resp.json();
     const suspect = /unavailable|truncated|redacted|garbled|could not|administrative|by their nature|assumed|without specific/i;
+    const hasRefs = (r: typeof rows[number]) => {
+      const audit = (r.policy_dimensions || {})['scoring_audit'] as { evidence_refs?: Record<string, unknown> } | undefined;
+      return !!audit?.evidence_refs && Object.keys(audit.evidence_refs).length > 0;
+    };
     const targets = rows
-      .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections/i.test(r.title)))
-      .filter(r => suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
+      .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections|minutes|account|statement|monetary policy/i.test(r.title)))
+      .filter(r => onlyMissingRefs
+        // Backfill pass: scored documents that carry no page/line citations yet.
+        ? !hasRefs(r) && Math.abs(Number(r.net_score) || 0) > 0.05
+        : suspect.test((r.reasons || []).join(' ')) || !(r.reasons || []).length)
       .slice(0, limit);
+
     let fixed = 0;
     for (const r of targets) {
       const text = await fetchPageText(r.url);
       const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
+      // A citation backfill must never destroy an existing score: if the re-read
+      // comes back unscoreable, leave the stored row untouched.
+      if (onlyMissingRefs && !ai.dimensions) continue;
+
       const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
         method: 'PATCH',
         headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -1898,7 +2016,7 @@ Deno.serve(async (req) => {
     if (body.mode === 'repair-transcripts') {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
-      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12);
+      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true);
       return new Response(JSON.stringify({ mode: 'repair-transcripts', rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
