@@ -315,6 +315,21 @@ export interface BlendResult extends Aggregate {
   omega: number;
   anchor: PolicyAnchor;
   narrative: number;
+  /** How the headline was assembled, for the provenance panel. */
+  provenance: {
+    formula: string;
+    alpha: number;
+    omega: number;
+    comms_avg: number;
+    comms_n: number;
+    stats_avg: number;
+    stats_n: number;
+    narrative: number;
+    anchor_score: number;
+    half_life_days: number;
+    computed_at: string;
+  };
+
 }
 
 
