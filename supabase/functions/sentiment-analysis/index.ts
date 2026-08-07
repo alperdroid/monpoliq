@@ -593,7 +593,18 @@ ANCHOR LADDER (identical for all three dimensions):
    NEGATIVE (−) = easing bias, cut delivered or signalled, policy seen as too tight, dissent for a cut.
    +1.0 example: a delivered hike or "we are not close to cutting"
    −1.0 example: a delivered cut or "further easing will be appropriate"
-   Note: a HOLD is not automatically 0 — read whether it is framed as vigilance (+) or as a pause before cuts (−).
+   HOLD RULES (apply strictly — a hold is a continuation, not a new signal):
+     • Announcing an unchanged rate, on its own, is 0.0. The words "maintain the target range"
+       or "keep rates unchanged" carry NO directional score by themselves.
+     • Only go beyond ±0.2 on a hold if the text adds explicit forward direction:
+       ±0.2 hedged direction ("we can be patient", "we are watching"),
+       ±0.5 unhedged direction ("rates will need to stay at these levels for some time" / "cuts are coming"),
+       ±0.8/±1.0 only if that direction is the dominant, repeated message of the document.
+     • Voting record adjustment: dissents in favour of cutting push this dimension DOWN
+       (−0.2 for one or two dissenters, −0.3 if three or more); dissents for hiking push it up
+       by the same amounts. Apply this after picking the anchor, then clamp to [−1, +1].
+     • Never score a hold positive merely because the current level is described as restrictive.
+
 
 3. growth_labor_drag — the state of demand and the labour market as the speaker describes it.
    POSITIVE (+) = economy resilient, labour market tight, demand robust (i.e. no case for easing).
