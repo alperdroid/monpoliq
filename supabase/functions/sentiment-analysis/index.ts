@@ -1555,6 +1555,9 @@ Deno.serve(async (req) => {
 
       const ei: It[] = [];
       if (st.status === 'fulfilled') ei.push(...st.value);
+      // Re-score macro prints as standardized surprises vs market consensus
+      if (aiKey && ei.length) await applyConsensusSurprise(ei, aiKey);
+
 
       const allRawComms: RawComm[] = rawComms.status === 'fulfilled' ? rawComms.value : [];
       
