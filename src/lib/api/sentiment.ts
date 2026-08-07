@@ -1,4 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
+import { dynamicHalfLife, itemWeight, type WeightableItem } from '@/lib/scoring-weights';
+
 
 export interface SentimentItem {
   bank: string;
