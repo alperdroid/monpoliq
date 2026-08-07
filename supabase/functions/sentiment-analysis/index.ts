@@ -648,6 +648,29 @@ interface AIScore {
     evidence_refs?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', EvidenceRef>>;
     /** Extraction provenance for the panel: pages found, words extracted, chars sent. */
     extraction?: { pages: number; words: number; doc_chars: number; sampled: boolean };
+    /**
+     * Full provenance chain: which text version, produced by which reader and
+     * parser settings, sampled how, scored by which run.
+     */
+    provenance?: {
+      text_sha256: string;
+      text_chars: number;
+      extractor: string;
+      extractor_version: string;
+      parser_settings: typeof PARSER_SETTINGS;
+      prose_gate_min_words: number;
+      sampling: { budget: number; begin: number; middle: number; end: number; sampled: boolean; sent_chars: number };
+      source_url?: string;
+      http_status?: number;
+      content_type?: string;
+      fetched_at?: string;
+      run_id: string;
+      run_mode: string;
+      run_started_at: string;
+      attempt: number;
+      scored_at: string;
+    };
+
   };
 }
 
