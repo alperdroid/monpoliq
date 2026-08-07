@@ -197,6 +197,34 @@ function EvidenceRow({ row }: { row: Row }) {
             </div>
           ))}
 
+          {audit?.forward_guidance ? (
+            <div className="rounded-md border border-border/70 bg-muted/40 p-2.5 space-y-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Forward-guidance check
+              </p>
+              {audit.forward_guidance.found ? (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    explicit future-policy language detected · direction {audit.forward_guidance.direction} ·{' '}
+                    {audit.forward_guidance.strength === 1 ? 'unconditional' : 'conditional'}
+                  </p>
+                  <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
+                    {(audit.forward_guidance.cues ?? []).map(c => (
+                      <li key={c.sentence}>
+                        <span className="font-medium">“{c.phrase}”</span> — {c.sentence}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  no explicit future-policy language found — a directional stance cannot override the hold clamp
+                </p>
+              )}
+            </div>
+          ) : null}
+
+
           {audit?.stance_adjustments?.applied?.length ? (
             <div className="rounded-md border border-border/70 bg-muted/40 p-2.5 space-y-1">
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
