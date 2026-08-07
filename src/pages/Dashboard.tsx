@@ -96,17 +96,20 @@ const Dashboard = () => {
   const fed7 = recent7.filter(i => i.bank === 'FED');
   const ecb7 = recent7.filter(i => i.bank === 'ECB');
 
-  // Aggregate scores (comms 45d + stats 60d combined)
+  // Aggregate scores (comms 45d + stats 60d) — α-blended, decay & tier weighted
   const fedAggAll = [...fed45Comms, ...fed60Stats];
   const ecbAggAll = [...ecb45Comms, ...ecb60Stats];
-  const fedAggAvg = computeAvg(fedAggAll);
-  const ecbAggAvg = computeAvg(ecbAggAll);
+  const fedBlend = blendedAggregate(fedAggAll as unknown as WeightableItem[], 'FED');
+  const ecbBlend = blendedAggregate(ecbAggAll as unknown as WeightableItem[], 'ECB');
+  const fedAggAvg = fedAggAll.length ? fedBlend.avg : null;
+  const ecbAggAvg = ecbAggAll.length ? ecbBlend.avg : null;
 
-  // Separate scores
-  const fedCommAvg = computeAvg(fed45Comms);
-  const ecbCommAvg = computeAvg(ecb45Comms);
-  const fedStatAvg = computeAvg(fed60Stats);
-  const ecbStatAvg = computeAvg(ecb60Stats);
+  // Separate channel scores (same weighting, single channel each)
+  const fedCommAvg = fed45Comms.length ? fedBlend.text.avg : null;
+  const ecbCommAvg = ecb45Comms.length ? ecbBlend.text.avg : null;
+  const fedStatAvg = fed60Stats.length ? fedBlend.stats.avg : null;
+  const ecbStatAvg = ecb60Stats.length ? ecbBlend.stats.avg : null;
+
 
   // 1.5-year monthly fluctuation data
   const eighteenMonthsAgo = new Date();
