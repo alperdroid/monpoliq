@@ -707,6 +707,7 @@ interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir:
 const FR: FS[] = [
   { id: 'CPIAUCSL', met: 'CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
   { id: 'CPIAUCSL', met: 'CPI MoM Trend', tr: 'p1', ht: 0.4, dt: 0.1, dir: 'hh', w: 2 },
+  { id: 'CPILFESL', met: 'Core CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
   { id: 'PAYEMS', met: 'Payrolls MoM', tr: 'd1', ht: 200, dt: 100, dir: 'hh', w: 3 },
   { id: 'UNRATE', met: 'Unemployment', tr: 'lv', ht: 4, dt: 5, dir: 'lh', w: 3 },
   { id: 'PCEPILFE', met: 'Core PCE YoY', tr: 'p12', ht: 2.5, dt: 2, dir: 'hh', w: 3 },
@@ -714,27 +715,53 @@ const FR: FS[] = [
   { id: 'RSAFS', met: 'Retail Sales', tr: 'p1', ht: 0.5, dt: -0.2, dir: 'hh', w: 2 },
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
   { id: 'MANEMP', met: 'Mfg Employment Trend', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
+  // Higher-frequency releases so the US channel never goes stale between monthly prints
+  { id: 'ICSA', met: 'Initial Claims (4wk chg)', tr: 'd1', ht: -15000, dt: 15000, dir: 'lh', w: 2 },
+  { id: 'CES0500000003', met: 'Avg Hourly Earnings YoY', tr: 'p12', ht: 4, dt: 3, dir: 'hh', w: 2 },
+  { id: 'T5YIE', met: '5Y Breakeven Inflation', tr: 'lv', ht: 2.5, dt: 2, dir: 'hh', w: 2 },
+  { id: 'T10Y2Y', met: '10Y-2Y Spread', tr: 'lv', ht: 0.6, dt: -0.2, dir: 'hh', w: 1 },
 ];
+
+/** Latest publication (release) date per FRED series — observation dates are period starts. */
+async function fetchFredReleaseDates(key: string, ids: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.allSettled(ids.map(async id => {
+    const r = await sf(`https://api.stlouisfed.org/fred/series?series_id=${id}&api_key=${key}&file_type=json`);
+    if (!r || !r.ok) return;
+    const d = await r.json();
+    const lu: string | undefined = d?.seriess?.[0]?.last_updated;
+    if (lu) out[id] = lu.slice(0, 10);
+  }));
+  return out;
+}
 
 async function fetchFred(key: string, days: number): Promise<It[]> {
   const co = new Date(); co.setDate(co.getDate() - days);
   const cs = co.toISOString().split('T')[0];
+  const today = new Date().toISOString().split('T')[0];
   // Deduplicate by series ID to avoid fetching same series twice (e.g. CPI YoY + CPI MoM)
   const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
   const seriesCache: Record<string, any[]> = {};
-  
-  // Fetch each unique series once
-  await Promise.allSettled(uniqueSeriesIds.map(async id => {
-    const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
-    if (!r || !r.ok) return;
-    const d = await r.json();
-    seriesCache[id] = (d.observations || []).filter((o: any) => o.value !== '.');
-  }));
-  
+
+  // Fetch each unique series once, plus its publication date
+  const [, releaseDates] = await Promise.all([
+    Promise.allSettled(uniqueSeriesIds.map(async id => {
+      const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
+      if (!r || !r.ok) return;
+      const d = await r.json();
+      seriesCache[id] = (d.observations || []).filter((o: any) => o.value !== '.');
+    })),
+    fetchFredReleaseDates(key, uniqueSeriesIds),
+  ]);
+
   const results: It[] = [];
   for (const s of FR) {
     const obs = seriesCache[s.id];
-    if (!obs || !obs.length || obs[0].date < cs) continue;
+    if (!obs || !obs.length) continue;
+    // Score by RELEASE date (when markets saw it), not by the reference period.
+    const period = obs[0].date as string;
+    const released = releaseDates[s.id] && releaseDates[s.id] <= today ? releaseDates[s.id] : period;
+    if (released < cs) continue;
     const v = obs.map((o: any) => parseFloat(o.value));
     let val: number | null = null;
     if (s.tr === 'lv') val = v[0];
@@ -744,16 +771,17 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
     if (val === null) continue;
     const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
     results.push({
-      bank: 'FED', source: 'FRED', item_date: obs[0].date,
-      title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ')',
+      bank: 'FED', source: 'FRED', item_date: released,
+      title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ', ref ' + period + ')',
       url: 'https://fred.stlouisfed.org/series/' + s.id,
       is_statistical: true, hawk_pts: 0, dove_pts: 0,
       net_score: r2.net_score, label: r2.label, word_count: 0,
-      reasons: ['fred'], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
+      reasons: ['fred', 'released:' + released, 'period:' + period], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
     } as It);
   }
   return results;
 }
+
 
 // ── FOMC Minutes ──
 const KNOWN_FOMC_DATES = [
