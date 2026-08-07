@@ -335,6 +335,9 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
         </div>
       )}
 
+      <AggregateProvenance allItems={allItems} bank={bank} />
+
+
       <div className="grid lg:grid-cols-2 gap-3">
         {items.length === 0 ? (
           <p className="text-[12px] text-muted-foreground py-4">No scored communications in the last 45 days.</p>
