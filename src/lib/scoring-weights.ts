@@ -97,21 +97,70 @@ export interface Aggregate {
   half_life_days: number;
 }
 
+const CHAIR_NAMES = /powell|lagarde|chair|president|jefferson|de guindos/i;
+
+function speakerOf(title: string): string | null {
+  const t = (title || '').trim();
+  const colon = t.indexOf(':');
+  if (colon > 1 && colon < 60) {
+    const head = t.slice(0, colon);
+    if (/\b(the|and|for|report|statement|minutes|account|update|review)\b/i.test(head)) return null;
+    const first = head.split(/,|&| and /i)[0].trim();
+    if (first.length >= 3 && first.length <= 40) return first.toLowerCase().replace(/\s+/g, ' ');
+  }
+  const m = t.match(/^([\p{L}][\p{L}.'-]+),\s/u);
+  if (m) return m[1].toLowerCase();
+  return null;
+}
+
+/** No single non-chair speaker may exceed 10% of the aggregate's total weight. */
+export const MAX_SPEAKER_SHARE = 0.10;
+
+export function capSpeakerWeights(items: WeightableItem[], weights: number[]): number[] {
+  const w = [...weights];
+  const groups = new Map<string, number[]>();
+  items.forEach((it, i) => {
+    if (it.is_statistical) return;
+    const sp = speakerOf(it.title);
+    if (!sp || CHAIR_NAMES.test(sp)) return;
+    if (!groups.has(sp)) groups.set(sp, []);
+    groups.get(sp)!.push(i);
+  });
+  if (!groups.size) return w;
+  for (let pass = 0; pass < 5; pass++) {
+    const total = w.reduce((s, v) => s + v, 0);
+    if (total <= 0) break;
+    let changed = false;
+    for (const idxs of groups.values()) {
+      const sum = idxs.reduce((s, i) => s + w[i], 0);
+      const cap = MAX_SPEAKER_SHARE * total;
+      if (sum > cap + 1e-9) {
+        const f = cap / sum;
+        for (const i of idxs) w[i] *= f;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return w;
+}
+
 export function weightedAggregate(sub: WeightableItem[], bank?: string, now: Date = new Date()): Aggregate {
   const scored = sub.filter(i => Math.abs(i.net_score) > 0.001);
   const inferredBank = bank || scored[0]?.bank || 'FED';
   const halfLife = dynamicHalfLife(inferredBank, now);
   if (!scored.length) return { avg: 0, n: 0, dist: {}, sentiment: 'NEUTRAL', half_life_days: halfLife };
+  const weights = capSpeakerWeights(scored, scored.map(it => itemWeight(it, halfLife, now)));
   let num = 0;
   let den = 0;
   const dist: Record<string, number> = {};
-  for (const it of scored) {
-    const w = itemWeight(it, halfLife, now);
+  scored.forEach((it, i) => {
+    const w = weights[i];
     num += it.net_score * w;
     den += w;
     const lb = it.label || (it.net_score > 0.1 ? 'hawkish' : it.net_score < -0.1 ? 'dovish' : 'neutral');
     dist[lb] = (dist[lb] || 0) + 1;
-  }
+  });
   const avg = den > 0 ? Math.round((num / den) * 1000) / 1000 : 0;
   return { avg, n: scored.length, dist, sentiment: sentimentLabel(avg), half_life_days: halfLife };
 }

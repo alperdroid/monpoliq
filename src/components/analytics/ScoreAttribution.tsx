@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { ExternalLink, Mic, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { dynamicHalfLife, itemWeight, documentTier, TIER_LABEL, type WeightableItem } from '@/lib/scoring-weights';
+import { dynamicHalfLife, itemWeight, capSpeakerWeights, documentTier, TIER_LABEL, type WeightableItem } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 /** Pull the speaker out of a title: "Cook, Economic Outlook" / "Frank Elderson: Europe's …" */
@@ -27,10 +27,11 @@ function contributions(items: SentimentItem[], bank: string, now: Date): Contrib
   const scored = items.filter(i => Math.abs(i.net_score) > 0.001);
   if (!scored.length) return [];
   const halfLife = dynamicHalfLife(bank, now);
-  const weighted = scored.map(item => {
-    const weight = itemWeight(item as unknown as WeightableItem, halfLife, now);
-    return { item, weight, contribution: item.net_score * weight, share: 0 };
-  });
+  const raw = scored.map(item => itemWeight(item as unknown as WeightableItem, halfLife, now));
+  const capped = capSpeakerWeights(scored as unknown as WeightableItem[], raw);
+  const weighted = scored.map((item, i) => ({
+    item, weight: capped[i], contribution: item.net_score * capped[i], share: 0,
+  }));
   const den = weighted.reduce((s, w) => s + w.weight, 0) || 1;
   const absTotal = weighted.reduce((s, w) => s + Math.abs(w.contribution), 0) || 1;
   return weighted
