@@ -404,11 +404,18 @@ Content: ${truncated}`;
     const parsed = JSON.parse(content);
     const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
     const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
+    const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
+    const d = parsed.dimensions || {};
 
     return {
       score: Math.round(score * 1000) / 1000,
       label,
       reasoning: parsed.reasoning || '',
+      dimensions: {
+        inflation_persistence: cl(d.inflation_persistence),
+        policy_stance: cl(d.policy_stance),
+        growth_labor_drag: cl(d.growth_labor_drag),
+      },
     };
   } catch (e) {
     console.error('AI score parse error:', e);
