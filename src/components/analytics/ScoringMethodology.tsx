@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ExternalLink, FunctionSquare, Gauge, LineChart, Quote, Scale } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { documentTier, TIER_LABEL, ANCHOR_OMEGA } from '@/lib/scoring-weights';
+import { documentTier, TIER_LABEL, ANCHOR_OMEGA, blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 const DIM_WEIGHTS = { inflation_persistence: 0.45, policy_stance: 0.40, growth_labor_drag: 0.15 } as const;
@@ -258,6 +258,59 @@ function TechnicalCard({ t }: { t: Technical }) {
 }
 
 /**
+ * Headline-level provenance: the exact α/ω used, the two channel averages, and
+ * every realized decision that fed the action anchor with its decay weight, so
+ * the published aggregate can be re-derived line by line.
+ */
+function AggregateProvenance({ allItems, bank }: { allItems: SentimentItem[]; bank: 'FED' | 'ECB' }) {
+  const blend = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    const cs = cutoff.toISOString().split('T')[0];
+    const rows = allItems.filter(i => i.bank === bank && i.item_date >= cs);
+    return blendedAggregate(rows as unknown as WeightableItem[], bank);
+  }, [allItems, bank]);
+
+  const p = blend.provenance;
+  const ap = blend.anchor.provenance;
+  const s = (v: number, d = 3) => `${v > 0 ? '+' : ''}${v.toFixed(d)}`;
+
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {bank} headline provenance — inputs, weights and decisions used
+      </p>
+      <div className="font-mono text-[11px] leading-relaxed space-y-0.5">
+        <div>{p.formula}</div>
+        <div>
+          comms {s(p.comms_avg)} (n={p.comms_n}, half-life {p.half_life_days}d) · stats {s(p.stats_avg)} (n={p.stats_n})
+        </div>
+        <div>α = {p.alpha.toFixed(2)} → narrative {s(p.narrative)} · ω = {p.omega.toFixed(2)} · anchor {s(p.anchor_score)}</div>
+        <div className="font-semibold">published headline = {s(blend.avg)}</div>
+      </div>
+      <div className="space-y-0.5">
+        <p className="text-[11px] font-semibold text-muted-foreground">Realized-action anchor</p>
+        <p className="font-mono text-[10px] text-muted-foreground">{ap.params.formula}</p>
+        {ap.actions.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">No rate decision in the trailing {ap.params.window_days} days.</p>
+        ) : (
+          <div className="font-mono text-[10px] text-muted-foreground space-y-0.5">
+            {ap.actions.map(a => (
+              <div key={a.date}>
+                {a.date} · {a.bps > 0 ? '+' : ''}{a.bps}bp · age {a.age_days}d · decay {a.decay.toFixed(3)} → {s(a.contribution)}
+              </div>
+            ))}
+            <div>
+              Σ = {s(ap.raw)}{ap.clamped ? ` → clamped to ±${ap.params.clamp}` : ''} · calendar: {ap.params.calendar}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Technical transparency panel: explains the three sub-dimensions in plain
  * language, publishes the fixed anchor ladder used to score them, and exposes
  * the numeric inputs behind every AI-scored communication so any number on the
@@ -334,6 +387,9 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
           <div>6. published aggregate = {(1 - ANCHOR_OMEGA).toFixed(2)}·narrative + {ANCHOR_OMEGA.toFixed(2)}·realized-action anchor</div>
         </div>
       )}
+
+      <AggregateProvenance allItems={allItems} bank={bank} />
+
 
       <div className="grid lg:grid-cols-2 gap-3">
         {items.length === 0 ? (

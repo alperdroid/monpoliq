@@ -334,6 +334,60 @@ export interface EvidenceRef {
   pages: number;
 }
 
+// ── Scoring provenance ──────────────────────────────────────────────────────
+// Every published score must be traceable to the exact text version it was
+// computed from, the parser settings that produced that text, and the run that
+// wrote it. The identity of a text version is its SHA-256 fingerprint, so a
+// re-read that yields different text is visibly a different input.
+
+/** Bump when the PDF/HTML readers change in a way that alters extracted text. */
+export const EXTRACTOR_VERSION = 'pdf-inflate-v3-pagesep';
+export const HTML_EXTRACTOR_VERSION = 'html-strip-v2';
+
+/** Parser settings that decide which streams survive and where pages break. */
+export const PARSER_SETTINGS = {
+  page_sep: '\\f',
+  pdf_inflate_formats: ['deflate', 'deflate-raw'],
+  prose_stream_min_chars: 40,
+  prose_stream_min_words: 12,
+  prose_stream_alpha_ratio: 0.75,
+  prose_gate_min_words: { policy: 200, other: 40 },
+} as const;
+
+export interface ExtractionMeta {
+  url: string;
+  extractor: 'pdf' | 'html';
+  extractor_version: string;
+  http_status: number;
+  content_type: string;
+  source_bytes: number;
+  fetched_at: string;
+}
+
+/** Text fingerprint → how that exact text version was obtained. */
+const EXTRACTIONS = new Map<string, ExtractionMeta>();
+
+/** Short, stable SHA-256 fingerprint identifying one extracted text version. */
+export async function textFingerprint(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+}
+
+export interface RunMeta {
+  /** Unique id of this invocation — the "repair run" a score came from. */
+  run_id: string;
+  /** scrape | repair-transcripts | repair-refs | repair-zero-scores | … */
+  mode: string;
+  started_at: string;
+}
+let RUN: RunMeta = { run_id: crypto.randomUUID(), mode: 'unknown', started_at: new Date().toISOString() };
+export function beginRun(mode: string): RunMeta {
+  RUN = { run_id: crypto.randomUUID(), mode, started_at: new Date().toISOString() };
+  return RUN;
+}
+export function currentRun(): RunMeta { return RUN; }
+
+
 const normalize = (s: string) => s.toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
 const splitLines = (s: string) => s.split(/(?<=[.?!])\s+/).map(l => l.trim()).filter(Boolean);
 
@@ -413,13 +467,35 @@ async function fetchPageText(url: string): Promise<string> {
     const r = await sf(url, 15000);
     if (!r || !r.ok) return '';
     const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (ct.includes('pdf') || url.toLowerCase().endsWith('.pdf')) {
-      return await extractPdfText(new Uint8Array(await r.arrayBuffer()));
+    const isPdf = ct.includes('pdf') || url.toLowerCase().endsWith('.pdf');
+    let text: string;
+    let bytes = 0;
+    if (isPdf) {
+      const raw = new Uint8Array(await r.arrayBuffer());
+      bytes = raw.length;
+      text = await extractPdfText(raw);
+    } else {
+      const html = await r.text();
+      bytes = html.length;
+      text = extractText(html);
     }
-    const html = await r.text();
-    return extractText(html);
+    // Register how this exact text version was produced so the score written
+    // from it can cite the fetch, the reader and the parser settings used.
+    if (text) {
+      EXTRACTIONS.set(await textFingerprint(text), {
+        url,
+        extractor: isPdf ? 'pdf' : 'html',
+        extractor_version: isPdf ? EXTRACTOR_VERSION : HTML_EXTRACTOR_VERSION,
+        http_status: r.status,
+        content_type: ct || 'unknown',
+        source_bytes: bytes,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+    return text;
   } catch { return ''; }
 }
+
 
 
 // ── XML helpers ──
@@ -572,6 +648,29 @@ interface AIScore {
     evidence_refs?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', EvidenceRef>>;
     /** Extraction provenance for the panel: pages found, words extracted, chars sent. */
     extraction?: { pages: number; words: number; doc_chars: number; sampled: boolean };
+    /**
+     * Full provenance chain: which text version, produced by which reader and
+     * parser settings, sampled how, scored by which run.
+     */
+    provenance?: {
+      text_sha256: string;
+      text_chars: number;
+      extractor: string;
+      extractor_version: string;
+      parser_settings: typeof PARSER_SETTINGS;
+      prose_gate_min_words: number;
+      sampling: { budget: number; begin: number; middle: number; end: number; sampled: boolean; sent_chars: number };
+      source_url?: string;
+      http_status?: number;
+      content_type?: string;
+      fetched_at?: string;
+      run_id: string;
+      run_mode: string;
+      run_started_at: string;
+      attempt: number;
+      scored_at: string;
+    };
+
   };
 }
 
@@ -609,14 +708,14 @@ async function scoreWithAI(
 
   let truncated: string;
   const budget = isPolicy ? 24000 : 6000;
+  const beginLen = isPolicy ? 14000 : 3000;
+  const midLen = isPolicy ? 6000 : 1500;
+  const endLen = isPolicy ? 4000 : 1500;
   if (text.length <= budget) {
     truncated = text;
   } else {
     // Long documents (press conferences, minutes): sample beginning + middle + end.
     // The opening carries the decision and guidance, the Q&A carries the nuance.
-    const beginLen = isPolicy ? 14000 : 3000;
-    const midLen = isPolicy ? 6000 : 1500;
-    const endLen = isPolicy ? 4000 : 1500;
     const mid = Math.floor(text.length / 2);
     truncated = text.slice(0, beginLen) +
       '\n...[middle section truncated]...\n' +
@@ -624,6 +723,12 @@ async function scoreWithAI(
       '\n...[late section truncated]...\n' +
       text.slice(-endLen);
   }
+
+  // Identity of the exact text version scored, plus how it was obtained.
+  const textSha = await textFingerprint(text);
+  const extractionMeta = EXTRACTIONS.get(textSha);
+  const run = currentRun();
+
 
   // Add special instructions for policy documents
   let policyPreamble = '';
@@ -740,7 +845,35 @@ Content: ${truncated}`;
             doc_chars: text.length,
             sampled: truncated.length < text.length,
           },
+          provenance: {
+            text_sha256: textSha,
+            text_chars: text.length,
+            extractor: extractionMeta?.extractor ?? 'unknown',
+            extractor_version: extractionMeta?.extractor_version ?? 'n/a',
+            parser_settings: PARSER_SETTINGS,
+            prose_gate_min_words: isPolicy
+              ? PARSER_SETTINGS.prose_gate_min_words.policy
+              : PARSER_SETTINGS.prose_gate_min_words.other,
+            sampling: {
+              budget,
+              begin: beginLen,
+              middle: midLen,
+              end: endLen,
+              sampled: truncated.length < text.length,
+              sent_chars: truncated.length,
+            },
+            source_url: extractionMeta?.url,
+            http_status: extractionMeta?.http_status,
+            content_type: extractionMeta?.content_type,
+            fetched_at: extractionMeta?.fetched_at,
+            run_id: run.run_id,
+            run_mode: run.mode,
+            run_started_at: run.started_at,
+            attempt: attempt + 1,
+            scored_at: new Date().toISOString(),
+          },
         },
+
       };
 
 
@@ -2000,7 +2133,12 @@ Deno.serve(async (req) => {
     const rawBank = (body.bank || 'both').toLowerCase();
     const bank = rawBank === 'fed' ? 'FED' : rawBank === 'ecb' ? 'ECB' : 'both';
     const days = body.days || 365;
-    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days);
+    // Stamp every score written by this invocation with one traceable run id.
+    const run = beginRun(
+      body.mode === 'repair-transcripts' && body.refs === true ? 'repair-citations' : (body.mode || 'scrape'),
+    );
+    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days + ' run=' + run.run_id + ' mode=' + run.mode);
+
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
     const fk = Deno.env.get('FRED_API_KEY') || '';
@@ -2017,10 +2155,11 @@ Deno.serve(async (req) => {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
       for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true);
-      return new Response(JSON.stringify({ mode: 'repair-transcripts', rescored: out }), {
+      return new Response(JSON.stringify({ mode: 'repair-transcripts', run_id: run.run_id, rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }
+
 
     if (body.mode === 'backfill-fred') {
 
