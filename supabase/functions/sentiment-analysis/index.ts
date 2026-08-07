@@ -376,51 +376,60 @@ Content: ${truncated}`;
   // Use stronger model for policy documents, lighter model for routine items
   const model = isPolicy ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
 
-  try {
-    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: AI_SCORING_PROMPT },
-          { role: 'user', content: userMsg },
-        ],
-      }),
-    });
+  // Policy documents get several attempts — a rate-limited gateway must never
+  // leave a binding statement/decision sitting at a bogus 0 score.
+  const attempts = isPolicy ? 4 : 2;
+  let lastErr = 'AI scoring unavailable';
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1)));
+    try {
+      const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: AI_SCORING_PROMPT },
+            { role: 'user', content: userMsg },
+          ],
+        }),
+      });
 
-    if (!resp.ok) {
-      console.error('AI scoring failed:', resp.status);
-      return { score: 0, label: 'neutral', reasoning: 'AI scoring unavailable' };
+      if (!resp.ok) {
+        console.error(`AI scoring failed (attempt ${attempt + 1}/${attempts}):`, resp.status, title.slice(0, 60));
+        lastErr = 'AI scoring unavailable';
+        continue;
+      }
+
+      const data = await resp.json();
+      let content = data.choices?.[0]?.message?.content || '';
+      content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+      const parsed = JSON.parse(content);
+      const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
+      const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
+      const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
+      const d = parsed.dimensions || {};
+
+      return {
+        score: Math.round(score * 1000) / 1000,
+        label,
+        reasoning: parsed.reasoning || '',
+        dimensions: {
+          inflation_persistence: cl(d.inflation_persistence),
+          policy_stance: cl(d.policy_stance),
+          growth_labor_drag: cl(d.growth_labor_drag),
+        },
+      };
+    } catch (e) {
+      console.error(`AI score parse error (attempt ${attempt + 1}/${attempts}):`, e);
+      lastErr = 'AI scoring error';
     }
-
-    const data = await resp.json();
-    let content = data.choices?.[0]?.message?.content || '';
-    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-    const parsed = JSON.parse(content);
-    const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
-    const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
-    const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
-    const d = parsed.dimensions || {};
-
-    return {
-      score: Math.round(score * 1000) / 1000,
-      label,
-      reasoning: parsed.reasoning || '',
-      dimensions: {
-        inflation_persistence: cl(d.inflation_persistence),
-        policy_stance: cl(d.policy_stance),
-        growth_labor_drag: cl(d.growth_labor_drag),
-      },
-    };
-  } catch (e) {
-    console.error('AI score parse error:', e);
-    return { score: 0, label: 'neutral', reasoning: 'AI scoring error' };
   }
+  return { score: 0, label: 'neutral', reasoning: lastErr };
 }
 
 async function scoreBatchWithAI(
