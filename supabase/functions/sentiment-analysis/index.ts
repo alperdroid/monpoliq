@@ -1524,7 +1524,7 @@ Deno.serve(async (req) => {
         }
       }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
-      const s1 = ag(allFedItems.filter(i => !i.is_statistical)), s2 = ag(allFedItems);
+      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED'), s2 = ag(allFedItems, 'FED');
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
