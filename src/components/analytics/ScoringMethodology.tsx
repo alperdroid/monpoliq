@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ExternalLink, FunctionSquare, Gauge, LineChart, Quote, Scale } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { documentTier, TIER_LABEL, ANCHOR_OMEGA, blendedAggregate, type WeightableItem } from '@/lib/scoring-weights';
+import { documentTier, TIER_LABEL, ANCHOR_OMEGA } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 const DIM_WEIGHTS = { inflation_persistence: 0.45, policy_stance: 0.40, growth_labor_drag: 0.15 } as const;
