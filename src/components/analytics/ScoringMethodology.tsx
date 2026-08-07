@@ -366,7 +366,7 @@ export function ScoringMethodology({ allItems }: { allItems: SentimentItem[] }) 
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 font-mono text-[12px] leading-relaxed space-y-0.5">
           <div>1. dimensions: IP, PS, GL scored on the anchor ladder above, each in [−1, +1]</div>
           <div>2. composite = 0.45·IP + 0.40·PS + 0.15·GL</div>
-          <div>3. item score = 0.50·model_headline + 0.50·composite, zeroed inside ±0.10</div>
+          <div>3. item score = blend of the overall read and the weighted composite, zeroed inside ±0.10</div>
           <div>4. item weight = 2^(−age/half-life) × document tier (T1 1.0 / T2 0.7 / T3 0.4 / T4 0.1), any non-chair speaker capped at 10% of total weight</div>
           <div>5. narrative = α·text + (1−α)·statistics, α from channel freshness (0.35–0.85)</div>
           <div>6. published aggregate = {(1 - ANCHOR_OMEGA).toFixed(2)}·narrative + {ANCHOR_OMEGA.toFixed(2)}·realized-action anchor</div>
