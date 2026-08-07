@@ -196,7 +196,7 @@ function EvidenceRow({ row }: { row: Row }) {
                 Provenance — this score's exact inputs
               </p>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px] text-muted-foreground">
-                {audit?.model && <ProvRow k="model" v={`${audit.model} · prompt ${audit.prompt_version ?? '—'} · temp 0`} />}
+                {audit?.prompt_version && <ProvRow k="scoring rubric" v={`${audit.prompt_version}`} />}
                 {pv?.text_sha256 && <ProvRow k="text version (sha256)" v={pv.text_sha256} />}
                 {pv?.extractor_version && <ProvRow k="reader" v={`${pv.extractor ?? '?'} · ${pv.extractor_version}`} />}
                 {pv?.parser_settings && (
