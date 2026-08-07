@@ -44,7 +44,7 @@ export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
 };
 
 /** Weight of the realized-action anchor inside the headline aggregate. */
-export const ANCHOR_OMEGA = 0.25;
+export const ANCHOR_OMEGA = 0.35;
 
 /**
  * Realized-action anchor: the stance implied by what the bank actually DID,
@@ -65,7 +65,7 @@ export function policyActionAnchor(
     if (age < 0 || age > 180) continue;
     if (!last || a.date > last.date) last = a;
     const w = Math.pow(0.5, age / 120);
-    num += (a.bps / 25) * 0.35 * w;
+    num += (a.bps / 25) * 0.45 * w;
     netBps += a.bps;
   }
   const score = Math.round(Math.max(-0.7, Math.min(0.7, num)) * 1000) / 1000;
