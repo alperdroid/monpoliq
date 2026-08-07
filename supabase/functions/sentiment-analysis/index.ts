@@ -1693,7 +1693,7 @@ Deno.serve(async (req) => {
         }
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
-      const s1 = ag(allEcbItems.filter(i => !i.is_statistical)), s2 = ag(allEcbItems);
+      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB'), s2 = ag(allEcbItems, 'ECB');
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
