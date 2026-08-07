@@ -7,8 +7,10 @@
 // FOMC & ECB press conference transcripts now scraped and analyzed.
 // Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
 
-import { weightedAggregate } from '../_shared/scoring-weights.ts';
+import { weightedAggregate, blendedAggregate } from '../_shared/scoring-weights.ts';
 import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
+import { partitionForScoring } from '../_shared/relevance-filter.ts';
+import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 
 
 
@@ -23,6 +25,7 @@ interface It {
   is_statistical:boolean; hawk_pts:number; dove_pts:number; net_score:number;
   label:string; word_count:number; reasons:string[];
   stat_metric:string|null; stat_value:number|null; stat_weight:number;
+  policy_dimensions?:Record<string, unknown>|null;
 }
 
 // ── Cross-language / variant-title dedup helpers ──
@@ -303,12 +306,20 @@ SCORING RULES:
 - Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
 - Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
 
+ENTITY-LEVEL SUB-DIMENSIONS (Layer 2) — score each independently on the same -1..+1 scale:
+- inflation_persistence: price pressures, wage growth, inflation expectations. Positive = pressures persistent/rising; negative = fading.
+- policy_stance: how restrictive vs accommodative the speaker frames current/needed policy. Positive = restrictive/tighter-for-longer; negative = easing bias.
+- growth_labor_drag: growth and labour market risk. Positive = economy resilient/tight labour market; negative = weakening growth, rising unemployment, recession risk.
+Use 0.0 for a dimension the text does not address. The headline score should be consistent with the dimensions you report.
+
 Respond with ONLY a JSON object (no markdown):
-{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>"}`;
+{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>",
+ "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>}}`;
 interface AIScore {
   score: number;
   label: string;
   reasoning: string;
+  dimensions?: { inflation_persistence: number; policy_stance: number; growth_labor_drag: number };
 }
 
 // Detect if an item is a major policy document that needs stronger AI model
@@ -393,11 +404,18 @@ Content: ${truncated}`;
     const parsed = JSON.parse(content);
     const score = Math.max(-1, Math.min(1, Number(parsed.score) || 0));
     const label = score > 0.05 ? 'hawkish' : score < -0.05 ? 'dovish' : 'neutral';
+    const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
+    const d = parsed.dimensions || {};
 
     return {
       score: Math.round(score * 1000) / 1000,
       label,
       reasoning: parsed.reasoning || '',
+      dimensions: {
+        inflation_persistence: cl(d.inflation_persistence),
+        policy_stance: cl(d.policy_stance),
+        growth_labor_drag: cl(d.growth_labor_drag),
+      },
     };
   } catch (e) {
     console.error('AI score parse error:', e);
@@ -1475,14 +1493,28 @@ Deno.serve(async (req) => {
       const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
       console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
 
-      // Score new items with AI
-      if (newComms.length > 0 && aiKey) {
+      // Layer 1 — drop administrative/operational noise before the NLP pass
+      const fedPart = partitionForScoring(newComms.map(c => ({ ...c, source: c.source, text: c.text })));
+      console.log('FED layer1: ' + fedPart.scorable.length + ' scorable, ' + fedPart.noise.length + ' filtered as noise');
+      for (const { doc: c, verdict } of fedPart.noise) {
+        fi.push({
+          bank: 'FED', source: c.source, item_date: c.date, title: c.title, url: c.url,
+          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
+          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
+          stat_metric: null, stat_value: null, stat_weight: 0,
+          policy_dimensions: { relevance: verdict.relevance },
+        });
+      }
+
+      // Layer 2 — semantic scoring with entity-level sub-dimensions
+      const fedScorable = fedPart.scorable;
+      if (fedScorable.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
+          fedScorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
-        for (let i = 0; i < newComms.length; i++) {
-          const c = newComms[i];
+        for (let i = 0; i < fedScorable.length; i++) {
+          const { doc: c, verdict } = fedScorable[i];
           const s = scores[i];
           fi.push({
             bank: 'FED', source: c.source, item_date: c.date,
@@ -1493,8 +1525,9 @@ Deno.serve(async (req) => {
             net_score: s.score,
             label: s.label,
             word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning],
+            reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
           });
         }
       }
@@ -1503,6 +1536,8 @@ Deno.serve(async (req) => {
       let fiDedup = dedupItems(fi);
       if (fiDedup.length < fi.length) console.log('FED: deduped ' + fi.length + ' -> ' + fiDedup.length + ' items');
       fiDedup = await aiCrossLangDedup(fiDedup, aiKey);
+      // Layer 3 — normalize each speaker against their own historical baseline
+      fiDedup = await applySpeakerCalibration(fiDedup, 'FED', sbUrl, sbKey);
       if (fiDedup.length) {
         console.log('FED: persisting ' + fiDedup.length + ' items to DB');
         for (let i = 0; i < fiDedup.length; i += 50) {
@@ -1515,6 +1550,7 @@ Deno.serve(async (req) => {
               hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
               label: it.label, word_count: it.word_count, reasons: it.reasons,
               stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+              ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
             }))),
           });
           if (!resp.ok) {
@@ -1524,7 +1560,10 @@ Deno.serve(async (req) => {
         }
       }
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
-      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED'), s2 = ag(allFedItems, 'FED');
+      // Layer 4 — α·S_text + (1−α)·S_stats
+      const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED');
+      const s2 = blendedAggregate(allFedItems, 'FED');
+      console.log('FED layer4: alpha=' + s2.alpha + ' text=' + s2.text.avg + ' stats=' + s2.stats.avg + ' blended=' + s2.avg);
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
@@ -1638,13 +1677,27 @@ Deno.serve(async (req) => {
       const newComms = actualComms.filter(c => !existing.has(`${c.title}|${c.date}`));
       console.log('ECB: ' + actualComms.length + ' actual comms, ' + newComms.length + ' NEW to score with AI');
 
-      if (newComms.length > 0 && aiKey) {
+      // Layer 1 — drop administrative/operational noise before the NLP pass
+      const ecbPart = partitionForScoring(newComms);
+      console.log('ECB layer1: ' + ecbPart.scorable.length + ' scorable, ' + ecbPart.noise.length + ' filtered as noise');
+      for (const { doc: c, verdict } of ecbPart.noise) {
+        ei.push({
+          bank: 'ECB', source: c.source, item_date: c.date, title: c.title, url: c.url,
+          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
+          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
+          stat_metric: null, stat_value: null, stat_weight: 0,
+          policy_dimensions: { relevance: verdict.relevance },
+        });
+      }
+
+      // Layer 2 — semantic scoring with entity-level sub-dimensions
+      if (ecbPart.scorable.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
+          ecbPart.scorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
-        for (let i = 0; i < newComms.length; i++) {
-          const c = newComms[i];
+        for (let i = 0; i < ecbPart.scorable.length; i++) {
+          const { doc: c, verdict } = ecbPart.scorable[i];
           const s = scores[i];
           ei.push({
             bank: 'ECB', source: c.source, item_date: c.date,
@@ -1655,8 +1708,9 @@ Deno.serve(async (req) => {
             net_score: s.score,
             label: s.label,
             word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning],
+            reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
           });
         }
       }
@@ -1666,6 +1720,8 @@ Deno.serve(async (req) => {
       let dedupEi = dedupItems(ei);
       if (dedupEi.length < ei.length) console.log('ECB: deduped ' + ei.length + ' -> ' + dedupEi.length + ' items');
       dedupEi = await aiCrossLangDedup(dedupEi, aiKey);
+      // Layer 3 — normalize each speaker against their own historical baseline
+      dedupEi = await applySpeakerCalibration(dedupEi, 'ECB', sbUrl, sbKey);
       if (dedupEi.length) {
         console.log('ECB: persisting ' + dedupEi.length + ' items to DB');
         for (let i = 0; i < dedupEi.length; i += 50) {
@@ -1676,6 +1732,7 @@ Deno.serve(async (req) => {
             hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
             label: it.label, word_count: it.word_count, reasons: it.reasons,
             stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+            ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
           }));
           // Log press conf items for debugging
           const pressConfInBatch = payload.filter(p => p.source === 'ECB Press Conf');
@@ -1693,7 +1750,10 @@ Deno.serve(async (req) => {
         }
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
-      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB'), s2 = ag(allEcbItems, 'ECB');
+      // Layer 4 — α·S_text + (1−α)·S_stats
+      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB');
+      const s2 = blendedAggregate(allEcbItems, 'ECB');
+      console.log('ECB layer4: alpha=' + s2.alpha + ' text=' + s2.text.avg + ' stats=' + s2.stats.avg + ' blended=' + s2.avg);
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
