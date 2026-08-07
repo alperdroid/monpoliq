@@ -26,10 +26,11 @@ function recentItems(items: SentimentItem[], days: number) {
   return items.filter(i => i.item_date >= cs);
 }
 
-function compute30dAvg(items: SentimentItem[]) {
-  const w = weightedAvgScore(items, { halfLifeDays: 21 });
+function compute30dAvg(items: SentimentItem[], bank?: string) {
+  const w = weightedAvgScore(items, { bank });
   return w ? w.avg : null;
 }
+
 
 const Predictions = () => {
   const { data: aiPrediction, isLoading } = useQuery({
