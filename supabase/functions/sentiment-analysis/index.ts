@@ -406,15 +406,44 @@ SCORING RULES:
 - Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
 - Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
 
-ENTITY-LEVEL SUB-DIMENSIONS (Layer 2) — score each independently on the same -1..+1 scale:
-- inflation_persistence: price pressures, wage growth, inflation expectations. Positive = pressures persistent/rising; negative = fading.
-- policy_stance: how restrictive vs accommodative the speaker frames current/needed policy. Positive = restrictive/tighter-for-longer; negative = easing bias.
-- growth_labor_drag: growth and labour market risk. Positive = economy resilient/tight labour market; negative = weakening growth, rising unemployment, recession risk.
-Use 0.0 for a dimension the text does not address. The headline score should be consistent with the dimensions you report.
+ENTITY-LEVEL SUB-DIMENSIONS (Layer 2) — score each on the FIXED anchor ladder below.
+Do not free-hand a number: pick the anchor whose description the text actually matches, and only
+move ±0.1 off an anchor to reflect how emphatic the wording is.
+
+ANCHOR LADDER (identical for all three dimensions):
+   0.0  → the text does not address this dimension, or is genuinely two-sided on it
+  ±0.2  → mentioned once, hedged or conditional ("could", "some", "we are watching")
+  ±0.5  → stated as the speaker's assessment of the current situation, unhedged
+  ±0.8  → stated as the dominant concern of the document, repeated or quantified
+  ±1.0  → stated as the binding reason for the policy decision itself
+
+1. inflation_persistence — where the text puts price pressure (HICP/PCE, wages, expectations).
+   POSITIVE (+) = pressure is persistent, above target, broadening, or expectations drifting up.
+   NEGATIVE (−) = disinflation on track, pressure fading, expectations anchored or falling.
+   +1.0 example: "inflation is too high and that is why we raised rates today"
+   −0.5 example: "underlying inflation has continued to ease as we expected"
+
+2. policy_stance — how restrictive the speaker frames current or needed policy.
+   POSITIVE (+) = keep restrictive, higher-for-longer, hike, resist cutting, dissent for a hike.
+   NEGATIVE (−) = easing bias, cut delivered or signalled, policy seen as too tight, dissent for a cut.
+   +1.0 example: a delivered hike or "we are not close to cutting"
+   −1.0 example: a delivered cut or "further easing will be appropriate"
+   Note: a HOLD is not automatically 0 — read whether it is framed as vigilance (+) or as a pause before cuts (−).
+
+3. growth_labor_drag — the state of demand and the labour market as the speaker describes it.
+   POSITIVE (+) = economy resilient, labour market tight, demand robust (i.e. no case for easing).
+   NEGATIVE (−) = growth slowing, unemployment rising, recession or downside risk emphasised.
+   +0.5 example: "the labour market remains solid"
+   −0.8 example: "hiring has slowed markedly and downside risks have increased"
+
+Quote the words you scored from: for each non-zero dimension put a short verbatim snippet in
+"evidence". The headline score must be consistent with the dimensions you report.
 
 Respond with ONLY a JSON object (no markdown):
 {"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>",
- "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>}}`;
+ "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>},
+ "evidence": {"inflation_persistence": "<quote or empty>", "policy_stance": "<quote or empty>", "growth_labor_drag": "<quote or empty>"}}`;
+
 // ── Standardization layer (auditable, deterministic) ──
 // The model returns a headline score AND three sub-dimension scores. We do NOT
 // take the headline at face value: we recompute a deterministic composite from
