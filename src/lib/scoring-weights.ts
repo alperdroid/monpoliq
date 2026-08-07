@@ -2,7 +2,7 @@
 // Layer 3 normalization: dynamic time-decay × contextual document tier ×
 // statistical reliability weight.
 
-import { MEETINGS_2026 } from '@/data/meeting-schedule';
+import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 
 export interface WeightableItem {
   bank: string;
