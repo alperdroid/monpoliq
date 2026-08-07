@@ -1677,13 +1677,27 @@ Deno.serve(async (req) => {
       const newComms = actualComms.filter(c => !existing.has(`${c.title}|${c.date}`));
       console.log('ECB: ' + actualComms.length + ' actual comms, ' + newComms.length + ' NEW to score with AI');
 
-      if (newComms.length > 0 && aiKey) {
+      // Layer 1 — drop administrative/operational noise before the NLP pass
+      const ecbPart = partitionForScoring(newComms);
+      console.log('ECB layer1: ' + ecbPart.scorable.length + ' scorable, ' + ecbPart.noise.length + ' filtered as noise');
+      for (const { doc: c, verdict } of ecbPart.noise) {
+        ei.push({
+          bank: 'ECB', source: c.source, item_date: c.date, title: c.title, url: c.url,
+          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
+          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
+          stat_metric: null, stat_value: null, stat_weight: 0,
+          policy_dimensions: { relevance: verdict.relevance },
+        });
+      }
+
+      // Layer 2 — semantic scoring with entity-level sub-dimensions
+      if (ecbPart.scorable.length > 0 && aiKey) {
         const scores = await scoreBatchWithAI(
-          newComms.map(c => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
+          ecbPart.scorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
         );
-        for (let i = 0; i < newComms.length; i++) {
-          const c = newComms[i];
+        for (let i = 0; i < ecbPart.scorable.length; i++) {
+          const { doc: c, verdict } = ecbPart.scorable[i];
           const s = scores[i];
           ei.push({
             bank: 'ECB', source: c.source, item_date: c.date,
@@ -1694,8 +1708,9 @@ Deno.serve(async (req) => {
             net_score: s.score,
             label: s.label,
             word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning],
+            reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}) },
           });
         }
       }
@@ -1705,6 +1720,8 @@ Deno.serve(async (req) => {
       let dedupEi = dedupItems(ei);
       if (dedupEi.length < ei.length) console.log('ECB: deduped ' + ei.length + ' -> ' + dedupEi.length + ' items');
       dedupEi = await aiCrossLangDedup(dedupEi, aiKey);
+      // Layer 3 — normalize each speaker against their own historical baseline
+      dedupEi = await applySpeakerCalibration(dedupEi, 'ECB', sbUrl, sbKey);
       if (dedupEi.length) {
         console.log('ECB: persisting ' + dedupEi.length + ' items to DB');
         for (let i = 0; i < dedupEi.length; i += 50) {
@@ -1715,6 +1732,7 @@ Deno.serve(async (req) => {
             hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
             label: it.label, word_count: it.word_count, reasons: it.reasons,
             stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+            ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
           }));
           // Log press conf items for debugging
           const pressConfInBatch = payload.filter(p => p.source === 'ECB Press Conf');
@@ -1732,7 +1750,10 @@ Deno.serve(async (req) => {
         }
       }
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
-      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB'), s2 = ag(allEcbItems, 'ECB');
+      // Layer 4 — α·S_text + (1−α)·S_stats
+      const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB');
+      const s2 = blendedAggregate(allEcbItems, 'ECB');
+      console.log('ECB layer4: alpha=' + s2.alpha + ' text=' + s2.text.avg + ' stats=' + s2.stats.avg + ' blended=' + s2.avg);
       await fetch(sbUrl + '/rest/v1/sentiment_scores?on_conflict=bank', {
         method: 'POST', headers: { ...persistHd, 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify([{
