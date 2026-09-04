@@ -2402,7 +2402,7 @@ Deno.serve(async (req) => {
               hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
               label: it.label, word_count: it.word_count, reasons: it.reasons,
               stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
-              ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
+              policy_dimensions: it.policy_dimensions ?? null,
             }))),
           });
           if (!resp.ok) {
@@ -2586,7 +2586,7 @@ Deno.serve(async (req) => {
             hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
             label: it.label, word_count: it.word_count, reasons: it.reasons,
             stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
-            ...(it.policy_dimensions ? { policy_dimensions: it.policy_dimensions } : {}),
+            policy_dimensions: it.policy_dimensions ?? null,
           }));
           // Log press conf items for debugging
           const pressConfInBatch = payload.filter(p => p.source === 'ECB Press Conf');
