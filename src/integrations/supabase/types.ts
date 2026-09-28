@@ -339,7 +339,51 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      scorer_comparison: {
+        Row: {
+          ai_score: number | null
+          bank: string | null
+          disagreement: boolean | null
+          frozen_score: number | null
+          id: string | null
+          item_date: string | null
+          n_sentences: number | null
+          net_score: number | null
+          scorer_model: string | null
+          source: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          ai_score?: never
+          bank?: string | null
+          disagreement?: never
+          frozen_score?: never
+          id?: string | null
+          item_date?: string | null
+          n_sentences?: never
+          net_score?: number | null
+          scorer_model?: never
+          source?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          ai_score?: never
+          bank?: string | null
+          disagreement?: never
+          frozen_score?: never
+          id?: string | null
+          item_date?: string | null
+          n_sentences?: never
+          net_score?: number | null
+          scorer_model?: never
+          source?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
