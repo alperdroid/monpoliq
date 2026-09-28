@@ -283,7 +283,7 @@ const Dashboard = () => {
       {/* Score attribution — verify which speaker / release drove the score */}
       <ScoreAttribution allItems={allItems} />
 
-      {/* Technical inputs behind every AI-scored communication */}
+      {/* Technical inputs behind every scored communication */}
       <ScoringMethodology allItems={allItems} />
 
       {/* Extracted snippets with page/line references behind each score */}

@@ -1,0 +1,48 @@
+import type { SentimentItem } from '@/lib/api/sentiment';
+
+/** The frozen scorer's own record, written by supabase/functions/_shared/frozen-scoring.ts. */
+export interface FrozenAudit {
+  net_score?: number;
+  z?: number;
+  label?: string;
+  lexicon_measure?: number;
+  linear_soft_measure?: number;
+  n_sentences?: number;
+  scorer_agreement?: number;
+  evidence?: { hawkish?: string[]; dovish?: string[] };
+  versions?: { lexicon?: string; linear?: string; bundle_sha?: string; dimensions?: string };
+}
+
+export type ScoreKind = 'frozen' | 'sep' | 'legacy';
+export type TextKind = 'bis' | 'ai_discovered' | 'primary';
+
+export const FROZEN_MODEL = 'frozen lexicon + linear ensemble (no LLM)';
+
+type AuditRecord = { model?: string; frozen?: FrozenAudit } & Record<string, unknown>;
+
+function auditOf(item: SentimentItem): AuditRecord | null {
+  const pd = (item.policy_dimensions || {}) as unknown as Record<string, unknown>;
+  return (pd.scoring_audit as AuditRecord | undefined) ?? null;
+}
+
+export function isSepItem(item: SentimentItem): boolean {
+  return /fomc sep|summary of economic projections/i.test(`${item.source || ''} ${item.title || ''}`);
+}
+
+/** How the published score was produced. */
+export function scoreKind(item: SentimentItem): ScoreKind {
+  if (isSepItem(item)) return 'sep';
+  const a = auditOf(item);
+  return a?.model === FROZEN_MODEL ? 'frozen' : 'legacy';
+}
+
+/** Where the scored text came from. */
+export function textKind(item: SentimentItem): TextKind {
+  if (item.source === 'Member Speech (BIS)') return 'bis';
+  if (item.source === 'GC Member Remark' || item.source === 'Fed Official Remark') return 'ai_discovered';
+  return 'primary';
+}
+
+export function frozenOf(item: SentimentItem): FrozenAudit | null {
+  return auditOf(item)?.frozen ?? null;
+}

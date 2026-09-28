@@ -23,6 +23,7 @@ import Alerts from "./pages/Alerts";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import NotFound from "./pages/NotFound";
+import AdminScoring from "./pages/AdminScoring";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
                   <Route path="/taxonomy" element={<PolicyTaxonomy />} />
                   <Route path="/radar" element={<PolicyRadar />} />
                   <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/admin/scoring" element={<AdminScoring />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </AppLayout>

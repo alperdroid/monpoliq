@@ -6,6 +6,8 @@ import { ChevronDown, ChevronRight, ExternalLink, FileSearch, Quote } from 'luci
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { documentTier, TIER_LABEL } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
+import type { FrozenAudit } from '@/lib/scoring-provenance';
+import { ScoreProvenanceBadges } from '@/components/analytics/ScoreProvenanceBadges';
 
 const DIMS = [
   { key: 'inflation_persistence', label: 'Inflation persistence', weight: 0.45 },
@@ -57,6 +59,7 @@ interface Audit {
   };
   model?: string;
   prompt_version?: string;
+  frozen?: FrozenAudit;
 }
 
 const ProvRow = ({ k, v }: { k: string; v: string }) => (
@@ -145,6 +148,7 @@ function EvidenceRow({ row }: { row: Row }) {
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-mono text-muted-foreground">{item.item_date}</span>
             <span className="text-[11px] text-muted-foreground">{item.source}</span>
+            <ScoreProvenanceBadges item={item} linkable={false} />
             <span className="text-[10px] text-muted-foreground">T{tier} · {TIER_LABEL[tier]}</span>
             <span className="text-[10px] font-mono text-muted-foreground">
               {snippets.length} snippet{snippets.length === 1 ? '' : 's'}
@@ -246,7 +250,9 @@ function EvidenceRow({ row }: { row: Row }) {
                 Provenance — this score's exact inputs
               </p>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px] text-muted-foreground">
-                {audit?.prompt_version && <ProvRow k="scoring rubric" v={`${audit.prompt_version}`} />}
+                {audit?.model && <ProvRow k="method" v={audit.model} />}
+                {audit?.prompt_version && <ProvRow k="scorer version" v={`${audit.prompt_version}`} />}
+                {audit?.frozen?.n_sentences != null && <ProvRow k="sentences scored" v={String(audit.frozen.n_sentences)} />}
                 {pv?.text_sha256 && <ProvRow k="text version (sha256)" v={pv.text_sha256} />}
                 {pv?.extractor_version && <ProvRow k="reader" v={`${pv.extractor ?? '?'} · ${pv.extractor_version}`} />}
                 {pv?.parser_settings && (

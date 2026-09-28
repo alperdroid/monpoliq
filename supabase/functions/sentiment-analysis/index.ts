@@ -12,6 +12,8 @@ import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
 import { partitionForScoring } from '../_shared/relevance-filter.ts';
 import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
+import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
+import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
 
 
 
@@ -773,7 +775,32 @@ function isPolicyDocForScoring(title: string, source: string): boolean {
   return keywords.some(k => tl.includes(k));
 }
 
+// Layer 2 entry point. Every communication (statements, minutes, press conferences,
+// accounts, speeches, interviews, member remarks) is scored here; SCORER_MODE decides
+// whether the frozen scorer or Gemini sets net_score (see _shared/frozen-scoring.ts).
 async function scoreWithAI(
+  title: string,
+  text: string,
+  bank: string,
+  apiKey: string,
+  source?: string,
+): Promise<AIScore> {
+  const mode = scorerMode();
+  // SEP documents are projection tables, not prose: they keep the Gemini path
+  // (and are later overwritten by the SEP delta scoring, which also uses Gemini to read the tables).
+  if (isSepDoc(title, source || '') && apiKey) return await scoreWithGemini(title, text, bank, apiKey, source);
+  if (!apiKey && mode !== 'frozen-only') {
+    // no Gemini key: fall back to the deterministic scorer rather than skip the document
+    return await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: 'no ai key' }), 'frozen-only') as AIScore;
+  }
+  return await scoreCombined(text, () => scoreWithGemini(title, text, bank, apiKey, source), mode) as AIScore;
+}
+
+function isSepDoc(title: string, source: string): boolean {
+  return /fomc sep|summary of economic projections/i.test(`${source} ${title}`);
+}
+
+async function scoreWithGemini(
   title: string,
   text: string,
   bank: string,
@@ -1060,6 +1087,7 @@ Respond with ONLY a JSON object (no markdown):
 }`;
 
 async function extractSEPProjections(text: string, meetingDate: string, apiKey: string): Promise<SEPProjections | null> {
+  if (!apiKey) return null;
   try {
     const truncated = text.length > 8000 ? text.slice(0, 8000) : text;
     const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -1952,16 +1980,15 @@ For each comment, provide:
 - speaker: full name
 - date: YYYY-MM-DD format  
 - headline: what they said (include the media outlet if known)
-- summary: 2-3 sentences of what they said about monetary policy
-- sentiment: hawkish/dovish/neutral
-- score: -1.0 to 1.0
+- summary: 2-3 sentences of what they said about monetary policy, as close to their own words as possible
+- outlet_url: the article URL if known, otherwise empty
 
 Only include comments about monetary policy (rates, inflation, growth outlook).
 Skip ceremonial, administrative, or non-monetary remarks.
 Only include items you are confident actually happened — do NOT fabricate.
 
 Respond with ONLY a JSON array (no markdown):
-[{"speaker":"...","date":"YYYY-MM-DD","headline":"...","summary":"...","sentiment":"...","score":0.0}]
+[{"speaker":"...","date":"YYYY-MM-DD","headline":"...","summary":"...","outlet_url":""}]
 Return empty array [] if no significant remarks found.`;
 
   try {
@@ -1979,7 +2006,7 @@ Return empty array [] if no significant remarks found.`;
     let content = data.choices?.[0]?.message?.content || '';
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     
-    const remarks: { speaker: string; date: string; headline: string; summary: string; sentiment: string; score: number }[] = JSON.parse(content);
+    const remarks: { speaker: string; date: string; headline: string; summary: string; outlet_url?: string }[] = JSON.parse(content);
     console.log('Media interview search (' + bank + '): found ' + remarks.length + ' remarks');
     
     for (const remark of remarks) {
@@ -1994,7 +2021,7 @@ Return empty array [] if no significant remarks found.`;
         title: remark.headline,
         text: remark.summary,
         date: remark.date,
-        url: '',
+        url: /^https?:\/\//.test(remark.outlet_url || '') ? remark.outlet_url! : '',
         source: bank === 'ECB' ? 'GC Member Remark' : 'Fed Official Remark',
         bank,
       });
@@ -2197,6 +2224,106 @@ function ag(sub: It[], bank?: string) {
 }
 
 
+// ── Frozen-scorer backfill ──
+// Re-reads stored communications and scores them with the frozen scorer, with no
+// Gemini calls. apply=false (default) only writes the result into
+// policy_dimensions.scoring_audit.frozen, so the live index is untouched and the
+// two scorers can be compared. apply=true also overwrites net_score / label, which
+// is what you run once, for the whole history, right before setting
+// SCORER_MODE=frozen, so speaker baselines are rebuilt on one consistent scale.
+async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: boolean, offset = 0, limit = 40): Promise<{ scored: number; skipped: number; next_offset: number | null }> {
+  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
+  const resp = await fetch(
+    `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&offset=${offset}&limit=${limit}`,
+    { headers: hd },
+  );
+  if (!resp.ok) return { scored: 0, skipped: 0, next_offset: null };
+  const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; policy_dimensions: Record<string, any> | null }[] = await resp.json();
+  let scored = 0, skipped = 0;
+  for (const r of rows) {
+    const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
+    if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '') || documentTier(r.source || '', r.title || '') === 4) { skipped++; continue; }
+    const text = r.url ? await fetchPageText(r.url) : stored;
+    if (!isReadableProse(text || '', 40)) { skipped++; continue; }
+    const f = await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: '' }), 'frozen-only');
+    const frozen = (f.audit as any)?.frozen;
+    if (!frozen || frozen.n_sentences === 0) { skipped++; continue; }
+    const pd = { ...(r.policy_dimensions || {}) };
+    const priorAi = pd.scoring_audit?.ai_score ?? r.net_score;
+    if (apply) {
+      Object.assign(pd, f.dimensions || {});                        // deterministic sub-dimensions for the UI
+      pd.scoring_audit = { ...(f.audit || {}), ai_score: priorAi };   // keep the old Gemini score for reference
+    } else {
+      pd.scoring_audit = { ...(pd.scoring_audit || {}), frozen, ai_score: priorAi };
+    }
+    const body: Record<string, unknown> = { policy_dimensions: pd };
+    if (apply) Object.assign(body, {
+      net_score: f.score, label: f.label,
+      hawk_pts: f.score > 0 ? Math.round(f.score * 10) : 0, dove_pts: f.score < 0 ? Math.round(-f.score * 10) : 0,
+    });
+    const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+      method: 'PATCH', headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify(body),
+    });
+    if (patch.ok) scored++; else skipped++;
+  }
+  return { scored, skipped, next_offset: rows.length === limit ? offset + limit : null };
+}
+
+
+// ── Member communications ──
+// MEMBER_SOURCE=both (default): Gemini media-interview discovery + BIS speech texts
+//   (euro-area NCB governors, regional Fed presidents). 'ai' or 'bis' for one source, 'off' for none.
+// Gemini is used here only to FIND remarks; the text it returns is scored by the frozen scorer.
+async function fetchMemberCommunications(bank: string, aiKey: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
+  const src = (Deno.env.get('MEMBER_SOURCE') || 'both').toLowerCase();
+  if (src === 'off') return [];
+  const [ai, bis] = await Promise.all([
+    src === 'ai' || src === 'both' ? fetchMediaInterviews(bank, aiKey, existing) : Promise.resolve([] as RawComm[]),
+    src === 'bis' || src === 'both' ? fetchBisMemberSpeeches(bank, existing, cutoffDate) : Promise.resolve([] as RawComm[]),
+  ]);
+  return [...bis, ...ai];
+}
+
+async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
+  const out: RawComm[] = [];
+  try {
+    const r = await sf(BIS_FEED, 20000);
+    if (!r || !r.ok) { console.error('BIS feed unavailable:', r?.status); return out; }
+    const members = parseBisRss(await r.text()).map(classifyMember)
+      .filter((m): m is NonNullable<typeof m> => !!m && m.bank === bank);
+    for (const m of members) {
+      const date = m.delivered || m.published;
+      if (!date || date < cutoffDate) continue;
+      const title = monpoliqTitle(m);
+      if (existing.has(`${title}|${date}`)) continue;
+      let text = await fetchPageText(m.url);
+      if (text.split(/\s+/).length < 300 && m.pdf) text = await fetchPageText(m.pdf);
+      if (!isReadableProse(text, 150)) { console.log('BIS: unreadable text, skipped', m.url); continue; }
+      out.push({ title, text, date, url: m.url, source: 'Member Speech (BIS)', bank });
+    }
+    console.log(`BIS member speeches (${bank}): ${out.length} new`);
+  } catch (e) { console.error('BIS member speeches error:', e); }
+  return out;
+}
+
+// ── Admin check for write/maintenance modes ──
+// This function is deployed with verify_jwt = false, so anyone can call it. Modes that
+// overwrite stored scores require a signed-in user whose email is listed in the
+// ADMIN_EMAILS secret (comma-separated). If ADMIN_EMAILS is not set, nobody is admin.
+async function isAdminRequest(req: Request, sbUrl: string): Promise<boolean> {
+  const admins = (Deno.env.get('ADMIN_EMAILS') || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  if (!admins.length) return false;
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!token) return false;
+  const apikey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  try {
+    const r = await fetch(`${sbUrl}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey } });
+    if (!r.ok) return false;
+    const u = await r.json();
+    return admins.includes(String(u?.email || '').toLowerCase());
+  } catch { return false; }
+}
+
 // ── DB persistence ──
 async function persist(bank: string, items: It[], s1: ReturnType<typeof ag>, s2: ReturnType<typeof ag>) {
   const sbUrl = Deno.env.get('SUPABASE_URL')!;
@@ -2249,11 +2376,13 @@ Deno.serve(async (req) => {
     const run = beginRun(
       body.mode === 'repair-transcripts' && body.refs === true ? 'repair-citations' : (body.mode || 'scrape'),
     );
-    console.log('SA v4.0 (AI+PressConf+Dedup): bank=' + bank + ' days=' + days + ' run=' + run.run_id + ' mode=' + run.mode);
+    console.log('SA v4.1 (frozen scorer, mode=' + scorerMode() + '): bank=' + bank + ' days=' + days + ' run=' + run.run_id + ' mode=' + run.mode);
 
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
     const fk = Deno.env.get('FRED_API_KEY') || '';
+    // Gemini remains available for scraping helpers (member-remark discovery, cross-language dedup,
+    // ECB URL fallback) and for SEP projections. It never scores other communications in frozen modes.
     const aiKey = Deno.env.get('LOVABLE_API_KEY') || '';
     const sbUrl = Deno.env.get('SUPABASE_URL')!;
     const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -2272,6 +2401,31 @@ Deno.serve(async (req) => {
       });
     }
 
+
+    // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
+    //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
+    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen') {
+      if (!(await isAdminRequest(req, sbUrl))) {
+        return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
+          status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+    if (body.mode === 'scoring-status') {
+      return new Response(JSON.stringify({
+        mode: 'scoring-status', scorer_mode: scorerMode(),
+        member_source: (Deno.env.get('MEMBER_SOURCE') || 'both').toLowerCase(),
+        gemini_key_present: !!Deno.env.get('LOVABLE_API_KEY'),
+      }), { headers: { ...CH, 'Content-Type': 'application/json' } });
+    }
+    if (body.mode === 'rescore-frozen') {
+      const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
+      const out: Record<string, unknown> = {};
+      for (const b of banks) out[b] = await rescoreFrozen(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 40, 100));
+      return new Response(JSON.stringify({ mode: 'rescore-frozen', run_id: run.run_id, apply: body.apply === true, result: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
 
     if (body.mode === 'backfill-fred') {
 
@@ -2308,7 +2462,7 @@ Deno.serve(async (req) => {
         fetchRssRaw(cs, 'FED'),
         fetchFomcMinutes(cs),
         fetchFomcPressConferences(cs),
-        fetchMediaInterviews('FED', aiKey, existing),
+        fetchMemberCommunications('FED', aiKey, existing, cs),
       ]);
 
       const fi: It[] = [];
@@ -2360,7 +2514,7 @@ Deno.serve(async (req) => {
 
       // Layer 2 — semantic scoring with entity-level sub-dimensions
       const fedScorable = fedPart.scorable;
-      if (fedScorable.length > 0 && aiKey) {
+      if (fedScorable.length > 0) {
         const scores = await scoreBatchWithAI(
           fedScorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
@@ -2379,7 +2533,9 @@ Deno.serve(async (req) => {
             word_count: c.text.split(/\s+/).length,
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}) },
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
+              // no URL to re-read later (e.g. Gemini-discovered remarks): keep the exact text that was scored
+              ...(c.url ? {} : { source_text: (c.text || '').slice(0, 6000) }) },
           });
         }
       }
@@ -2443,7 +2599,7 @@ Deno.serve(async (req) => {
         fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
         fetchEcbAccounts(cs),
-        fetchMediaInterviews('ECB', aiKey, existing),
+        fetchMemberCommunications('ECB', aiKey, existing, cs),
       ]);
 
       const ei: It[] = [];
@@ -2489,7 +2645,7 @@ Deno.serve(async (req) => {
       }
 
       // AI-score reclassified surveys and add as statistical items
-      if (reclassifiedSurveys.length > 0 && aiKey) {
+      if (reclassifiedSurveys.length > 0) {
         const surveyTexts: { title: string; text: string; bank: string }[] = [];
         for (const s of reclassifiedSurveys) {
           // Fetch page text if not already available
@@ -2545,7 +2701,7 @@ Deno.serve(async (req) => {
       }
 
       // Layer 2 — semantic scoring with entity-level sub-dimensions
-      if (ecbPart.scorable.length > 0 && aiKey) {
+      if (ecbPart.scorable.length > 0) {
         const scores = await scoreBatchWithAI(
           ecbPart.scorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
           aiKey,
@@ -2564,7 +2720,9 @@ Deno.serve(async (req) => {
             word_count: c.text.split(/\s+/).length,
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}) },
+            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
+              // no URL to re-read later (e.g. Gemini-discovered remarks): keep the exact text that was scored
+              ...(c.url ? {} : { source_text: (c.text || '').slice(0, 6000) }) },
           });
         }
       }

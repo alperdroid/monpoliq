@@ -97,7 +97,7 @@ export interface Aggregate {
   half_life_days: number;
 }
 
-const CHAIR_NAMES = /powell|lagarde|chair|president|jefferson|de guindos/i;
+const CHAIR_NAMES = /powell|warsh|lagarde|chair|president|jefferson|de guindos|vuj[cč]i[cć]/i;
 
 function speakerOf(title: string): string | null {
   const t = (title || '').trim();

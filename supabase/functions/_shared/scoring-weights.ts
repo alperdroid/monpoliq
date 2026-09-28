@@ -217,7 +217,7 @@ export interface Aggregate {
 }
 
 /** Chairs/Presidents speak for the committee, so they are exempt from the cap. */
-const CHAIR_NAMES = /powell|lagarde|chair|president|jefferson|de guindos/i;
+const CHAIR_NAMES = /powell|warsh|lagarde|chair|president|jefferson|de guindos|vuj[cč]i[cć]/i;
 
 /** Pull the speaker out of a communication title ("Nagel: Act now …"). */
 function speakerOf(title: string): string | null {

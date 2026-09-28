@@ -17,7 +17,7 @@ export interface CalibratableItem {
   policy_dimensions?: Record<string, unknown> | null;
 }
 
-const CHAIRS = /powell|lagarde/i;
+const CHAIRS = /powell|warsh|lagarde/i;   // Fed Chair Warsh (2026), ECB President Lagarde
 
 /** Pull the speaker out of a communication title ("Nagel: Act now …", "Lagarde, Vujčić: …"). */
 export function extractSpeaker(title: string): string | null {
