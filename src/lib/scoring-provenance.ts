@@ -18,7 +18,7 @@ export interface FrozenAudit {
 }
 
 export type ScoreKind = 'frozen' | 'sep' | 'legacy';
-export type TextKind = 'bis' | 'fed_site' | 'ai_verified' | 'ai_discovered' | 'primary';
+export type TextKind = 'bis' | 'ai_verified' | 'ai_discovered' | 'primary';
 
 export const FROZEN_MODEL = 'frozen lexicon + linear ensemble (no LLM)';
 
@@ -43,7 +43,6 @@ export function scoreKind(item: SentimentItem): ScoreKind {
 /** Where the scored text came from. */
 export function textKind(item: SentimentItem): TextKind {
   if (item.source === 'Member Speech (BIS)') return 'bis';
-  if (item.source === 'Member Speech (Fed site)') return 'fed_site';
   // Verified only when the backend confirmed it against a published article or speech; a URL alone
   // proves nothing (older rows kept URLs the AI search suggested without checking them).
   if (item.source === 'GC Member Remark' || item.source === 'Fed Official Remark') {

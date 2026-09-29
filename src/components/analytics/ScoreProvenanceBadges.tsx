@@ -36,12 +36,6 @@ export function ScoreProvenanceBadges({ item, linkable = true }: { item: Sentime
           : <span className={`${pill} border-border bg-background text-foreground`}
               title="Confirmed by a published source; scored on the speaker's own sentences from it">Verified source</span>
       )}
-      {tk === 'fed_site' && (
-        item.url && linkable
-          ? <a href={item.url} target="_blank" rel="noopener noreferrer"
-              className={`${pill} border-border bg-background text-foreground hover:underline`}>Fed speech</a>
-          : <span className={`${pill} border-border bg-background text-foreground`}>Fed speech</span>
-      )}
       {tk === 'bis' && (
         item.url && linkable
           ? <a href={item.url} target="_blank" rel="noopener noreferrer"
