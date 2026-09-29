@@ -27,7 +27,9 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   Never route other communications to scoreWithGemini().
 - Do not change weights, tiers, decay, the 10% speaker cap or the policy anchor
   (supabase/functions/_shared/scoring-weights.ts, src/lib/scoring-weights.ts).
-- SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: both | bis | ai | off.
+- SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: bis (default) | both | ai | off.
+  Member communications come from BIS speeches (real URL, full text). The AI remark search ('ai'/'both')
+  recalls from memory and returned 2024 news with 2026 dates; keep it off unless verified sources are required.
   ADMIN_EMAILS: comma-separated emails allowed to run maintenance modes.
 - sentiment-analysis has verify_jwt = false: any mode that writes data must check isAdminRequest().
 - Two type errors in sentiment-analysis/index.ts predate this work (stance_adjustments,

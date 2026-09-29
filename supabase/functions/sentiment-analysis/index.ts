@@ -2300,11 +2300,12 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
 
 
 // ── Member communications ──
-// MEMBER_SOURCE=both (default): Gemini media-interview discovery + BIS speech texts
-//   (euro-area NCB governors, regional Fed presidents). 'ai' or 'bis' for one source, 'off' for none.
-// Gemini is used here only to FIND remarks; the text it returns is scored by the frozen scorer.
+// MEMBER_SOURCE=bis (default): BIS speech texts (euro-area NCB governors, regional Fed
+//   presidents), each with its published URL and full text. 'ai' or 'both' add the Gemini
+//   remark search, which recalls from memory and produced misdated 2024 remarks; opt-in only.
+//   'off' for none.
 async function fetchMemberCommunications(bank: string, aiKey: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
-  const src = (Deno.env.get('MEMBER_SOURCE') || 'both').toLowerCase();
+  const src = (Deno.env.get('MEMBER_SOURCE') || 'bis').toLowerCase();
   if (src === 'off') return [];
   const [ai, bis] = await Promise.all([
     src === 'ai' || src === 'both' ? fetchMediaInterviews(bank, aiKey, existing) : Promise.resolve([] as RawComm[]),
@@ -2567,7 +2568,7 @@ Deno.serve(async (req) => {
     if (body.mode === 'scoring-status') {
       return new Response(JSON.stringify({
         mode: 'scoring-status', scorer_mode: scorerMode(),
-        member_source: (Deno.env.get('MEMBER_SOURCE') || 'both').toLowerCase(),
+        member_source: (Deno.env.get('MEMBER_SOURCE') || 'bis').toLowerCase(),
         gemini_key_present: !!Deno.env.get('LOVABLE_API_KEY'),
       }), { headers: { ...CH, 'Content-Type': 'application/json' } });
     }
