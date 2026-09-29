@@ -255,7 +255,7 @@ async function inflate(bytes: Uint8Array): Promise<string | null> {
       } catch { /* keep what we already read */ }
     })();
     try {
-      await writer.write(data);
+      await writer.write(data as BufferSource);
       await writer.close();
     } catch { /* trailing garbage / wrong format */ }
     await pump;
