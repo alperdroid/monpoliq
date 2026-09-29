@@ -7,9 +7,15 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
 ## Scoring rules (do not break)
 
 - Communications are scored by a frozen, deterministic scorer:
-  supabase/functions/_shared/frozen-scorer.ts + frozen_scorer_bundle.json.
-  **Never edit, reformat or regenerate these two files.** Any change alters every score.
+  supabase/functions/_shared/frozen-scorer.ts + frozen_scorer_bundle.json + frozen_decision_bundle.json.
+  **Never edit, reformat or regenerate these files.** Any change alters scores.
   A deliberate model change means a new bundle version and a full history rescore.
+- Rate-decision documents (FOMC statement, ECB "Monetary policy decisions"; see isDecisionDoc() in
+  sentiment-analysis/index.ts) are scored as action + words (decision-v1.0): the decision is read from
+  the text and sets the base score; the other sentences, normalised on the statement genre, move it.
+  All other documents use the general scorer, whose output is unchanged by the decision layer.
+- Surveys (bank lending, loan officer, consumer expectations, SAFE, monetary analysts) go to the
+  statistical channel on both the Fed and ECB side (shouldReclassifyAsStatistical()).
 - Gemini (LOVABLE_API_KEY) is allowed ONLY for: scraping/discovery (member-remark search,
   cross-language dedup, ECB URL fallback) and SEP projections (isSepDoc path + SEP delta scoring).
   Never route other communications to scoreWithGemini().
@@ -26,3 +32,4 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
 npx tsc -p tsconfig.app.json --noEmit && npm run build && npx vitest run
 deno check supabase/functions/sentiment-analysis/index.ts   (expect only the two old errors)
 deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   (14/14)
+deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)

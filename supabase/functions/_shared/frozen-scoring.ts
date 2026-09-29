@@ -15,7 +15,7 @@
 // filtering (Layer 1) and speaker calibration / tiers / decay / speaker cap /
 // policy anchor (Layer 3) apply exactly as before, to every communication.
 // ─────────────────────────────────────────────────────────────────────────────
-import { scoreText, DIM_VERSION, type FrozenScore } from './frozen-scorer.ts';
+import { scoreText, DIM_VERSION, type DocClass, type FrozenScore } from './frozen-scorer.ts';
 
 export type ScorerMode = 'ai' | 'shadow' | 'frozen' | 'frozen-only';
 
@@ -39,6 +39,7 @@ function frozenAudit(f: FrozenScore) {
     lexicon_measure: f.lexicon_measure, linear_soft_measure: f.linear_soft_measure,
     n_sentences: f.n_sentences, scorer_agreement: f.scorer_agreement,
     evidence: f.evidence, dimensions: f.dimensions, dimension_n: f.dimension_n,
+    ...(f.decision ? { decision: f.decision } : {}),
     versions: { ...f.versions, dimensions: DIM_VERSION },
   };
 }
@@ -50,7 +51,8 @@ function uiAudit(f: FrozenScore, mode: ScorerMode) {
     f.dimensions.policy_stance * w.policy_stance + f.dimensions.growth_labor_drag * w.growth_labor_drag) * 1000) / 1000;
   return {
     model: 'frozen lexicon + linear ensemble (no LLM)',
-    prompt_version: `${f.versions.linear} | ${f.versions.lexicon} | ${DIM_VERSION} | bundle ${f.versions.bundle_sha}`,
+    prompt_version: `${f.versions.linear} | ${f.versions.lexicon} | ${DIM_VERSION} | bundle ${f.versions.bundle_sha}`
+      + (f.versions.decision ? ` | ${f.versions.decision} ${f.versions.decision_bundle_sha}` : ''),
     temperature: 0,
     dimension_composite: composite,
     published: f.net_score,
@@ -62,7 +64,14 @@ function uiAudit(f: FrozenScore, mode: ScorerMode) {
 
 function evidenceText(f: FrozenScore): string {
   const h = f.evidence.hawkish[0], d = f.evidence.dovish[0];
-  const parts = [`frozen z=${f.z} over ${f.n_sentences} policy sentences`];
+  const parts: string[] = [];
+  if (f.decision) {
+    const dc = f.decision;
+    const act = dc.direction > 0 ? `raise ${dc.bp}bp` : dc.direction < 0 ? `cut ${dc.bp}bp` : 'hold';
+    parts.push(`decision: ${act}${dc.direction && !dc.size_stated ? ' (size not stated, 25bp assumed)' : ''} → base ${dc.base}; words ${dc.words_score} over ${dc.words_n} sentences`);
+  } else {
+    parts.push(`frozen z=${f.z} over ${f.n_sentences} policy sentences`);
+  }
   if (h) parts.push(`most hawkish: "${h.slice(0, 180)}"`);
   if (d) parts.push(`most dovish: "${d.slice(0, 180)}"`);
   return parts.join(' | ');
@@ -76,10 +85,11 @@ export async function scoreCombined(
   text: string,
   gemini: () => Promise<ScoreLike>,
   mode: ScorerMode = scorerMode(),
+  docClass: DocClass = 'general',
 ): Promise<ScoreLike> {
   if (mode === 'ai') return gemini();
 
-  const f = scoreText(text);
+  const f = scoreText(text, 0.1, docClass);
   if (mode === 'frozen-only') {
     if (!f.scored) return { score: 0, label: 'neutral', reasoning: 'not scored — no policy-relevant sentences', audit: { frozen: frozenAudit(f) } };
     return { score: f.net_score, label: f.label, reasoning: evidenceText(f), dimensions: f.dimensions, audit: uiAudit(f, mode) };

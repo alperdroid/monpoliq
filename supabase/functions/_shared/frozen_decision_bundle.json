@@ -1,0 +1,18 @@
+{
+ "decision_id": "decision-v1.0",
+ "lexicon_mean": 0.054516,
+ "lexicon_sd": 0.239162,
+ "linear_mean": -0.056369,
+ "linear_sd": 0.144308,
+ "shrinkage_k": 2,
+ "z_to_net": 2.5,
+ "action_base": {
+  "le25": 0.6,
+  "le50": 0.8,
+  "gt50": 1.0
+ },
+ "decision_window_sentences": 20,
+ "n_docs": 490,
+ "calibration": "FOMC statements 1999-2024 (200) + ECB press conference statements 1998-2026 (290); decision sentence excluded from words",
+ "bundle_sha": "6afa382ce2b9e7af"
+}

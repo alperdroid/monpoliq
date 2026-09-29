@@ -177,11 +177,22 @@ function DimensionGuide() {
           message reaches about &plusmn;0.8. The quoted sentence under each dimension is the one that contributed
           most.
         </p>
+        <p className="text-[12px] font-semibold pt-1">Rate-decision statements</p>
+        <p className="text-[12px] text-muted-foreground leading-snug">
+          FOMC statements and ECB &ldquo;Monetary policy decisions&rdquo; releases are short and formulaic: one sentence
+          carries the decision, and much of the rest is standard risk language that appears whatever the decision. They
+          are scored as action plus words: the decision is read directly from the text (raise, cut or hold, and by how
+          much) and sets the base score (&plusmn;0.6 for 25 bp, &plusmn;0.8 for 50 bp, &plusmn;1.0 for larger moves); the
+          remaining sentences, scored against other statements rather than against speeches, move the score within the
+          remaining range. Tested on 200 FOMC and 266 ECB statements, the decision is read correctly every time.
+        </p>
         <p className="text-[12px] font-semibold pt-1">Exceptions</p>
         <p className="text-[12px] text-muted-foreground leading-snug">
           Summary of Economic Projections documents are tables of numbers, not prose: they are scored by comparing
           the new projections with the previous ones, with an AI model used to read the tables. Some member remarks
           are found by an AI search; their text is a summary, marked as such, and scored by the same fixed method.
+          Surveys (bank lending, loan officer, consumer expectations) report banks&rsquo;, firms&rsquo; or households&rsquo;
+          own conditions, so they are treated as data rather than as central bank communication.
         </p>
         <p className="text-[11px] text-muted-foreground leading-snug">
           Validation: the index matches a published research measure (r &asymp; 0.85), gets the direction right at
@@ -259,6 +270,16 @@ function TechnicalCard({ t }: { t: Technical }) {
               </Tooltip>
             </TooltipProvider>
           </div>
+          {fz.decision && (
+            <p className="text-[11px] leading-snug">
+              <span className="font-semibold">Decision read:</span>{' '}
+              <span className="text-muted-foreground">
+                {fz.decision.direction > 0 ? `raise ${fz.decision.bp} bp` : fz.decision.direction < 0 ? `cut ${fz.decision.bp} bp` : 'hold'}
+                {fz.decision.direction !== 0 && !fz.decision.size_stated ? ' (size not stated; 25 bp assumed)' : ''}
+                {' · '}base {sign(fz.decision.base)} · words {sign(fz.decision.words_score)} over {fz.decision.words_n} sentences
+              </span>
+            </p>
+          )}
           {fz.evidence?.hawkish?.[0] && (
             <p className="text-[11px] leading-snug">
               <span className="font-semibold text-signal-hawkish">Most hawkish sentence:</span>{' '}

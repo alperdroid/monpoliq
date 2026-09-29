@@ -791,9 +791,19 @@ async function scoreWithAI(
   if (isSepDoc(title, source || '') && apiKey) return await scoreWithGemini(title, text, bank, apiKey, source);
   if (!apiKey && mode !== 'frozen-only') {
     // no Gemini key: fall back to the deterministic scorer rather than skip the document
-    return await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: 'no ai key' }), 'frozen-only') as AIScore;
+    return await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: 'no ai key' }), 'frozen-only',
+      isDecisionDoc(title, source || '') ? 'decision' : 'general') as AIScore;
   }
-  return await scoreCombined(text, () => scoreWithGemini(title, text, bank, apiKey, source), mode) as AIScore;
+  const docClass = isDecisionDoc(title, source || '') ? 'decision' : 'general';
+  return await scoreCombined(text, () => scoreWithGemini(title, text, bank, apiKey, source), mode, docClass) as AIScore;
+}
+
+// Decision documents (FOMC statement, ECB "Monetary policy decisions" press release) are scored
+// as action + words (decision-v1.0). ECB press conference transcripts and minutes stay general.
+function isDecisionDoc(title: string, source: string): boolean {
+  const t = `${source} ${title}`;
+  if (/minutes|press conf|transcript|account|projections|implementation note/i.test(t)) return false;
+  return /fomc statement|issues fomc statement|monetary policy decisions?\b/i.test(t);
 }
 
 function isSepDoc(title: string, source: string): boolean {
@@ -2032,13 +2042,21 @@ Return empty array [] if no significant remarks found.`;
 }
 
 // ── Patterns to reclassify as statistical (not commentary) ──
+// Surveys report households', firms' or banks' own conditions — data, not the central bank's
+// stance. Their wording ("credit standards tightened") would otherwise read as policy language.
 const STATISTICAL_RECLASSIFY_PATTERNS = [
   /consumer\s+expectations?\s+survey/i,
   /bank\s+lending\s+survey/i,
   /survey\s+of\s+professional\s+forecasters/i,
+  /senior\s+loan\s+officer/i,
+  /survey\s+on\s+the\s+access\s+to\s+finance/i,
+  /survey\s+of\s+monetary\s+analysts/i,
+  /\bsurvey\b[^.]{0,80}\b(lending|credit|loans?|banks?)\b/i,
+  /\b(lending|credit|loans?)\b[^.]{0,80}\bsurvey\b/i,
 ];
 
-function shouldReclassifyAsStatistical(title: string): boolean {
+function shouldReclassifyAsStatistical(title: string, source = ''): boolean {
+  if (/speech|remark|interview|testimony/i.test(source)) return false;   // a speech about a survey is still a speech
   return STATISTICAL_RECLASSIFY_PATTERNS.some(p => p.test(title));
 }
 
@@ -2245,7 +2263,8 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
     if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '') || documentTier(r.source || '', r.title || '') === 4) { skipped++; continue; }
     const text = r.url ? await fetchPageText(r.url) : stored;
     if (!isReadableProse(text || '', 40)) { skipped++; continue; }
-    const f = await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: '' }), 'frozen-only');
+    const f = await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: '' }), 'frozen-only',
+      isDecisionDoc(r.title || '', r.source || '') ? 'decision' : 'general');
     const frozen = (f.audit as any)?.frozen;
     if (!frozen || frozen.n_sentences === 0) { skipped++; continue; }
     const pd = { ...(r.policy_dimensions || {}) };
@@ -2496,8 +2515,34 @@ Deno.serve(async (req) => {
         console.log('FED: ' + fedMediaInterviews.value.length + ' media interview remarks found');
       }
 
-      const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`));
-      console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score with AI');
+      // Surveys (e.g. Senior Loan Officer Opinion Survey) go to the statistical channel, as on the ECB side
+      const fedSurveys = allRawComms.filter(c => shouldReclassifyAsStatistical(c.title, c.source) && !existing.has(`${c.title}|${c.date}`));
+      if (fedSurveys.length > 0) {
+        const surveyTexts: { title: string; text: string; bank: string; source: string }[] = [];
+        for (const sv of fedSurveys) {
+          let text = sv.text;
+          if (!text && sv.url) text = await fetchPageText(sv.url);
+          surveyTexts.push({ title: sv.title, text: text || sv.title, bank: 'FED', source: sv.source });
+        }
+        const surveyScores = await scoreBatchWithAI(surveyTexts, aiKey);
+        for (let i = 0; i < fedSurveys.length; i++) {
+          const c = fedSurveys[i]; const sc = surveyScores[i];
+          console.log('FED: reclassifying as statistical: ' + c.title);
+          fi.push({
+            bank: 'FED', source: c.source, item_date: c.date, title: c.title, url: c.url,
+            is_statistical: true,
+            hawk_pts: sc.score > 0 ? Math.round(Math.abs(sc.score) * 10) : 0,
+            dove_pts: sc.score < 0 ? Math.round(Math.abs(sc.score) * 10) : 0,
+            net_score: sc.score, label: sc.label,
+            word_count: surveyTexts[i].text.split(/\s+/).length,
+            reasons: ['survey-reclassified-as-statistical', sc.reasoning],
+            stat_metric: 'Survey', stat_value: null, stat_weight: 1,
+          });
+        }
+      }
+      const fedSurveyKeys = new Set(fedSurveys.map(c => `${c.title}|${c.date}`));
+      const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`) && !fedSurveyKeys.has(`${c.title}|${c.date}`));
+      console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score');
 
       // Layer 1 — drop administrative/operational noise before the NLP pass
       const fedPart = partitionForScoring(newComms.map(c => ({ ...c, source: c.source, text: c.text })));
@@ -2636,7 +2681,7 @@ Deno.serve(async (req) => {
       const actualComms: RawComm[] = [];
       const reclassifiedSurveys: RawComm[] = [];
       for (const c of allRawComms) {
-        if (shouldReclassifyAsStatistical(c.title)) {
+        if (shouldReclassifyAsStatistical(c.title, c.source)) {
           console.log('Reclassifying as statistical (will AI-score): ' + c.title);
           reclassifiedSurveys.push(c);
         } else {

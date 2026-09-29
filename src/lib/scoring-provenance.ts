@@ -10,7 +10,11 @@ export interface FrozenAudit {
   n_sentences?: number;
   scorer_agreement?: number;
   evidence?: { hawkish?: string[]; dovish?: string[] };
-  versions?: { lexicon?: string; linear?: string; bundle_sha?: string; dimensions?: string };
+  versions?: { lexicon?: string; linear?: string; bundle_sha?: string; dimensions?: string; decision?: string; decision_bundle_sha?: string };
+  decision?: {
+    doc_class: 'decision'; direction: -1 | 0 | 1; bp: number; size_stated: boolean;
+    sentence: string | null; base: number; words_score: number; words_z: number; words_n: number;
+  };
 }
 
 export type ScoreKind = 'frozen' | 'sep' | 'legacy';
