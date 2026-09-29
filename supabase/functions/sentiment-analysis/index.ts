@@ -741,6 +741,10 @@ interface AIScore {
     evidence_refs?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', EvidenceRef>>;
     /** Extraction provenance for the panel: pages found, words extracted, chars sent. */
     extraction?: { pages: number; words: number; doc_chars: number; sampled: boolean };
+    /** Hold-guard record: the model's raw stance and which adjustments were applied. */
+    stance_adjustments?: { raw_policy_stance: number; applied: string[] };
+    /** Forward-guidance detector output: what lifted (or failed to lift) the hold clamp. */
+    forward_guidance?: GuidanceResult;
     /**
      * Full provenance chain: which text version, produced by which reader and
      * parser settings, sampled how, scored by which run.
@@ -2122,7 +2126,8 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
       for (let j = 0; j < batch.length; j++) {
         const ri = batch[j];
         const pub = td(ri.pubDate)!;
-        const pageText = textResults[j].status === 'fulfilled' ? textResults[j].value : '';
+        const result = textResults[j];
+        const pageText = result.status === 'fulfilled' ? result.value : '';
         rawComms.push({ title: ri.title, text: pageText, date: pub, url: ri.link, source: f.lbl, bank });
       }
     }
