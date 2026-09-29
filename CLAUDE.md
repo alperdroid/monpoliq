@@ -28,7 +28,10 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
 - Do not change weights, tiers, decay, the 10% speaker cap or the policy anchor
   (supabase/functions/_shared/scoring-weights.ts, src/lib/scoring-weights.ts).
 - SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: bis (default) | both | ai | off.
-  Member communications come from BIS speeches (real URL, full text). The AI remark search ('ai'/'both')
+  Member communications come from BIS speeches (real URL, full text) and, for the FED, presidents' speeches
+  on the regional banks' own sites (_shared/fed-speeches.ts; kept only if the page names the speaker as the
+  bank's President; a few pages per bank per scrape, rejections remembered in analysis_cache 'fed-speech-skip';
+  admin preview: fed-speeches-report; imported only when the secret FED_SITE_SPEECHES=on). The AI remark search ('ai'/'both')
   recalls from memory and returned 2024 news with 2026 dates; keep it off unless verified sources are required.
   ADMIN_EMAILS: comma-separated emails allowed to run maintenance modes.
 - sentiment-analysis has verify_jwt = false: any mode that writes data must check isAdminRequest().
@@ -41,3 +44,4 @@ deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
 deno run --allow-read supabase/functions/_shared/tests/source_probe_test.ts     (9/9)
+deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (16/16)
