@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_remarks_removed: {
+        Row: {
+          bank: string | null
+          created_at: string | null
+          dove_pts: number | null
+          fetched_at: string | null
+          hawk_pts: number | null
+          id: string | null
+          is_statistical: boolean | null
+          item_date: string | null
+          label: string | null
+          net_score: number | null
+          policy_dimensions: Json | null
+          reasons: string[] | null
+          source: string | null
+          stat_metric: string | null
+          stat_value: number | null
+          stat_weight: number | null
+          title: string | null
+          topics: string[] | null
+          url: string | null
+          word_count: number | null
+        }
+        Insert: {
+          bank?: string | null
+          created_at?: string | null
+          dove_pts?: number | null
+          fetched_at?: string | null
+          hawk_pts?: number | null
+          id?: string | null
+          is_statistical?: boolean | null
+          item_date?: string | null
+          label?: string | null
+          net_score?: number | null
+          policy_dimensions?: Json | null
+          reasons?: string[] | null
+          source?: string | null
+          stat_metric?: string | null
+          stat_value?: number | null
+          stat_weight?: number | null
+          title?: string | null
+          topics?: string[] | null
+          url?: string | null
+          word_count?: number | null
+        }
+        Update: {
+          bank?: string | null
+          created_at?: string | null
+          dove_pts?: number | null
+          fetched_at?: string | null
+          hawk_pts?: number | null
+          id?: string | null
+          is_statistical?: boolean | null
+          item_date?: string | null
+          label?: string | null
+          net_score?: number | null
+          policy_dimensions?: Json | null
+          reasons?: string[] | null
+          source?: string | null
+          stat_metric?: string | null
+          stat_value?: number | null
+          stat_weight?: number | null
+          title?: string | null
+          topics?: string[] | null
+          url?: string | null
+          word_count?: number | null
+        }
+        Relationships: []
+      }
       alert_history: {
         Row: {
           current_value: number
