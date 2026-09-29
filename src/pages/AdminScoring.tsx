@@ -293,7 +293,8 @@ export default function AdminScoring() {
         <p className="text-xs text-muted-foreground leading-snug">
           Read-only. Shows what the next scrapes would import from the regional Federal Reserve Banks&rsquo; own sites
           (New York, Boston, Richmond, Kansas City, Dallas, San Francisco): up to four new pages per bank, newest first. A page
-          is imported only when it names the speaker as the bank&rsquo;s President. Each scrape then imports a few, with the
+          is imported only when it names the speaker as the bank&rsquo;s President and that bank had an FOMC vote in the
+          year of the speech (New York always; the others by the fixed rotation). Each scrape then imports a few, with the
           full text and the page URL, and scores them like every other communication. Nothing is written here.
         </p>
         <Button size="sm" onClick={runFedReport} disabled={fedBusy}>{fedBusy ? 'Checking…' : 'Preview'}</Button>

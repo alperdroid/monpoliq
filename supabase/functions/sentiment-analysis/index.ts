@@ -16,7 +16,7 @@ import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
 import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
 import {
   FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
-  type FedSpeechSource,
+  isFomcVoter, type FedSpeechSource,
 } from '../_shared/fed-speeches.ts';
 import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
@@ -2534,7 +2534,7 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
     const cands = (src.kind === 'feed'
       ? feedItems(body)
       : listingLinks(body, r.url || src.url, src.link!).map(u => ({ url: u, title: '', date: linkDate(u) })))
-      .filter(c => !known.has(c.url) && (!c.date || c.date >= cutoffDate))
+      .filter(c => !known.has(c.url) && (!c.date || (c.date >= cutoffDate && isFomcVoter(src.bank, c.date))))
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));                 // dated newest first; undated keep page order
     rows.push({ bank: src.bank, url: src.url, result: `${cands.length} new candidate page(s)` });
     let fetched = 0;
@@ -2552,6 +2552,11 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
       if (date < cutoffDate) {
         rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: older than the window' }); await skip(c.url, 'older than window');
         if (!c.date) break;                                                         // undated listing is newest first: the rest is older
+        continue;
+      }
+      if (!isFomcVoter(src.bank, date)) {
+        rows.push({ bank: src.bank, url: c.url, speaker, date, result: `skipped: not an FOMC voter in ${date.slice(0, 4)}` });
+        await skip(c.url, 'not an FOMC voter that year');
         continue;
       }
       if (!isReadableProse(text, 300)) { rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: text unreadable or too short' }); await skip(c.url, 'unreadable'); continue; }
@@ -2580,6 +2585,7 @@ async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutof
     for (const m of members) {
       const date = m.delivered || m.published;
       if (!date || date < cutoffDate) continue;
+      if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
       const title = monpoliqTitle(m);
       if (existing.has(`${title}|${date}`)) continue;
       let text = await fetchPageText(m.url);

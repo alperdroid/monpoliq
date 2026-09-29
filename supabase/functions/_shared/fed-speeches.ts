@@ -34,6 +34,28 @@ export const FED_SPEECH_SOURCES: FedSpeechSource[] = [
 
 export const FED_SITE_SOURCE = 'Member Speech (Fed site)';
 
+// ── FOMC voting rotation ──
+// New York votes every year. The other eleven banks rotate in four fixed groups, one voter per
+// group per year (Federal Reserve Act §12A). Anchored on 2026: Philadelphia, Cleveland, Dallas,
+// Minneapolis. Only speeches given in a year the speaker's bank votes are imported.
+const ROTATION: { anchor: number; banks: string[] }[] = [
+  { anchor: 2025, banks: ['Boston', 'Philadelphia', 'Richmond'] },
+  { anchor: 2026, banks: ['Cleveland', 'Chicago'] },
+  { anchor: 2025, banks: ['St. Louis', 'Dallas', 'Atlanta'] },
+  { anchor: 2025, banks: ['Kansas City', 'Minneapolis', 'San Francisco'] },
+];
+
+/** Regional banks whose president votes on the FOMC in `year` (e.g. 2026 → New York, Philadelphia, Cleveland, Dallas, Minneapolis). */
+export function fomcVoterBanks(year: number): string[] {
+  return ['New York', ...ROTATION.map(g => g.banks[((year - g.anchor) % g.banks.length + g.banks.length) % g.banks.length])];
+}
+
+/** Whether "Federal Reserve Bank of X" (or just "X") had an FOMC vote in the year of `date` (YYYY-MM-DD). */
+export function isFomcVoter(bank: string, date: string): boolean {
+  const name = bank.replace(/^Federal Reserve Bank of\s+/i, '').trim().toLowerCase();
+  return fomcVoterBanks(+date.slice(0, 4)).some(b => b.toLowerCase() === name);
+}
+
 export interface Candidate { url: string; title: string; date: string | null }
 
 const decode = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&amp;/g, '&').replace(/&lt;/g, '<')

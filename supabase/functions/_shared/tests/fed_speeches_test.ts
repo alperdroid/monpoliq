@@ -1,5 +1,7 @@
 // Run: deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts
-import { feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle, FED_SPEECH_SOURCES } from '../fed-speeches.ts';
+import {
+  feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle, FED_SPEECH_SOURCES, fomcVoterBanks, isFomcVoter,
+} from '../fed-speeches.ts';
 
 let pass = 0, total = 0;
 const check = (name: string, ok: boolean, detail = '') => { total++; pass += +ok; console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ' | ' + detail : ''}`); };
@@ -39,5 +41,21 @@ check('title from og:title without site name',
 check('title from h1', pageTitle('<title>x</title><h1 class="t">Why <em>Hike</em>?</h1>') === 'Why Hike ?');
 check('speech title keeps one speaker prefix', speechTitle('Lorie K. Logan', 'Lorie K. Logan: Remarks on the economy') === 'Lorie K. Logan: Remarks on the economy');
 check('speech title adds speaker', speechTitle('Mary C. Daly', 'Staying the course') === 'Mary C. Daly: Staying the course');
+
+// Published FOMC rotation: 2023, 2024, 2025, 2026, 2027.
+const want: Record<number, string[]> = {
+  2023: ['Chicago', 'Dallas', 'Minneapolis', 'New York', 'Philadelphia'],
+  2024: ['Atlanta', 'Cleveland', 'New York', 'Richmond', 'San Francisco'],
+  2025: ['Boston', 'Chicago', 'Kansas City', 'New York', 'St. Louis'],
+  2026: ['Cleveland', 'Dallas', 'Minneapolis', 'New York', 'Philadelphia'],
+  2027: ['Atlanta', 'Chicago', 'New York', 'Richmond', 'San Francisco'],
+};
+for (const [y, banks] of Object.entries(want)) {
+  const got = fomcVoterBanks(+y).sort();
+  check(`FOMC voters ${y}`, JSON.stringify(got) === JSON.stringify(banks), got.join(', '));
+}
+check('voter by speech date', isFomcVoter('Federal Reserve Bank of Boston', '2025-11-20') && !isFomcVoter('Federal Reserve Bank of Boston', '2026-03-01'));
+check('New York always votes', isFomcVoter('Federal Reserve Bank of New York', '2031-05-05'));
+check('St. Louis name with a dot', isFomcVoter('Federal Reserve Bank of St. Louis', '2025-06-01'));
 
 console.log(`${pass}/${total} passed`); if (pass !== total) Deno.exit(1);
