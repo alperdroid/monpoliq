@@ -14,6 +14,7 @@ import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
 import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
+import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
   REMARK_SOURCES, GDELT_WINDOW_DAYS, remarkSurname, verifyArticle, gdeltUrl, parseGdelt, rankCandidates, daysBetween,
   type Candidate,
@@ -2438,6 +2439,51 @@ async function resolveRemarks(bank: string, sbUrl: string, sbKey: string, apply:
   return { rows: report, verified, not_verified: notVerified, next_offset: rows.length === limit ? offset + rows.length : null };
 }
 
+// Admin, read-only: which member-speech sources can the function actually read?
+// For a feed: item count, date range and (BIS) how many items are member speeches.
+// For a page: speech-like links, their date range, and the RSS feeds it advertises (those are fetched too).
+function feedSummary(body: string) {
+  const bis = parseBisRss(body);
+  const dates = bis.length
+    ? bis.map(i => i.delivered || i.published || null)
+    : [...body.matchAll(/<(?:pubDate|published|updated|dc:date)>([^<]+)</gi)].map(m => {
+        const d = new Date(m[1].trim()); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+      });
+  const members = bis.map(classifyMember).filter(Boolean) as { bank: string }[];
+  return {
+    items: (body.match(/<(item|entry)\b/gi) || []).length, ...dateRange(dates),
+    member_speeches: { ECB: members.filter(m => m.bank === 'ECB').length, FED: members.filter(m => m.bank === 'FED').length },
+    sample: bis.slice(0, 2).map(i => `${i.speaker}: ${i.title}`),
+  };
+}
+
+async function probeOne(t: ProbeTarget) {
+  const r = await sf(t.url, 15000);
+  if (!r) return { ...t, status: 'no response' };
+  const body = r.ok ? await r.text() : '';
+  const base = { ...t, status: r.status, content_type: r.headers.get('content-type') || '', bytes: body.length };
+  if (!r.ok) return base;
+  if (/xml|rss|atom/i.test(base.content_type) || /^\s*<\?xml|<rss\b|<rdf:RDF/i.test(body.slice(0, 400))) {
+    return { ...base, kind: 'feed', ...feedSummary(body) };
+  }
+  const links = speechLinks(body, r.url || t.url);
+  const feeds = feedLinks(body, r.url || t.url).slice(0, 3);
+  const feedResults = await Promise.all(feeds.map(async f => {
+    const fr = await sf(f, 15000);
+    if (!fr || !fr.ok) return { url: f, status: fr?.status ?? 'no response' };
+    return { url: f, status: fr.status, ...feedSummary(await fr.text()) };
+  }));
+  return {
+    ...base, kind: 'page', text_words: extractText(body).split(/\s+/).filter(Boolean).length,
+    speech_links: links.length, ...dateRange(links.map(linkDate)), sample: links.slice(0, 3), feeds: feedResults,
+  };
+}
+
+async function probeMemberSources() {
+  const targets = [...bisArchiveTargets(), ...REGIONAL_FED_TARGETS];
+  return await Promise.all(targets.map(t => probeOne(t).catch(e => ({ ...t, status: 'error', error: String(e) }))));
+}
+
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
   const out: RawComm[] = [];
   try {
@@ -2558,7 +2604,7 @@ Deno.serve(async (req) => {
 
     // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
     //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
-    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen' || body.mode === 'resolve-remarks') {
+    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen' || body.mode === 'resolve-remarks' || body.mode === 'probe-member-sources') {
       if (!(await isAdminRequest(req, sbUrl))) {
         return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
           status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
@@ -2577,6 +2623,12 @@ Deno.serve(async (req) => {
       const out: Record<string, unknown> = {};
       for (const b of banks) out[b] = await rescoreFrozen(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 40, 100));
       return new Response(JSON.stringify({ mode: 'rescore-frozen', run_id: run.run_id, apply: body.apply === true, result: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+    // Read-only: which member-speech sources (BIS archive, regional Fed sites) the function can read.
+    if (body.mode === 'probe-member-sources') {
+      return new Response(JSON.stringify({ mode: 'probe-member-sources', run_id: run.run_id, result: await probeMemberSources() }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }

@@ -86,6 +86,16 @@ export default function AdminScoring() {
   const [rmErr, setRmErr] = useState<string | null>(null);
   const rmStop = useRef(false);
 
+  const [probing, setProbing] = useState(false);
+  const [probe, setProbe] = useState<Record<string, unknown>[] | null>(null);
+  const [probeErr, setProbeErr] = useState<string | null>(null);
+  const runProbe = async () => {
+    setProbing(true); setProbeErr(null);
+    const { data, error } = await supabase.functions.invoke('sentiment-analysis', { body: { mode: 'probe-member-sources' } });
+    if (error) setProbeErr(String(error.message || error)); else setProbe((data?.result ?? []) as Record<string, unknown>[]);
+    setProbing(false);
+  };
+
   const refresh = useCallback(async () => {
     setLoading(true); setRowsErr(null);
     try { setRows(await loadComparison()); } catch (e) { setRowsErr(String((e as Error).message || e)); }
@@ -262,6 +272,45 @@ export default function AdminScoring() {
           </div>
         )}
         {runErr && <p className="text-xs text-destructive">{runErr} — if calls time out, the batch size is too large for the function time limit.</p>}
+      </section>
+
+      {/* Member speech sources: read-only probe */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <h2 className="text-sm font-semibold">Probe member speech sources</h2>
+        <p className="text-xs text-muted-foreground leading-snug">
+          Read-only. Checks which sources of real member speeches the function can read: the BIS archive (for past
+          speeches) and the twelve regional Federal Reserve Banks&rsquo; speech pages, including any RSS feeds they
+          advertise. Nothing is written. Takes up to a minute.
+        </p>
+        <Button size="sm" onClick={runProbe} disabled={probing}>{probing ? 'Probing…' : 'Run probe'}</Button>
+        {probe && (
+          <div className="space-y-2">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground"><tr className="text-left">
+                  <th className="py-1 pr-3">Source</th><th className="pr-3">Status</th><th className="pr-3">Kind</th>
+                  <th className="pr-3">Items / links</th><th className="pr-3">Dates</th><th>Feeds found</th>
+                </tr></thead>
+                <tbody>{probe.map((p, i) => {
+                  const feeds = (p.feeds as { url: string; status: unknown; items?: number; min?: string; max?: string }[] | undefined) ?? [];
+                  return (
+                    <tr key={i} className="border-t border-border align-top">
+                      <td className="py-1 pr-3"><a href={String(p.url)} target="_blank" rel="noopener noreferrer" className="text-primary underline">{String(p.name)}</a></td>
+                      <td className="pr-3 font-mono">{String(p.status)}</td>
+                      <td className="pr-3">{String(p.kind ?? '—')}</td>
+                      <td className="pr-3 font-mono">{String(p.items ?? p.speech_links ?? '—')}</td>
+                      <td className="pr-3 font-mono whitespace-nowrap">{p.min ? `${p.min} → ${p.max}` : '—'}</td>
+                      <td className="font-mono">{feeds.length ? feeds.map(f => `${f.status} · ${f.items ?? 0} items${f.min ? ` · ${f.min}→${f.max}` : ''}`).join(' | ') : '—'}</td>
+                    </tr>);
+                })}</tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Full result (copy and paste this back):</p>
+            <textarea readOnly className="w-full h-40 text-[11px] font-mono rounded border border-border bg-background p-2"
+              value={JSON.stringify(probe, null, 1)} onFocus={e => e.currentTarget.select()} />
+          </div>
+        )}
+        {probeErr && <p className="text-xs text-destructive">{probeErr}</p>}
       </section>
 
       {/* AI-found member remarks: verify against real sources */}

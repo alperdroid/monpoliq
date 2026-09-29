@@ -42,3 +42,4 @@ deno check supabase/functions/sentiment-analysis/index.ts   (expect only the two
 deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   (14/14)
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
+deno run --allow-read supabase/functions/_shared/tests/source_probe_test.ts     (9/9)
