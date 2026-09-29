@@ -14,6 +14,10 @@ import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
 import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
+import {
+  REMARK_SOURCES, GDELT_WINDOW_DAYS, remarkSurname, verifyArticle, gdeltUrl, parseGdelt, rankCandidates, daysBetween,
+  type Candidate,
+} from '../_shared/remark-sources.ts';
 
 
 
@@ -2065,7 +2069,11 @@ const SKIP = new Set(['enforcement actions', 'orders on banking applications', '
 const MINUTES_SKIP = /minutes/i;
 const PRESS_CONF_SKIP = /press\s*conference/i;
 
-interface RawComm { title: string; text: string; date: string; url: string; source: string; bank: string }
+interface RawComm {
+  title: string; text: string; date: string; url: string; source: string; bank: string;
+  keepText?: boolean;                          // store the scored text even though there is a URL (it is an extract of the page)
+  resolution?: Record<string, unknown>;        // how an AI-found remark was checked against a real source
+}
 
 async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
   const items: RawComm[] = [];
@@ -2261,7 +2269,9 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
   for (const r of rows) {
     const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
     if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '') || documentTier(r.source || '', r.title || '') === 4) { skipped++; continue; }
-    const text = r.url ? await fetchPageText(r.url) : stored;
+    // Stored text wins: for a verified AI-found remark it is the speaker's extract, not the whole article.
+    // An AI-found remark is never scored from its URL alone (the URL may be unverified).
+    const text = stored || (r.url && !REMARK_SOURCES.includes(r.source) ? await fetchPageText(r.url) : '');
     if (!isReadableProse(text || '', 40)) { skipped++; continue; }
     const f = await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: '' }), 'frozen-only',
       isDecisionDoc(r.title || '', r.source || '') ? 'decision' : 'general');
@@ -2300,7 +2310,131 @@ async function fetchMemberCommunications(bank: string, aiKey: string, existing: 
     src === 'ai' || src === 'both' ? fetchMediaInterviews(bank, aiKey, existing) : Promise.resolve([] as RawComm[]),
     src === 'bis' || src === 'both' ? fetchBisMemberSpeeches(bank, existing, cutoffDate) : Promise.resolve([] as RawComm[]),
   ]);
-  return [...bis, ...ai];
+  return [...bis, ...await verifyAiRemarks(ai, bank)];
+}
+
+// ── Verifying AI-found remarks against a real source (see _shared/remark-sources.ts) ──
+// The AI search recalls remarks from memory, so each one is checked before it is scored:
+// its own outlet URL, then news articles from GDELT. (Not BIS: a member's BIS speech is
+// already scored in full as its own "Member Speech (BIS)" item.)
+// Verified: scored on the speaker's attributed sentences, with the real URL.
+// Not verified: kept as before (the AI summary, no URL, "not verified" badge) and
+// marked verified:false; the admin "resolve-remarks" mode retries them later.
+interface Resolved { url: string; text: string; via: 'outlet_url' | 'gdelt'; words: number; sentences: number }
+interface Resolution { resolved: Resolved | null; surname: string | null; reason: string; tried: string[] }
+
+let gdeltNext = 0;
+async function gdeltSearch(surname: string, bank: string, date: string): Promise<Candidate[] | null> {
+  const wait = gdeltNext - Date.now();                               // GDELT asks for at most one request per 5 seconds
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  gdeltNext = Date.now() + 5500;
+  const r = await sf(gdeltUrl(surname, bank, date), 20000);
+  if (!r || !r.ok) { console.log('GDELT unavailable:', r?.status); return null; }
+  const body = await r.text();
+  try { return parseGdelt(JSON.parse(body)); } catch { console.log('GDELT non-JSON reply:', body.slice(0, 120)); return null; }
+}
+
+async function resolveRemarkSource(
+  rm: { title: string; date: string; bank: string; url?: string }, deadline = Infinity,
+): Promise<Resolution> {
+  const surname = remarkSurname(rm.title);
+  if (!surname) return { resolved: null, surname, reason: 'no speaker name in the headline', tried: [] };
+  if (Date.now() > deadline) return { resolved: null, surname, reason: 'time budget used up; retry with resolve-remarks', tried: [] };
+  const tried: string[] = [];
+  let lastReason = 'no candidate source found';
+
+  const tryArticle = async (url: string, via: Resolved['via']): Promise<Resolved | null> => {
+    tried.push(url);
+    const text = await fetchPageText(url);
+    if (!text) { lastReason = 'page could not be read'; return null; }
+    const v = verifyArticle(text, surname, rm.title);
+    if (!v.ok) { lastReason = v.reason; return null; }
+    const extract = v.attributed.join(' ');
+    return { url, text: extract, via, words: v.words, sentences: v.attributed.length };
+  };
+
+  if (rm.url && /^https?:\/\//.test(rm.url)) {
+    const r = await tryArticle(rm.url, 'outlet_url');
+    if (r) return { resolved: r, surname, reason: 'verified', tried };
+  }
+
+  if (daysBetween(rm.date, new Date().toISOString().slice(0, 10)) > GDELT_WINDOW_DAYS) {
+    return { resolved: null, surname, reason: tried.length ? lastReason : 'older than the news index window (about 3 months)', tried };
+  }
+  if (Date.now() > deadline) return { resolved: null, surname, reason: 'time budget used up; retry with resolve-remarks', tried };
+  const cands = await gdeltSearch(surname, rm.bank, rm.date);
+  if (cands === null) return { resolved: null, surname, reason: 'news index unavailable', tried };
+  for (const c of rankCandidates(cands, surname).slice(0, 3)) {
+    if (Date.now() > deadline) break;
+    const r = await tryArticle(c.url, 'gdelt');
+    if (r) return { resolved: r, surname, reason: 'verified', tried };
+  }
+  return { resolved: null, surname, reason: cands.length ? lastReason : 'no news articles found', tried };
+}
+
+function resolutionRecord(res: Resolution) {
+  const r = res.resolved;
+  return r
+    ? { verified: true, via: r.via, url: r.url, words: r.words, sentences: r.sentences, checked_at: new Date().toISOString() }
+    : { verified: false, reason: res.reason, tried: res.tried.length, checked_at: new Date().toISOString() };
+}
+
+async function verifyAiRemarks(remarks: RawComm[], bank: string): Promise<RawComm[]> {
+  const deadline = Date.now() + 45000;                               // keep the scrape run inside the function time limit
+  const out: RawComm[] = [];
+  for (const c of remarks) {
+    const res = await resolveRemarkSource({ title: c.title, date: c.date, bank, url: c.url }, deadline);
+    const rec = resolutionRecord(res);
+    if (res.resolved) {
+      console.log(`AI remark verified (${bank}, ${res.resolved.via}): ${c.title} -> ${res.resolved.url}`);
+      out.push({ ...c, url: res.resolved.url, text: res.resolved.text, keepText: true, resolution: rec });
+    } else {
+      console.log(`AI remark not verified (${bank}): ${c.title} — ${res.reason}`);
+      out.push({ ...c, url: '', resolution: rec });                  // no unverified URL: the summary is stored and rescored
+    }
+  }
+  return out;
+}
+
+// Admin: check stored AI-found remarks against real sources. apply=false only reports what
+// would be found. apply=true stores the verified URL and the speaker's extract (the frozen
+// backfill then scores it), or records verified:false. Published scores are not changed.
+// Verified rows are skipped; rows already found unverifiable are skipped unless recheck=true.
+async function resolveRemarks(bank: string, sbUrl: string, sbKey: string, apply: boolean, offset = 0, limit = 4, recheck = false) {
+  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
+  const src = REMARK_SOURCES.map(s => `"${s}"`).join(',');
+  const resp = await fetch(
+    `${sbUrl}/rest/v1/sentiment_items?select=id,title,item_date,url,policy_dimensions&bank=eq.${bank}` +
+    `&source=in.(${encodeURIComponent(src)})&order=item_date.desc,id.asc&offset=${offset}&limit=${limit}`,
+    { headers: hd },
+  );
+  if (!resp.ok) return { rows: [], verified: 0, not_verified: 0, next_offset: null, error: `read failed: ${resp.status}` };
+  const rows: { id: string; title: string; item_date: string; url: string | null; policy_dimensions: Record<string, any> | null }[] = await resp.json();
+  const report: Record<string, unknown>[] = [];
+  let verified = 0, notVerified = 0;
+  for (const r of rows) {
+    const pd = { ...(r.policy_dimensions || {}) };
+    const prev = pd.source_resolution;
+    if (prev?.verified === true || (!recheck && prev?.checked_at)) {
+      report.push({ id: r.id, date: r.item_date, title: r.title, status: prev.verified ? 'verified earlier' : 'checked earlier', ...prev });
+      if (prev.verified) verified++; else notVerified++;
+      continue;
+    }
+    // An existing URL came from the AI search unchecked: it is only a candidate.
+    const res = await resolveRemarkSource({ title: r.title, date: r.item_date, bank, url: r.url || undefined });
+    const rec = resolutionRecord(res);
+    report.push({ id: r.id, date: r.item_date, title: r.title, speaker: res.surname, status: res.resolved ? 'verified' : 'not verified', ...rec });
+    if (res.resolved) verified++; else notVerified++;
+    if (!apply) continue;
+    pd.source_resolution = rec;
+    const patch: Record<string, unknown> = { policy_dimensions: pd };
+    if (res.resolved) { pd.source_text = res.resolved.text.slice(0, 6000); patch.url = res.resolved.url; }
+    const p = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+      method: 'PATCH', headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify(patch),
+    });
+    if (!p.ok) console.error('resolve-remarks write failed:', r.id, p.status);
+  }
+  return { rows: report, verified, not_verified: notVerified, next_offset: rows.length === limit ? offset + rows.length : null };
 }
 
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
@@ -2423,7 +2557,7 @@ Deno.serve(async (req) => {
 
     // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
     //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
-    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen') {
+    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen' || body.mode === 'resolve-remarks') {
       if (!(await isAdminRequest(req, sbUrl))) {
         return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
           status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
@@ -2442,6 +2576,18 @@ Deno.serve(async (req) => {
       const out: Record<string, unknown> = {};
       for (const b of banks) out[b] = await rescoreFrozen(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 40, 100));
       return new Response(JSON.stringify({ mode: 'rescore-frozen', run_id: run.run_id, apply: body.apply === true, result: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+    // Check stored AI-found remarks against real sources, paged (small pages: each row may search the news index).
+    //   { "mode": "resolve-remarks", "bank": "ecb", "offset": 0, "limit": 4, "apply": false, "recheck": false }
+    if (body.mode === 'resolve-remarks') {
+      const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
+      const out: Record<string, unknown> = {};
+      for (const b of banks) {
+        out[b] = await resolveRemarks(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 4, 8), body.recheck === true);
+      }
+      return new Response(JSON.stringify({ mode: 'resolve-remarks', run_id: run.run_id, apply: body.apply === true, result: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }
@@ -2579,8 +2725,9 @@ Deno.serve(async (req) => {
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
             policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
-              // no URL to re-read later (e.g. Gemini-discovered remarks): keep the exact text that was scored
-              ...(c.url ? {} : { source_text: (c.text || '').slice(0, 6000) }) },
+              // no URL to re-read later, or the text is an extract of the page (verified AI-found remark): keep the exact text that was scored
+              ...(c.url && !c.keepText ? {} : { source_text: (c.text || '').slice(0, 6000) }),
+              ...(c.resolution ? { source_resolution: c.resolution } : {}) },
           });
         }
       }
@@ -2766,8 +2913,9 @@ Deno.serve(async (req) => {
             reasons: ['ai:' + s.reasoning, verdict.reason],
             stat_metric: null, stat_value: null, stat_weight: 0,
             policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
-              // no URL to re-read later (e.g. Gemini-discovered remarks): keep the exact text that was scored
-              ...(c.url ? {} : { source_text: (c.text || '').slice(0, 6000) }) },
+              // no URL to re-read later, or the text is an extract of the page (verified AI-found remark): keep the exact text that was scored
+              ...(c.url && !c.keepText ? {} : { source_text: (c.text || '').slice(0, 6000) }),
+              ...(c.resolution ? { source_resolution: c.resolution } : {}) },
           });
         }
       }

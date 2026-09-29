@@ -24,9 +24,17 @@ export function ScoreProvenanceBadges({ item, linkable = true }: { item: Sentime
       )}
       {tk === 'ai_discovered' && (
         <span className={`${pill} border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400`}
-          title="This remark was found by an AI search; the text is its summary. The score itself uses the fixed method.">
-          Found by AI search: text is a summary
+          title="This remark was found by an AI search and no published article or speech has confirmed it yet. The text is the AI's summary.">
+          AI search summary: not verified
         </span>
+      )}
+      {tk === 'ai_verified' && (
+        item.url && linkable
+          ? <a href={item.url} target="_blank" rel="noopener noreferrer"
+              title="Confirmed by this published source; scored on the speaker's own sentences from it"
+              className={`${pill} border-border bg-background text-foreground hover:underline`}>Verified source</a>
+          : <span className={`${pill} border-border bg-background text-foreground`}
+              title="Confirmed by a published source; scored on the speaker's own sentences from it">Verified source</span>
       )}
       {tk === 'bis' && (
         item.url && linkable

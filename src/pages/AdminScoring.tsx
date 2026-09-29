@@ -27,6 +27,10 @@ interface CmpRow {
 interface Status { scorer_mode: string; member_source: string; gemini_key_present: boolean }
 type Bank = 'both' | 'fed' | 'ecb';
 interface Progress { scored: number; skipped: number; offset: number; done: boolean }
+interface RemarkRow {
+  id: string; bank: string; date: string; title: string; speaker?: string | null; status: string;
+  verified?: boolean; via?: string; url?: string; reason?: string; sentences?: number;
+}
 
 const PAGE = 1000;
 const isSep = (r: CmpRow) => /fomc sep|summary of economic projections/i.test(`${r.source} ${r.title}`);
@@ -73,6 +77,15 @@ export default function AdminScoring() {
   const [runErr, setRunErr] = useState<string | null>(null);
   const stopRef = useRef(false);
 
+  const [rmBank, setRmBank] = useState<Bank>('both');
+  const [rmApply, setRmApply] = useState(false);
+  const [rmRecheck, setRmRecheck] = useState(false);
+  const [rmConfirm, setRmConfirm] = useState(false);
+  const [rmRunning, setRmRunning] = useState(false);
+  const [rmRows, setRmRows] = useState<RemarkRow[]>([]);
+  const [rmErr, setRmErr] = useState<string | null>(null);
+  const rmStop = useRef(false);
+
   const refresh = useCallback(async () => {
     setLoading(true); setRowsErr(null);
     try { setRows(await loadComparison()); } catch (e) { setRowsErr(String((e as Error).message || e)); }
@@ -112,6 +125,33 @@ export default function AdminScoring() {
     setRunning(false);
     refresh();
   };
+
+  // One bank at a time with small pages: each remark may need a news search (rate-limited to one per 5 s).
+  const runResolve = async () => {
+    setRmConfirm(false); setRmRunning(true); setRmErr(null); setRmRows([]); rmStop.current = false;
+    const acc: RemarkRow[] = [];
+    try {
+      for (const b of rmBank === 'both' ? ['fed', 'ecb'] : [rmBank]) {
+        let offset: number | null = 0;
+        while (offset !== null && !rmStop.current) {
+          const { data, error } = await supabase.functions.invoke('sentiment-analysis', {
+            body: { mode: 'resolve-remarks', bank: b, offset, limit: 4, apply: rmApply, recheck: rmRecheck },
+          });
+          if (error) { setRmErr(String(error.message || error)); rmStop.current = true; break; }
+          const r = (data?.result?.[b.toUpperCase()] ?? {}) as { rows?: Omit<RemarkRow, 'bank'>[]; next_offset?: number | null; error?: string };
+          if (r.error) { setRmErr(r.error); break; }
+          acc.push(...(r.rows ?? []).map(x => ({ ...x, bank: b.toUpperCase() })));
+          setRmRows([...acc]);
+          offset = r.next_offset ?? null;
+        }
+      }
+    } catch (e) { setRmErr(String((e as Error).message || e)); }
+    setRmRunning(false);
+  };
+  const rmCounts = useMemo(() => ({
+    verified: rmRows.filter(r => r.verified).length,
+    notVerified: rmRows.filter(r => !r.verified).length,
+  }), [rmRows]);
 
   const stats = useMemo(() => {
     const byBank = (b: string) => rows.filter(r => r.bank === b);
@@ -224,6 +264,64 @@ export default function AdminScoring() {
         {runErr && <p className="text-xs text-destructive">{runErr} — if calls time out, the batch size is too large for the function time limit.</p>}
       </section>
 
+      {/* AI-found member remarks: verify against real sources */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <h2 className="text-sm font-semibold">Verify AI-found member remarks</h2>
+        <p className="text-xs text-muted-foreground leading-snug">
+          The AI search recalls remarks from memory, so each one is checked against published news (GDELT, about the last
+          three months). A remark counts as verified only if an article names the speaker, matches the headline and quotes
+          the speaker on policy. Unchecked: report only, nothing is written. Checked: stores the article URL and the
+          speaker&rsquo;s own sentences for verified remarks (run the backfill afterwards to score them) and marks the rest
+          as not verified. Published scores do not change. About 5&ndash;20 seconds per remark.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex gap-1.5">
+            {(['both', 'fed', 'ecb'] as const).map(b => (
+              <Button key={b} size="sm" variant={rmBank === b ? 'default' : 'outline'} className="h-7 text-xs" disabled={rmRunning} onClick={() => setRmBank(b)}>
+                {b.toUpperCase()}
+              </Button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={rmApply} disabled={rmRunning} onCheckedChange={v => setRmApply(v === true)} />
+            Apply (store verified sources)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={rmRecheck} disabled={rmRunning} onCheckedChange={v => setRmRecheck(v === true)} />
+            Recheck remarks already marked not verified
+          </label>
+          {!rmRunning
+            ? <Button size="sm" onClick={() => (rmApply ? setRmConfirm(true) : runResolve())}>Run</Button>
+            : <Button size="sm" variant="destructive" onClick={() => { rmStop.current = true; }}>Stop after current batch</Button>}
+        </div>
+        {rmRows.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-mono">
+              checked {rmRows.length} · verified {rmCounts.verified} · not verified {rmCounts.notVerified}{rmRunning ? ' · running' : ''}
+            </p>
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground"><tr className="text-left">
+                  <th className="py-1 pr-3">Date</th><th className="pr-3">Bank</th><th className="pr-3">Title</th>
+                  <th className="pr-3">Result</th><th>Source / reason</th>
+                </tr></thead>
+                <tbody>{rmRows.map(r => (
+                  <tr key={r.id} className="border-t border-border align-top">
+                    <td className="py-1 pr-3 font-mono whitespace-nowrap">{r.date}</td><td className="pr-3">{r.bank}</td>
+                    <td className="pr-3">{r.title}</td>
+                    <td className={`pr-3 whitespace-nowrap ${r.verified ? 'text-primary' : 'text-muted-foreground'}`}>{r.status}</td>
+                    <td>{r.verified && r.url
+                      ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary underline break-all">{r.url}</a>
+                      : <span className="text-muted-foreground">{r.reason}</span>}</td>
+                  </tr>))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {rmErr && <p className="text-xs text-destructive">{rmErr}</p>}
+      </section>
+
       {/* 3c — comparison */}
       <section className="rounded-xl border border-border bg-card p-4 space-y-4">
         <h2 className="text-sm font-semibold">Frozen scorer vs previous Gemini score</h2>
@@ -294,6 +392,21 @@ export default function AdminScoring() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={runBackfill}>{apply ? 'Overwrite' : 'Run'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={rmConfirm} onOpenChange={setRmConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Store verification results?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`For ${rmBank === 'both' ? 'FED and ECB' : rmBank.toUpperCase()} AI-found remarks, verified ones get their article URL and the speaker's own sentences stored; the rest are marked not verified. Published scores do not change until you run the backfill.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runResolve}>Store</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

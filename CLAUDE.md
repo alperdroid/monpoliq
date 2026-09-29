@@ -16,6 +16,12 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   All other documents use the general scorer, whose output is unchanged by the decision layer.
 - Surveys (bank lending, loan officer, consumer expectations, SAFE, monetary analysts) go to the
   statistical channel on both the Fed and ECB side (shouldReclassifyAsStatistical()).
+- AI-found member remarks (sources 'GC Member Remark' / 'Fed Official Remark') come from a model that recalls
+  them from memory, so they can be invented. They are scored on real text only after verification
+  (_shared/remark-sources.ts): a published article that names the speaker, matches the headline and quotes
+  them on policy. The scored text is the speaker's attributed sentences, stored in policy_dimensions.source_text,
+  with the result in policy_dimensions.source_resolution. Unverified remarks keep the AI summary, get no URL and
+  are marked verified:false. Never score a remark from an unverified URL. Admin mode: resolve-remarks.
 - Gemini (LOVABLE_API_KEY) is allowed ONLY for: scraping/discovery (member-remark search,
   cross-language dedup, ECB URL fallback) and SEP projections (isSepDoc path + SEP delta scoring).
   Never route other communications to scoreWithGemini().
@@ -33,3 +39,4 @@ npx tsc -p tsconfig.app.json --noEmit && npm run build && npx vitest run
 deno check supabase/functions/sentiment-analysis/index.ts   (expect only the two old errors)
 deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   (14/14)
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
+deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
