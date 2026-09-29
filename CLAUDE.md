@@ -32,13 +32,11 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   recalls from memory and returned 2024 news with 2026 dates; keep it off unless verified sources are required.
   ADMIN_EMAILS: comma-separated emails allowed to run maintenance modes.
 - sentiment-analysis has verify_jwt = false: any mode that writes data must check isAdminRequest().
-- Two type errors in sentiment-analysis/index.ts predate this work (stance_adjustments,
-  PromiseSettledResult .value). Leave them unless asked.
 
 ## Checks before any commit
 
 npx tsc -p tsconfig.app.json --noEmit && npm run build && npx vitest run
-deno check supabase/functions/sentiment-analysis/index.ts   (expect only the two old errors)
+deno check supabase/functions/sentiment-analysis/index.ts   (no errors)
 deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   (14/14)
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
