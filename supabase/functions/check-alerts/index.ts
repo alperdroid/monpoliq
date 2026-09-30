@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { publishedIndex } from "../_shared/scoring-weights.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,34 +28,24 @@ serve(async (req) => {
       });
     }
 
-    // Get current metric values
-    const { data: scores } = await sb.from("sentiment_scores").select("*");
+    // Current metric values: the Dashboard's headline stance (published index)
+    const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().split("T")[0];
     const { data: recentItems } = await sb
       .from("sentiment_items")
-      .select("*")
+      .select("bank, source, title, item_date, is_statistical, net_score, stat_weight")
+      .gte("item_date", cutoff)
       .order("item_date", { ascending: false })
-      .limit(100);
+      .limit(1000);
 
-    // Compute metrics
-    const fedScore = scores?.find(s => s.bank === "FED");
-    const ecbScore = scores?.find(s => s.bank === "ECB");
-
-    const fed30Items = (recentItems || []).filter(i => i.bank === "FED" && !i.is_statistical);
-    const ecb30Items = (recentItems || []).filter(i => i.bank === "ECB" && !i.is_statistical);
-
-    const fedAvg = fed30Items.length > 0
-      ? fed30Items.reduce((s, i) => s + (i.net_score || 0), 0) / fed30Items.length
-      : 0;
-    const ecbAvg = ecb30Items.length > 0
-      ? ecb30Items.reduce((s, i) => s + (i.net_score || 0), 0) / ecb30Items.length
-      : 0;
+    const fedIdx = publishedIndex((recentItems || []) as any[], "FED");
+    const ecbIdx = publishedIndex((recentItems || []) as any[], "ECB");
 
     const metrics: Record<string, number> = {
-      "fed_score": fedAvg,
-      "ecb_score": ecbAvg,
-      "fed_ecb_spread": fedAvg - ecbAvg,
-      "fed_comms_count": fed30Items.length,
-      "ecb_comms_count": ecb30Items.length,
+      "fed_score": fedIdx.avg,
+      "ecb_score": ecbIdx.avg,
+      "fed_ecb_spread": fedIdx.avg - ecbIdx.avg,
+      "fed_comms_count": fedIdx.text.n,
+      "ecb_comms_count": ecbIdx.text.n,
     };
 
     let triggered = 0;

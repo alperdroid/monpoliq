@@ -44,8 +44,11 @@ export interface AIPredictionResponse {
     ecb_comms_count: number;
     fed_stats_count: number;
     ecb_stats_count: number;
-    fed_30d_avg: number | null;
-    ecb_30d_avg: number | null;
+    /** Comms-only and headline numbers of the published index (same as the Dashboard). */
+    fed_comms_index: number | null;
+    ecb_comms_index: number | null;
+    fed_headline: number;
+    ecb_headline: number;
   };
 }
 

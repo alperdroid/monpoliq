@@ -57,7 +57,8 @@ serve(async (req) => {
 
     // Compute features per bank
     const computeFeatures = (bank: string) => {
-      const bankItems = items.filter((i: any) => i.bank === bank);
+      // Scored items only: operational and unreadable items sit at 0 and are not part of the stance
+      const bankItems = items.filter((i: any) => i.bank === bank && Math.abs(i.net_score || 0) > 0.001);
       const recent30 = bankItems.filter((i: any) => {
         const d = new Date(); d.setDate(d.getDate() - 30);
         return i.item_date >= d.toISOString().split("T")[0];

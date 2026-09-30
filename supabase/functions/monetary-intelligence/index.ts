@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { publishedIndex, currentPolicyRate, MEETINGS_2026, POLICY_ACTIONS } from "../_shared/scoring-weights.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,22 +23,20 @@ serve(async (req) => {
     // ── 1. Gather sentiment data from DB ──
     const cutoff90 = new Date();
     cutoff90.setDate(cutoff90.getDate() - 90);
-    const cutoff30 = new Date();
-    cutoff30.setDate(cutoff30.getDate() - 30);
 
     const [commsRes, statsRes, scoresRes, minutesDiffFedRes, minutesDiffEcbRes] = await Promise.all([
       sb.from("sentiment_items")
-        .select("bank, source, title, item_date, net_score, label, reasons, hawk_pts, dove_pts")
+        .select("bank, source, title, item_date, is_statistical, net_score, label, reasons, hawk_pts, dove_pts")
         .eq("is_statistical", false)
         .gte("item_date", cutoff90.toISOString().split("T")[0])
         .order("item_date", { ascending: false })
-        .limit(200),
+        .limit(1000),
       sb.from("sentiment_items")
-        .select("bank, source, title, item_date, net_score, label, stat_metric, stat_value, stat_weight")
+        .select("bank, source, title, item_date, is_statistical, net_score, label, stat_metric, stat_value, stat_weight")
         .eq("is_statistical", true)
         .gte("item_date", cutoff90.toISOString().split("T")[0])
         .order("item_date", { ascending: false })
-        .limit(200),
+        .limit(1000),
       sb.from("sentiment_scores")
         .select("*")
         .order("fetched_at", { ascending: false })
@@ -69,7 +68,7 @@ serve(async (req) => {
     const latestStatDate = stats.length ? stats[0].item_date : "none";
     const scoreHash = scores.map((s: any) => `${s.bank}:${s.score_1_avg}:${s.score_2_avg}`).join("|");
     const todayISO = new Date().toISOString().split("T")[0];
-    const dailySuffix = `daily:${todayISO}:v6`;
+    const dailySuffix = `daily:${todayISO}:v7`;
     const dataHash = `${comms.length}|${stats.length}|${latestCommDate}|${latestStatDate}|r7:${recent7}|${scoreHash}|${dailySuffix}`;
 
     // Check cache: return ONLY if same data hash AND less than 2h old (anti-stickiness)
@@ -111,19 +110,13 @@ serve(async (req) => {
     }
 
     // ── 2c. Days to next FED / ECB meeting (drives market-weight blending) ──
-    const MEETINGS_2026 = [
-      { bank: "FED", date: "2026-04-29" }, { bank: "ECB", date: "2026-04-30" },
-      { bank: "FED", date: "2026-06-11" }, { bank: "ECB", date: "2026-06-11" },
-      { bank: "ECB", date: "2026-07-23" }, { bank: "FED", date: "2026-07-30" },
-      { bank: "ECB", date: "2026-09-10" }, { bank: "FED", date: "2026-09-17" },
-      { bank: "ECB", date: "2026-10-29" }, { bank: "FED", date: "2026-11-05" },
-      { bank: "FED", date: "2026-12-17" }, { bank: "ECB", date: "2026-12-17" },
-    ];
+    // Verified decision dates, shared with the scoring anchor (_shared/scoring-weights.ts)
     const todayD = new Date(todayISO);
+    const nextMeeting = (bank: string) => (MEETINGS_2026[bank] || []).find(d => d >= todayISO) ?? null;
     const daysTo = (bank: string) => {
-      const next = MEETINGS_2026.find(m => m.bank === bank && m.date >= todayISO);
+      const next = nextMeeting(bank);
       if (!next) return 999;
-      return Math.round((new Date(next.date).getTime() - todayD.getTime()) / 86400000);
+      return Math.round((new Date(next).getTime() - todayD.getTime()) / 86400000);
     };
     const fedDays = daysTo("FED");
     const ecbDays = daysTo("ECB");
@@ -150,16 +143,18 @@ serve(async (req) => {
     const fedStats = stats.filter((i: any) => i.bank === "FED");
     const ecbStats = stats.filter((i: any) => i.bank === "ECB");
 
-    // 30-day averages
-    const c30 = cutoff30.toISOString().split("T")[0];
-    const avg = (arr: any[]) => {
-      const f = arr.filter((i: any) => i.item_date >= c30 && Math.abs(i.net_score) > 0.001);
-      if (!f.length) return null;
-      return Math.round((f.reduce((s: number, i: any) => s + i.net_score, 0) / f.length) * 1000) / 1000;
-    };
+    // The published index, exactly as the Dashboard shows it: comms-only = tier/decay/speaker-cap
+    // weighted communications (45d), headline = comms + stats blend with the policy anchor.
+    const nowD = new Date();
+    const fedIdx = publishedIndex([...comms, ...stats] as any[], "FED", nowD);
+    const ecbIdx = publishedIndex([...comms, ...stats] as any[], "ECB", nowD);
+    const commsIndex = (x: typeof fedIdx) => x.text.n ? x.text.avg : null;
+    const fedComm = commsIndex(fedIdx), ecbComm = commsIndex(ecbIdx);
 
-    const fedScore = scores.find((s: any) => s.bank === "FED");
-    const ecbScore = scores.find((s: any) => s.bank === "ECB");
+    // Policy facts from the verified decision calendar, instead of a hand-written dated context.
+    const recentActions = (bank: string) => (POLICY_ACTIONS[bank] || [])
+      .filter(a => a.date <= todayISO).slice(-4)
+      .map(a => `${a.date}: ${a.bps > 0 ? `hike +${a.bps}bp` : a.bps < 0 ? `cut ${a.bps}bp` : "hold"}`).join(", ");
 
     // ── 3. Build AI prompt ──
     const summarizeItems = (items: any[], limit = 15) =>
@@ -169,12 +164,12 @@ serve(async (req) => {
 
     const systemPrompt = `You are a senior monetary policy analyst. You analyze central bank communications, economic statistics, market expectations, and geopolitical risks to predict the next policy decision. Do not mention any AI model names in your reasoning.
 
-CRITICAL MARKET CONTEXT (March 2026):
-- The Fed cut rates multiple times in late 2025. The current Fed Funds target range is 3.50-3.75% (effective rate ~3.64%). Markets now expect NO further cuts in 2026 due to sticky inflation (~2.8% CPI YoY) and tariff uncertainty.
-- The ECB deposit facility rate is currently 2.00%. Markets expect NO further cuts in 2026. Some analysts and ECB Governing Council members (e.g. Bundesbank president Nagel) have openly discussed the possibility of rate HIKES if inflation expectations de-anchor.
-- Your predictions should reflect this market reality. A dovish communication tone does NOT automatically mean a cut is imminent — central banks can sound cautious while holding or even preparing to tighten.
-- For the Fed: hold probability should generally be HIGH (60-85%) unless data dramatically shifts. Cut probability should be LOW (5-25%) reflecting market pricing.
-- For the ECB: hold probability should be HIGH (50-75%). Hike probability should be NON-ZERO (5-20%) reflecting the hawkish shift from NCB governors. Cut probability should be LOW (10-30%) — the easing cycle is likely over at 2.00%. Pay close attention to individual Governing Council members' speeches, especially from Bundesbank, Banque de France, and DNB — these often signal future policy shifts before official ECB statements.
+POLICY FACTS (from the verified decision calendar, as of ${todayISO}):
+- Fed: target range ${currentPolicyRate("FED")}. Last decisions: ${recentActions("FED")}. Next FOMC decision: ${nextMeeting("FED") ?? "not scheduled"}.
+- ECB: deposit facility rate ${currentPolicyRate("ECB")}. Last decisions: ${recentActions("ECB")}. Next Governing Council decision: ${nextMeeting("ECB") ?? "not scheduled"}.
+- Read the direction of the cycle from these decisions, the communication scores and the market pricing below; do not assume the cycle continues or ends.
+- A dovish communication tone does NOT automatically mean a cut is imminent, nor a hawkish one a hike — central banks can sound cautious while holding.
+- For the ECB, pay close attention to individual Governing Council members' speeches (e.g. Bundesbank, Banque de France, DNB) — these often signal policy shifts before official ECB statements.
 
 CRITICAL EUR/USD LOGIC — you MUST follow this:
 - EUR/USD = how many USD per 1 EUR
@@ -260,25 +255,25 @@ Score shift: ${diff.previous?.score ?? "?"} → ${diff.current?.score ?? "?"}`;
 
     const userPrompt = `Analyze the following data and predict the next Fed and ECB decisions:
 
-## FED SENTIMENT (30-day avg: ${avg(fedComms) ?? "N/A"})
+## FED SENTIMENT (communications index: ${fedComm ?? "N/A"}; headline stance: ${fedIdx.avg})
 ### Recent Communications (${fedComms.length} items, 90d):
 ${summarizeItems(fedComms)}
 
 ### Recent Economic Data:
 ${summarizeItems(fedStats)}
 
-${fedScore ? `### Algorithm Scores: Score2 avg=${fedScore.score_2_avg}, label=${fedScore.score_2_label}, count=${fedScore.score_2_count}` : ""}
+### Published index: headline=${fedIdx.avg} (${fedIdx.sentiment}), comms=${fedComm ?? "N/A"} (n=${fedIdx.text.n}), stats=${fedIdx.stats.avg} (n=${fedIdx.stats.n}), policy anchor=${fedIdx.anchor.score}
 
 ${formatMinutesDiff(fedMinutesDiff, "FED")}
 
-## ECB SENTIMENT (30-day avg: ${avg(ecbComms) ?? "N/A"})
+## ECB SENTIMENT (communications index: ${ecbComm ?? "N/A"}; headline stance: ${ecbIdx.avg})
 ### Recent Communications (${ecbComms.length} items, 90d):
 ${summarizeItems(ecbComms)}
 
 ### Recent Economic Data:
 ${summarizeItems(ecbStats)}
 
-${ecbScore ? `### Algorithm Scores: Score2 avg=${ecbScore.score_2_avg}, label=${ecbScore.score_2_label}, count=${ecbScore.score_2_count}` : ""}
+### Published index: headline=${ecbIdx.avg} (${ecbIdx.sentiment}), comms=${ecbComm ?? "N/A"} (n=${ecbIdx.text.n}), stats=${ecbIdx.stats.avg} (n=${ecbIdx.stats.n}), policy anchor=${ecbIdx.anchor.score}
 
 ${formatMinutesDiff(ecbMinutesDiff, "ECB")}
 
@@ -293,11 +288,11 @@ ${fedMktProbs ? `- FED market-implied probs: hike=${fedMktProbs.hike}, hold=${fe
 ${ecbMktProbs ? `- ECB market-implied probs: hike=${ecbMktProbs.hike}, hold=${ecbMktProbs.hold}, cut=${ecbMktProbs.cut}` : ""}
 
 ## CRITICAL SENTIMENT COMPARISON FOR EUR/USD LOGIC:
-Fed 30-day sentiment: ${avg(fedComms) ?? "N/A"}
-ECB 30-day sentiment: ${avg(ecbComms) ?? "N/A"}
+Fed communications index: ${fedComm ?? "N/A"}
+ECB communications index: ${ecbComm ?? "N/A"}
 
 MANDATORY CONSISTENCY RULE:
-- Fed sentiment (${avg(fedComms) ?? "N/A"}) vs ECB sentiment (${avg(ecbComms) ?? "N/A"})
+- Fed sentiment (${fedComm ?? "N/A"}) vs ECB sentiment (${ecbComm ?? "N/A"})
 - MORE NEGATIVE score = MORE DOVISH = currency WEAKENS
 - If Fed more dovish (more negative) → USD weakens → EUR/USD direction MUST be "bullish"
 - If ECB more dovish (more negative) → EUR weakens → EUR/USD direction MUST be "bearish"
@@ -414,8 +409,8 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
     }
 
     // ── 5. Post-hoc consistency check for EUR/USD based on sentiment scores ──
-    const fedSentiment = avg(fedComms) ?? 0;
-    const ecbSentiment = avg(ecbComms) ?? 0;
+    const fedSentiment = fedComm ?? 0;
+    const ecbSentiment = ecbComm ?? 0;
     
     // More negative = more dovish = currency weakens
     if (fedSentiment < ecbSentiment) {
@@ -441,8 +436,10 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       ecb_comms_count: ecbComms.length,
       fed_stats_count: fedStats.length,
       ecb_stats_count: ecbStats.length,
-      fed_30d_avg: avg(fedComms),
-      ecb_30d_avg: avg(ecbComms),
+      fed_comms_index: fedComm,
+      ecb_comms_index: ecbComm,
+      fed_headline: fedIdx.avg,
+      ecb_headline: ecbIdx.avg,
     };
 
     // ── 6. Cache the prediction ──

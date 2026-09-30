@@ -58,7 +58,8 @@ serve(async (req) => {
       const cut = new Date();
       cut.setDate(cut.getDate() - days);
       const cs = cut.toISOString().split("T")[0];
-      const filtered = items.filter((i: any) => i.bank === bank && i.item_date >= cs);
+      // Scored items only: operational and unreadable items sit at 0 and are not part of the stance
+      const filtered = items.filter((i: any) => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score || 0) > 0.001);
       const comms = filtered.filter((i: any) => !i.is_statistical);
       const stats = filtered.filter((i: any) => i.is_statistical);
       const avg = (arr: any[]) => arr.length ? arr.reduce((s: number, i: any) => s + (i.net_score || 0), 0) / arr.length : 0;

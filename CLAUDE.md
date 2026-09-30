@@ -29,6 +29,9 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   skipped by the frozen backfill, are not speaker-calibrated and do not count in speaker baselines.
 - Do not change weights, tiers, decay, the 10% speaker cap or the policy anchor
   (supabase/functions/_shared/scoring-weights.ts, src/lib/scoring-weights.ts).
+- After every Fed/ECB decision, record its bps in src/data/meeting-schedule.ts AND POLICY_ACTIONS in
+  _shared/scoring-weights.ts (data, not weights): they feed the policy anchor and the rate facts in the
+  predictions prompt (currentPolicyRate()). Predictions, alerts and the Dashboard all read publishedIndex().
 - SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: bis (default) | both | ai | off.
   Member communications come from BIS speeches (real URL, full text) and, for the FED, presidents' speeches
   on the regional banks' own sites (_shared/fed-speeches.ts), kept only if by the bank's current president

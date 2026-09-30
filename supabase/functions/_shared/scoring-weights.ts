@@ -27,11 +27,12 @@ export const MEETINGS_2026: Record<string, string[]> = {
  */
 export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
   FED: [
-    { date: '2025-06-18', bps: -25 }, { date: '2025-07-30', bps: -25 },
-    { date: '2025-09-17', bps: -25 }, { date: '2025-10-29', bps: 0 },
+    { date: '2025-06-18', bps: 0 }, { date: '2025-07-30', bps: 0 },
+    { date: '2025-09-17', bps: -25 }, { date: '2025-10-29', bps: -25 },
     { date: '2025-12-10', bps: -25 }, { date: '2026-01-28', bps: 0 },
     { date: '2026-03-18', bps: 0 }, { date: '2026-04-29', bps: 0 },
     { date: '2026-06-17', bps: 0 }, { date: '2026-07-29', bps: 0 },
+    { date: '2026-09-16', bps: 25 },
   ],
   ECB: [
     { date: '2025-03-06', bps: -25 }, { date: '2025-04-17', bps: -25 },
@@ -40,8 +41,20 @@ export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
     { date: '2025-12-18', bps: 0 }, { date: '2026-02-05', bps: 0 },
     { date: '2026-03-19', bps: 0 }, { date: '2026-04-30', bps: 0 },
     { date: '2026-06-11', bps: 25 }, { date: '2026-07-23', bps: 0 },
+    { date: '2026-09-10', bps: 25 },
   ],
 };
+
+/** Policy rate before the first action listed above (Fed: upper bound of the target range; ECB: deposit rate). */
+const RATE_BEFORE_ACTIONS: Record<string, number> = { FED: 4.50, ECB: 2.75 };
+
+/** Current policy rate implied by POLICY_ACTIONS, e.g. "3.75–4.00%" (Fed) or "2.50%" (ECB deposit facility). */
+export function currentPolicyRate(bank: string, now: Date = new Date()): string {
+  const b = bank.toUpperCase();
+  const today = now.toISOString().split('T')[0];
+  const upper = (RATE_BEFORE_ACTIONS[b] ?? 0) + (POLICY_ACTIONS[b] || []).filter(a => a.date <= today).reduce((s, a) => s + a.bps, 0) / 100;
+  return b === 'FED' ? `${(upper - 0.25).toFixed(2)}–${upper.toFixed(2)}%` : `${upper.toFixed(2)}%`;
+}
 
 /** Weight of the realized-action anchor inside the headline aggregate. */
 export const ANCHOR_OMEGA = 0.35;
