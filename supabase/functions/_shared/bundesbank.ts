@@ -10,6 +10,9 @@
 
 export const BUNDESBANK_PRESIDENT = 'Joachim Nagel';
 export const BUNDESBANK_SOURCE = 'Bundesbank Speech';
+export const BUNDESBANK_FEED = 'https://www.bundesbank.de/service/rss/en/633296/feed.rss';
+// A speech the Bundesbank lists only in German is taken from BIS when BIS publishes it in English
+// (see sameTitle: the BIS copy is skipped when an English Bundesbank copy exists).
 
 const DE = new Set(['der', 'die', 'das', 'und', 'ist', 'nicht', 'mit', 'für', 'auf', 'eine', 'einer', 'einen', 'wir', 'sich',
   'den', 'dem', 'des', 'von', 'zu', 'im', 'bei', 'auch', 'wie', 'über', 'wird', 'werden', 'sind', 'noch', 'nach', 'aus', 'vor']);
@@ -40,6 +43,16 @@ export function bundesbankVerdict(title: string, text: string): { keep: boolean;
   if (isGerman(title, text)) return { keep: false, reason: 'German-language copy' };
   if (!byBundesbankPresident(title, text)) return { keep: false, reason: 'not by the Bundesbank President' };
   return { keep: true, reason: 'English, by the President' };
+}
+
+/** Same speech title regardless of word order, punctuation and a "Speaker:" prefix (80% of words shared). */
+export function sameTitle(a: string, b: string, speaker = BUNDESBANK_PRESIDENT): boolean {
+  const words = (t: string) => new Set(titleKey(t, speaker).split(' ').filter(w => w.length >= 3));
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return false;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  return shared / (A.size + B.size - shared) >= 0.8;
 }
 
 /** Comparable form of a title: the part before " | " (Bundesbank) or after "Speaker: " (BIS), no punctuation. */

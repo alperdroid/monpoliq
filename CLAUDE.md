@@ -37,8 +37,10 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   fed-speeches-report, runs only when the secret FED_SITE_SPEECHES=on. When a president changes, update
   FED_SPEECH_SOURCES and delete that bank's 'fed-speech-skip' rows.
 - Bundesbank feed ('Bundesbank Speech', _shared/bundesbank.ts): kept only if English and by the Bundesbank
-  President (BUNDESBANK_PRESIDENT; update when it changes). His speeches come from this feed, not BIS (the BIS
-  path skips the Bundesbank). Admin check for stored rows: bundesbank-check.
+  President (BUNDESBANK_PRESIDENT; update when it changes). His items come from this feed; the BIS path adds
+  his speeches only when the Bundesbank has no English copy (German-only there, English on BIS; sameTitle()).
+  German-only items without an English version stay out: the frozen scorer is English-only. Admin check for
+  stored rows: bundesbank-check.
 - Only rate-setters count. ECB: Governing Council (Executive Board + euro-area NCB governors). FED: Board +
   regional presidents in a year their bank votes (fomcVoterBanks(): New York always, others by the fixed
   rotation, judged by the speech date; applies to BIS and Fed-site speeches).
@@ -56,4 +58,4 @@ deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
 deno run --allow-read supabase/functions/_shared/tests/source_probe_test.ts     (9/9)
 deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (32/32)
-deno run --allow-read supabase/functions/_shared/tests/bundesbank_test.ts       (11/11)
+deno run --allow-read supabase/functions/_shared/tests/bundesbank_test.ts       (14/14)

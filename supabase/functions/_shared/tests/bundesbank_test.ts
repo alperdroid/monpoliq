@@ -1,5 +1,5 @@
 // Run: deno run --allow-read supabase/functions/_shared/tests/bundesbank_test.ts
-import { isGerman, byBundesbankPresident, bundesbankVerdict, titleKey } from '../bundesbank.ts';
+import { isGerman, byBundesbankPresident, bundesbankVerdict, titleKey, sameTitle } from '../bundesbank.ts';
 
 let pass = 0, total = 0;
 const check = (name: string, ok: boolean, detail = '') => { total++; pass += +ok; console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ' | ' + detail : ''}`); };
@@ -25,5 +25,13 @@ check('remove: unreadable', bundesbankVerdict('x', '').reason === 'page could no
 check('title key: Bundesbank vs BIS form match',
   titleKey('Stable and strong in turbulent times – Europe’s responses to global challenges | Speech at the Lions Club')
   === titleKey('Joachim Nagel: Stable and strong in turbulent times - Europe\'s responses to global challenges', 'Joachim Nagel'));
+
+check('same title, different word order',
+  sameTitle('Panel Session on Economics of Innovation: Opening remarks | Conference "Trust and Innovation – The Future of Finance"',
+    'Joachim Nagel: Opening remarks - panel session on economics of innovation'));
+check('same title, different punctuation',
+  sameTitle('From heritage to renewal: building Europe’s future | Speech at the gala dinner', 'Joachim Nagel: From heritage to renewal - building Europe\'s future'));
+check('different speeches are not the same',
+  !sameTitle('The digital euro: promoting innovation, safeguarding sovereignty | Speech', 'Joachim Nagel: Structural challenges for the German economy'));
 
 console.log(`${pass}/${total} passed`); if (pass !== total) Deno.exit(1);

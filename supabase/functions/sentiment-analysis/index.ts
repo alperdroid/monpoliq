@@ -18,7 +18,9 @@ import {
   FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
   isFomcVoter, pageText, metaAuthor, byPresident, type FedSpeechSource,
 } from '../_shared/fed-speeches.ts';
-import { BUNDESBANK_PRESIDENT, BUNDESBANK_SOURCE, bundesbankVerdict, titleKey } from '../_shared/bundesbank.ts';
+import {
+  BUNDESBANK_PRESIDENT, BUNDESBANK_SOURCE, BUNDESBANK_FEED, bundesbankVerdict, sameTitle, isGerman,
+} from '../_shared/bundesbank.ts';
 import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
   REMARK_SOURCES, GDELT_WINDOW_DAYS, remarkSurname, verifyArticle, gdeltUrl, parseGdelt, rankCandidates, daysBetween,
@@ -2098,7 +2100,7 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
         { url: 'https://www.ecb.europa.eu/rss/blog.html', lbl: 'ECB Blog' },
         // Note: ECB speeches.html is HTML, not RSS — individual speeches come via speaker-scraper & media interviews
         // Bundesbank speeches, interviews and contributions (verified RSS feed)
-        { url: 'https://www.bundesbank.de/service/rss/en/633296/feed.rss', lbl: 'Bundesbank Speech' },
+        { url: BUNDESBANK_FEED, lbl: BUNDESBANK_SOURCE },
       ];
 
   const res = await Promise.allSettled(feeds.map(async f => {
@@ -2618,8 +2620,7 @@ async function bundesbankCheck(part: string, apply: boolean, offset: number, lim
     const bb: { title: string; item_date: string }[] = await get(
       `select=title,item_date&bank=eq.ECB&source=eq.${encodeURIComponent(BUNDESBANK_SOURCE)}&limit=2000`);
     for (const r of bis) {
-      const k = titleKey(r.title, BUNDESBANK_PRESIDENT);
-      const dup = bb.find(b => titleKey(b.title) === k && daysBetween(b.item_date, r.item_date) <= 7);
+      const dup = bb.find(b => !isGerman(b.title, '') && sameTitle(b.title, r.title) && daysBetween(b.item_date, r.item_date) <= 7);
       report.push({ id: r.id, date: r.item_date, title: r.title, url: r.url, keep: !dup,
         reason: dup ? `copy of Bundesbank item "${dup.title.split(' | ')[0]}"` : 'no Bundesbank copy found: kept' });
     }
@@ -2642,6 +2643,29 @@ async function bundesbankCheck(part: string, apply: boolean, offset: number, lim
   return { rows: report, removed, next_offset: rows.length === limit ? offset + rows.length - removed : null };
 }
 
+// English Bundesbank items (stored rows and the live feed), to tell whether a BIS speech by the
+// Bundesbank President is a copy of one. Loaded once per invocation.
+let bbEnglishCache: { title: string; date: string }[] | null = null;
+async function bundesbankEnglishTitles(): Promise<{ title: string; date: string }[]> {
+  if (bbEnglishCache) return bbEnglishCache;
+  const out: { title: string; date: string }[] = [];
+  const sbUrl = Deno.env.get('SUPABASE_URL')!, sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  try {
+    const r = await fetch(`${sbUrl}/rest/v1/sentiment_items?select=title,item_date&bank=eq.ECB&source=eq.${encodeURIComponent(BUNDESBANK_SOURCE)}&limit=2000`,
+      { headers: { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey } });
+    if (r.ok) for (const x of await r.json()) out.push({ title: x.title, date: x.item_date });
+  } catch { /* stored rows unavailable: the live feed below still applies */ }
+  try {
+    const f = await sf(BUNDESBANK_FEED);
+    if (f && f.ok) {
+      const xml = (await f.text()).replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, '&amp;');
+      for (const it of pi(xml)) { const d = td(it.pubDate); if (d) out.push({ title: it.title, date: d }); }
+    }
+  } catch { /* feed unavailable */ }
+  bbEnglishCache = out.filter(x => !isGerman(x.title, ''));
+  return bbEnglishCache;
+}
+
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
   const out: RawComm[] = [];
   try {
@@ -2653,7 +2677,12 @@ async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutof
       const date = m.delivered || m.published;
       if (!date || date < cutoffDate) continue;
       if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
-      if (/bundesbank/i.test(m.institution)) continue;                              // taken from the Bundesbank feed (with interviews)
+      // The Bundesbank President comes from the Bundesbank feed (it has his interviews too); BIS only
+      // supplies his speeches that the Bundesbank publishes in German only.
+      if (/bundesbank/i.test(m.institution)) {
+        const english = await bundesbankEnglishTitles();
+        if (english.some(e => sameTitle(e.title, m.title) && daysBetween(e.date, date) <= 7)) continue;
+      }
       const title = monpoliqTitle(m);
       if (existing.has(`${title}|${date}`)) continue;
       let text = await fetchPageText(m.url);
