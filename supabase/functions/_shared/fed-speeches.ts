@@ -6,31 +6,65 @@
 // edge function in September 2026 showed Cleveland, Atlanta, St. Louis and Minneapolis render
 // their lists in the browser, and the Philadelphia and Chicago addresses tried were wrong).
 //
-// A page is kept only if its text names the speaker as the bank's President (e.g. "Lorie K. Logan,
-// President and CEO"), so first vice presidents, research staff and guests are skipped. The whole
-// speech text is scored, with its URL, like every other communication.
+// A page is kept only if it is by the bank's current President. Where the list itself only reaches the
+// president's speeches (New York's "wil" code, Dallas' and San Francisco's per-president pages) that is
+// enough. Elsewhere the president's name must appear in the speech body, the page title or the page's
+// author field (not merely in site menus, which often name the president on every page). Staff, first
+// vice presidents and guests are skipped. The whole speech text is scored, with its URL, like every
+// other communication.
+//
+// WHEN A PRESIDENT CHANGES: update `president` (and the NY speaker code / Dallas and SF paths), then
+// delete their bank's rows from analysis_cache where analysis_type = 'fed-speech-skip', because the
+// new president's pages were remembered as "not the president".
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface FedSpeechSource {
   bank: string;                 // e.g. 'Federal Reserve Bank of New York'
+  president: string;            // current president, full name as the bank writes it
   kind: 'feed' | 'listing';
   url: string;
   link?: RegExp;                // for a listing: which links are individual speeches
+  scoped?: boolean;             // the links only reach this president's speeches
 }
 
 export const FED_SPEECH_SOURCES: FedSpeechSource[] = [
-  { bank: 'Federal Reserve Bank of New York', kind: 'listing', url: 'https://www.newyorkfed.org/newsevents/speeches',
-    link: /\/newsevents\/speeches\/\d{4}\/[a-z]{2,5}\d{6}$/ },
-  { bank: 'Federal Reserve Bank of Boston', kind: 'feed', url: 'https://www.bostonfed.org/feeds/rss_speeches.xml' },
-  { bank: 'Federal Reserve Bank of Richmond', kind: 'feed', url: 'https://www.richmondfed.org/press_room/speeches?cc_view=rss' },
-  { bank: 'Federal Reserve Bank of Kansas City', kind: 'listing', url: 'https://www.kansascityfed.org/speeches/',
-    link: /\/speeches\/(?!speakers-bureau)[a-z0-9-]{8,}\/?$/ },
-  // Per-president pages: if the president changes, the dry run shows no President byline; update the path.
-  { bank: 'Federal Reserve Bank of Dallas', kind: 'listing', url: 'https://www.dallasfed.org/news/speeches/logan',
-    link: /\/news\/speeches\/logan\/.+/ },
-  { bank: 'Federal Reserve Bank of San Francisco', kind: 'listing', url: 'https://www.frbsf.org/news-and-media/speeches/mary-c-daly/',
-    link: /\/news-and-media\/speeches\/mary-c-daly\/.+/ },
+  // New York's list mixes all speakers; the URL code "wil" is John C. Williams'.
+  { bank: 'Federal Reserve Bank of New York', president: 'John C. Williams', kind: 'listing',
+    url: 'https://www.newyorkfed.org/newsevents/speeches', link: /\/newsevents\/speeches\/\d{4}\/wil\d{6}$/, scoped: true },
+  { bank: 'Federal Reserve Bank of Boston', president: 'Susan M. Collins', kind: 'feed',
+    url: 'https://www.bostonfed.org/feeds/rss_speeches.xml' },
+  { bank: 'Federal Reserve Bank of Richmond', president: 'Thomas I. Barkin', kind: 'feed',
+    url: 'https://www.richmondfed.org/press_room/speeches?cc_view=rss' },
+  { bank: 'Federal Reserve Bank of Kansas City', president: 'Jeffrey R. Schmid', kind: 'listing',
+    url: 'https://www.kansascityfed.org/speeches/', link: /\/speeches\/(?!speakers-bureau)[a-z0-9-]{8,}\/?$/ },
+  { bank: 'Federal Reserve Bank of Dallas', president: 'Lorie K. Logan', kind: 'listing',
+    url: 'https://www.dallasfed.org/news/speeches/logan', link: /\/news\/speeches\/logan\/.+/, scoped: true },
+  { bank: 'Federal Reserve Bank of San Francisco', president: 'Mary C. Daly', kind: 'listing',
+    url: 'https://www.frbsf.org/news-and-media/speeches/mary-c-daly/', link: /\/news-and-media\/speeches\/mary-c-daly\/.+/, scoped: true },
 ];
+
+/** All visible text of a page, menus included; used only to find a date and for diagnostics. */
+export function pageText(html: string): string {
+  return decode(html.replace(/<(script|style|noscript|svg)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' '));
+}
+
+/** The page's declared author (meta author / article:author / citation_author), if any. */
+export function metaAuthor(html: string): string {
+  const m = html.match(/<meta\b[^>]*(?:name|property)=["'](?:author|article:author|citation_author|dc\.creator)["'][^>]*content=["']([^"']+)["']/i)
+    ?? html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:name|property)=["'](?:author|article:author|citation_author|dc\.creator)["']/i);
+  return m ? decode(m[1]) : '';
+}
+
+/** Whether `text` (speech body + title + author) is by `president`: full name once, or surname twice. */
+export function byPresident(text: string, president: string): boolean {
+  const parts = president.split(/\s+/);
+  const surname = parts[parts.length - 1];
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const first = parts[0];
+  // "John C. Williams", "John Williams", "John Carl Williams"
+  if (new RegExp(`\\b${esc(first)}(?:\\s+\\p{Lu}\\.|\\s+\\p{Lu}[\\p{L}'’-]+)?\\s+${esc(surname)}\\b`, 'iu').test(text)) return true;
+  return (text.match(new RegExp(`\\b${esc(surname)}\\b`, 'g')) ?? []).length >= 2;
+}
 
 export const FED_SITE_SOURCE = 'Member Speech (Fed site)';
 

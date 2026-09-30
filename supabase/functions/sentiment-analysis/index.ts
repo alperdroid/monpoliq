@@ -16,7 +16,7 @@ import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
 import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
 import {
   FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
-  isFomcVoter, type FedSpeechSource,
+  isFomcVoter, pageText, metaAuthor, byPresident, type FedSpeechSource,
 } from '../_shared/fed-speeches.ts';
 import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
@@ -2503,7 +2503,7 @@ async function probeMemberSources() {
 // short and successive scrapes work back through the past year. Pages that are permanently not
 // usable (not the president, too old, unreadable) are remembered in analysis_cache
 // ('fed-speech-skip') so they are not fetched again. report=true reads only and writes nothing.
-interface FedSpeechRow { bank: string; url: string; result: string; speaker?: string; title?: string; date?: string | null; words?: number }
+interface FedSpeechRow { bank: string; url: string; result: string; speaker?: string; title?: string; date?: string | null; words?: number; note?: string }
 
 async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, perSource = 3, report = false) {
   const sbUrl = Deno.env.get('SUPABASE_URL')!, sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -2531,12 +2531,15 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
     const r = await sf(src.url, 20000);
     if (!r || !r.ok) { rows.push({ bank: src.bank, url: src.url, result: `source unavailable (${r?.status ?? 'no response'})` }); return { items, rows }; }
     const body = await r.text();
-    const cands = (src.kind === 'feed'
+    const all = src.kind === 'feed'
       ? feedItems(body)
-      : listingLinks(body, r.url || src.url, src.link!).map(u => ({ url: u, title: '', date: linkDate(u) })))
-      .filter(c => !known.has(c.url) && (!c.date || (c.date >= cutoffDate && isFomcVoter(src.bank, c.date))))
+      : listingLinks(body, r.url || src.url, src.link!).map(u => ({ url: u, title: '', date: linkDate(u) }));
+    const inWindow = all.filter(c => !c.date || c.date >= cutoffDate);
+    const cands = inWindow
+      .filter(c => !known.has(c.url) && (!c.date || isFomcVoter(src.bank, c.date)))
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));                 // dated newest first; undated keep page order
-    rows.push({ bank: src.bank, url: src.url, result: `${cands.length} new candidate page(s)` });
+    rows.push({ bank: src.bank, url: src.url,
+      result: `${all.length} in source, ${inWindow.length} in the window, ${cands.length} new from voting years` });
     let fetched = 0;
     for (const c of cands) {
       if (fetched >= perSource) break;
@@ -2545,9 +2548,17 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
       if (!pr || !pr.ok) { rows.push({ bank: src.bank, url: c.url, result: `page unavailable (${pr?.status ?? 'no response'})` }); continue; }
       const html = await pr.text();
       const text = extractText(html);
-      const speaker = presidentByline(text);
-      if (!speaker) { rows.push({ bank: src.bank, url: c.url, result: 'skipped: not the president' }); await skip(c.url, 'not the president'); continue; }
-      const date = c.date || pageDate(text);
+      const full = pageText(html);
+      const pTitle = c.title || pageTitle(html);
+      if (!src.scoped && !byPresident(`${text} ${pTitle} ${metaAuthor(html)}`, src.president)) {
+        const named = presidentByline(full);
+        rows.push({ bank: src.bank, url: c.url, result: 'skipped: not the president',
+          note: `${named ? `page names ${named} as President; ` : ''}speech text starts: ${text.slice(0, 160)}` });
+        await skip(c.url, 'not the president');
+        continue;
+      }
+      const speaker = src.president;
+      const date = c.date || pageDate(text) || pageDate(full);
       if (!date) { rows.push({ bank: src.bank, url: c.url, speaker, result: 'skipped: no date found' }); continue; }
       if (date < cutoffDate) {
         rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: older than the window' }); await skip(c.url, 'older than window');
@@ -2559,8 +2570,12 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
         await skip(c.url, 'not an FOMC voter that year');
         continue;
       }
-      if (!isReadableProse(text, 300)) { rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: text unreadable or too short' }); await skip(c.url, 'unreadable'); continue; }
-      const title = speechTitle(speaker, c.title || pageTitle(html));
+      if (!isReadableProse(text, 300)) {
+        rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: text unreadable or too short',
+          note: `${text.split(/\s+/).filter(Boolean).length} words extracted; starts: ${text.slice(0, 160)}` });
+        await skip(c.url, 'unreadable'); continue;
+      }
+      const title = speechTitle(speaker, pTitle);
       if (existing.has(`${title}|${date}`)) { rows.push({ bank: src.bank, url: c.url, speaker, title, date, result: 'already stored' }); continue; }
       const words = text.split(/\s+/).length;
       rows.push({ bank: src.bank, url: c.url, speaker, title, date, words, result: report ? 'would import' : 'import' });

@@ -29,9 +29,11 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
   (supabase/functions/_shared/scoring-weights.ts, src/lib/scoring-weights.ts).
 - SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: bis (default) | both | ai | off.
   Member communications come from BIS speeches (real URL, full text) and, for the FED, presidents' speeches
-  on the regional banks' own sites (_shared/fed-speeches.ts), kept only if the page names the speaker as the
-  bank's President. Fed-site import: a few pages per bank per scrape, rejections remembered in analysis_cache
-  'fed-speech-skip', admin preview fed-speeches-report, runs only when the secret FED_SITE_SPEECHES=on.
+  on the regional banks' own sites (_shared/fed-speeches.ts), kept only if by the bank's current president
+  (configured by name per bank; New York/Dallas/SF lists only reach the president's speeches). Fed-site import:
+  a few pages per bank per scrape, rejections remembered in analysis_cache 'fed-speech-skip', admin preview
+  fed-speeches-report, runs only when the secret FED_SITE_SPEECHES=on. When a president changes, update
+  FED_SPEECH_SOURCES and delete that bank's 'fed-speech-skip' rows.
 - Only rate-setters count. ECB: Governing Council (Executive Board + euro-area NCB governors). FED: Board +
   regional presidents in a year their bank votes (fomcVoterBanks(): New York always, others by the fixed
   rotation, judged by the speech date; applies to BIS and Fed-site speeches).
@@ -48,4 +50,4 @@ deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
 deno run --allow-read supabase/functions/_shared/tests/source_probe_test.ts     (9/9)
-deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (24/24)
+deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (31/31)

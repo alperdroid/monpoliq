@@ -86,7 +86,7 @@ export default function AdminScoring() {
   const [rmErr, setRmErr] = useState<string | null>(null);
   const rmStop = useRef(false);
 
-  const [fedRows, setFedRows] = useState<{ bank: string; url: string; result: string; speaker?: string; title?: string; date?: string; words?: number }[] | null>(null);
+  const [fedRows, setFedRows] = useState<{ bank: string; url: string; result: string; speaker?: string; title?: string; date?: string; words?: number; note?: string }[] | null>(null);
   const [fedBusy, setFedBusy] = useState(false);
   const [fedErr, setFedErr] = useState<string | null>(null);
   const runFedReport = async () => {
@@ -313,7 +313,8 @@ export default function AdminScoring() {
                     <td className="pr-3 font-mono whitespace-nowrap">{r.date ?? ''}</td>
                     <td className="pr-3 whitespace-nowrap">{r.speaker ?? ''}</td>
                     <td><a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary underline break-all">{r.title ?? r.url}</a>
-                      {r.words ? <span className="text-muted-foreground"> · {r.words} words</span> : null}</td>
+                      {r.words ? <span className="text-muted-foreground"> · {r.words} words</span> : null}
+                      {r.note ? <p className="text-[11px] text-muted-foreground break-words">{r.note}</p> : null}</td>
                   </tr>))}
                 </tbody>
               </table>
