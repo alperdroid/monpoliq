@@ -211,6 +211,11 @@ ECB Features:
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if (aiResp.status === 402 || aiResp.status === 403) {
+        return new Response(JSON.stringify({ error: "AI credits are used up", unavailable: true, upstream_status: aiResp.status }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       throw new Error(`AI error: ${aiResp.status}`);
     }
 
