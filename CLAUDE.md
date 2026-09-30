@@ -50,4 +50,4 @@ deno run --allow-read supabase/functions/_shared/tests/member_sources_test.ts   
 deno run --allow-read supabase/functions/_shared/tests/decision_test.ts         (62/62, hold, general unchanged)
 deno run --allow-read supabase/functions/_shared/tests/remark_sources_test.ts   (20/20)
 deno run --allow-read supabase/functions/_shared/tests/source_probe_test.ts     (9/9)
-deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (31/31)
+deno run --allow-read supabase/functions/_shared/tests/fed_speeches_test.ts     (32/32)

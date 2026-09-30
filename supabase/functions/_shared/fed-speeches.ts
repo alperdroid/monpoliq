@@ -40,7 +40,7 @@ export const FED_SPEECH_SOURCES: FedSpeechSource[] = [
   { bank: 'Federal Reserve Bank of Dallas', president: 'Lorie K. Logan', kind: 'listing',
     url: 'https://www.dallasfed.org/news/speeches/logan', link: /\/news\/speeches\/logan\/.+/, scoped: true },
   { bank: 'Federal Reserve Bank of San Francisco', president: 'Mary C. Daly', kind: 'listing',
-    url: 'https://www.frbsf.org/news-and-media/speeches/mary-c-daly/', link: /\/news-and-media\/speeches\/mary-c-daly\/.+/, scoped: true },
+    url: 'https://www.frbsf.org/news-and-media/speeches/mary-c-daly/', link: /\/news-and-media\/speeches\/mary-c-daly\/\d{4}\/\d{2}\/[^/]+\/?$/, scoped: true },
 ];
 
 /** All visible text of a page, menus included; used only to find a date and for diagnostics. */
@@ -115,7 +115,9 @@ export function listingLinks(html: string, base: string, link: RegExp): string[]
   for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["']/gi)) {
     let u: string;
     try { u = new URL(decode(m[1]), base).toString(); } catch { continue; }
-    if (link.test(new URL(u).pathname) && !out.includes(u)) out.push(u);
+    const path = new URL(u).pathname;
+    if (/\/page\/\d+\/?$/.test(path)) continue;                                   // pagination, not a speech
+    if (link.test(path) && !out.includes(u)) out.push(u);
   }
   return out;
 }

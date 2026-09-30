@@ -27,6 +27,11 @@ const kc = FED_SPEECH_SOURCES.find(s => /Kansas/.test(s.bank))!;
 check('KC listing excludes speakers bureau',
   listingLinks('<a href="/speeches/speakers-bureau/">x</a><a href="/speeches/agriculture-the-economy-and-the-kansas-city-fed-august-2026/">y</a>', kc.url, kc.link!).length === 1);
 
+const sf = FED_SPEECH_SOURCES.find(s => /San Francisco/.test(s.bank))!;
+const sfLinks = listingLinks('<a href="/news-and-media/speeches/mary-c-daly/page/3/">3</a>'
+  + '<a href="/news-and-media/speeches/mary-c-daly/2026/04/many-voices-one-purpose/">x</a>', sf.url, sf.link!);
+check('SF: speech pages only, no pagination', sfLinks.length === 1 && sfLinks[0].endsWith('/2026/04/many-voices-one-purpose/'), sfLinks.join(', '));
+
 check('date "September 24, 2026"', pageDate('Home > Speeches  September 24, 2026  Remarks') === '2026-09-24');
 check('date "4 September 2026"', pageDate('Delivered 4 September 2026 in Dallas') === '2026-09-04');
 check('no date', pageDate('No date here') === null);
