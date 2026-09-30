@@ -227,8 +227,8 @@ For each bank, produce three horizon forecasts:
       const errText = await aiResp.text();
       console.error("AI error:", aiResp.status, errText);
       if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        return new Response(JSON.stringify({ error: "AI service is busy, try again in a minute", unavailable: true, rate_limited: true, upstream_status: 429 }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (aiResp.status === 402 || aiResp.status === 403) {

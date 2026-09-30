@@ -140,6 +140,11 @@ Rules:
     if (!response.ok) {
       const errorText = await response.text();
       console.error("API error:", response.status, errorText);
+      if (response.status === 429) {
+        return new Response(JSON.stringify({ error: "AI service is busy, try again in a minute", unavailable: true, rate_limited: true, upstream_status: 429 }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (response.status === 402 || response.status === 403) {
         return new Response(JSON.stringify({ error: "AI credits are used up", unavailable: true, upstream_status: response.status }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
