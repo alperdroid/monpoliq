@@ -2285,7 +2285,8 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
   let scored = 0, skipped = 0;
   for (const r of rows) {
     const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
-    if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '') || documentTier(r.source || '', r.title || '') === 4) { skipped++; continue; }
+    // Tier 4 is still scored (as new items are): the tier sets an item's weight, not whether it is scored.
+    if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '')) { skipped++; continue; }
     if (r.policy_dimensions?.relevance === 'operational') { skipped++; continue; }   // Layer 1 set it aside: not scored
     // Stored text wins: for a verified AI-found remark it is the speaker's extract, not the whole article.
     // An AI-found remark is never scored from its URL alone (the URL may be unverified).
