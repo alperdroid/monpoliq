@@ -156,8 +156,15 @@ Identify the most significant contradictions (up to 5).`;
       const errText = await aiResp.text();
       console.error("AI error:", aiResp.status, errText);
       if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited" }), {
+        return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (aiResp.status === 402 || aiResp.status === 403) {
+        let message = "AI credits are used up for this workspace. Add credits to re-enable contradiction analysis.";
+        try { const j = JSON.parse(errText); if (j?.message) message = j.message; } catch { /* keep default */ }
+        return new Response(JSON.stringify({ error: message }), {
+          status: aiResp.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       throw new Error(`AI error: ${aiResp.status}`);
