@@ -63,10 +63,28 @@ export async function runSentimentAnalysis(
   days: number = 365,
   _fetchText: boolean = false,
 ): Promise<SentimentResponse> {
+  // Scraping + scoring both banks in one call exceeds the function's CPU budget
+  // (WORKER_RESOURCE_LIMIT). Run one bank per call so each stays within limits.
+  if (bank === 'both') {
+    const out: SentimentResponse = {};
+    const errors: string[] = [];
+    for (const b of ['FED', 'ECB'] as const) {
+      try {
+        const r = await runSentimentAnalysis(b, days);
+        if (r.fed) out.fed = r.fed;
+        if (r.ecb) out.ecb = r.ecb;
+      } catch (e) {
+        errors.push(`${b}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (errors.length === 2) throw new Error(`Analysis failed — ${errors.join(' | ')}`);
+    return out;
+  }
+
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const url = `https://${projectId}.supabase.co/functions/v1/sentiment-analysis`;
-  
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
