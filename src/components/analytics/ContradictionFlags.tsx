@@ -20,7 +20,8 @@ interface ContradictionResult {
   contradictions: Contradiction[];
   summary: string;
   bank: string;
-  generated_at: string;
+  generated_at?: string;
+  unavailable?: boolean;
 }
 
 async function fetchContradictions(bank: string): Promise<ContradictionResult> {
