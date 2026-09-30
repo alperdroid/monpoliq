@@ -56,7 +56,9 @@ async function fetchPivotProbability(): Promise<PivotData> {
     if (resp.status === 429) throw new Error('Rate limited — try again later');
     throw new Error(`Failed: ${resp.status}`);
   }
-  return resp.json();
+  const d = await resp.json();
+  if ((d as any)?.unavailable) throw new Error('Paused: AI credits are used up');
+  return d;
 }
 
 export function PivotProbabilityPanel() {

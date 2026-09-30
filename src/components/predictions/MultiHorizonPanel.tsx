@@ -27,7 +27,9 @@ async function fetchMultiHorizon(): Promise<HorizonForecast> {
     headers: { 'Authorization': `Bearer ${anonKey}`, 'apikey': anonKey, 'Content-Type': 'application/json' },
   });
   if (!resp.ok) throw new Error(await resp.text());
-  return resp.json();
+  const d = await resp.json();
+  if ((d as any)?.unavailable) throw new Error('Paused: AI credits are used up');
+  return d;
 }
 
 const dirVariant = (d: string) => d === 'hawkish' ? 'hawkish' : d === 'dovish' ? 'dovish' : 'neutral';
@@ -119,7 +121,7 @@ export function MultiHorizonPanel() {
   if (error || !data) {
     return (
       <div className="rounded-lg border border-destructive/30 bg-card p-4 text-center">
-        <p className="text-xs text-muted-foreground">Multi-horizon forecasts unavailable</p>
+        <p className="text-xs text-muted-foreground">Multi-horizon forecasts unavailable{error instanceof Error && error.message.startsWith('Paused') ? ' — paused: AI credits are used up' : ''}</p>
       </div>
     );
   }
