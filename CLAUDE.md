@@ -25,6 +25,8 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
 - Gemini (LOVABLE_API_KEY) is allowed ONLY for: scraping/discovery (member-remark search,
   cross-language dedup, ECB URL fallback) and SEP projections (isSepDoc path + SEP delta scoring).
   Never route other communications to scoreWithGemini().
+- Items Layer 1 marks 'operational' (policy_dimensions.relevance) are never scored: they stay at 0, are
+  skipped by the frozen backfill, are not speaker-calibrated and do not count in speaker baselines.
 - Do not change weights, tiers, decay, the 10% speaker cap or the policy anchor
   (supabase/functions/_shared/scoring-weights.ts, src/lib/scoring-weights.ts).
 - SCORER_MODE secret: shadow | frozen | frozen-only | ai. MEMBER_SOURCE: bis (default) | both | ai | off.

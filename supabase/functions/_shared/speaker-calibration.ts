@@ -53,13 +53,15 @@ export async function loadSpeakerBaselines(
   const out = new Map<string, SpeakerBaseline>();
   try {
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=title,net_score&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=1500`,
+      `${sbUrl}/rest/v1/sentiment_items?select=title,net_score,relevance:policy_dimensions->>relevance&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&limit=1500`,
       { headers: { Authorization: 'Bearer ' + sbKey, apikey: sbKey } },
     );
     if (!resp.ok) return out;
-    const rows: { title: string; net_score: number }[] = await resp.json();
+    const rows: { title: string; net_score: number; relevance: string | null }[] = await resp.json();
     const buckets = new Map<string, number[]>();
     for (const r of rows) {
+      if (r.relevance === 'operational') continue;   // never scored: not part of anyone's tone
+
       const sp = extractSpeaker(r.title);
       if (!sp) continue;
       const key = sp.toLowerCase();
@@ -93,6 +95,9 @@ export function calibrateItem<T extends CalibratableItem>(
   baselines: Map<string, SpeakerBaseline>,
 ): T {
   if (it.is_statistical) return it;
+  // Layer 1 set this aside as non-policy and never scored it; calibrating its placeholder 0 would
+  // invent a signal from the speaker's usual tone alone.
+  if ((it.policy_dimensions as { relevance?: string } | null | undefined)?.relevance === 'operational') return it;
   const speaker = extractSpeaker(it.title);
   if (!speaker) return it;
   const base = baselines.get(speaker.toLowerCase());

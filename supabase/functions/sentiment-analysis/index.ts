@@ -2279,6 +2279,7 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
   for (const r of rows) {
     const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
     if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '') || documentTier(r.source || '', r.title || '') === 4) { skipped++; continue; }
+    if (r.policy_dimensions?.relevance === 'operational') { skipped++; continue; }   // Layer 1 set it aside: not scored
     // Stored text wins: for a verified AI-found remark it is the speaker's extract, not the whole article.
     // An AI-found remark is never scored from its URL alone (the URL may be unverified).
     const text = stored || (r.url && !REMARK_SOURCES.includes(r.source) ? await fetchPageText(r.url) : '');
