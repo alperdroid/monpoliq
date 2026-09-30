@@ -86,6 +86,16 @@ export default function AdminScoring() {
   const [rmErr, setRmErr] = useState<string | null>(null);
   const rmStop = useRef(false);
 
+  const [fedRows, setFedRows] = useState<{ bank: string; url: string; result: string; speaker?: string; title?: string; date?: string; words?: number }[] | null>(null);
+  const [fedBusy, setFedBusy] = useState(false);
+  const [fedErr, setFedErr] = useState<string | null>(null);
+  const runFedReport = async () => {
+    setFedBusy(true); setFedErr(null);
+    const { data, error } = await supabase.functions.invoke('sentiment-analysis', { body: { mode: 'fed-speeches-report', per_source: 4 } });
+    if (error) setFedErr(String(error.message || error)); else setFedRows(data?.rows ?? []);
+    setFedBusy(false);
+  };
+
   const [probing, setProbing] = useState(false);
   const [probe, setProbe] = useState<Record<string, unknown>[] | null>(null);
   const [probeErr, setProbeErr] = useState<string | null>(null);
@@ -178,6 +188,7 @@ export default function AdminScoring() {
         published: all.filter(r => r.scorer_model === FROZEN_MODEL).length,
         sep: all.filter(isSep).length,
         bis: all.filter(r => r.source === 'Member Speech (BIS)').length,
+        fedSite: all.filter(r => r.source === 'Member Speech (Fed site)').length,
         aiRemarks: all.filter(isAiRemark).length,
         n: pairs.length, corr: pearson(x, y), mae, disRate: pairs.length ? dis / pairs.length : null, pairs,
       };
@@ -226,12 +237,14 @@ export default function AdminScoring() {
           <table className="w-full text-xs">
             <thead className="text-muted-foreground"><tr className="text-left">
               <th className="py-1 pr-3">Bank</th><th className="pr-3">Communications</th><th className="pr-3">With frozen score</th>
-              <th className="pr-3">Published by frozen scorer</th><th className="pr-3">SEP</th><th className="pr-3">BIS speeches</th><th>AI-found remarks</th>
+              <th className="pr-3">Published by frozen scorer</th><th className="pr-3">SEP</th><th className="pr-3">BIS speeches</th>
+              <th className="pr-3">Fed-site speeches</th><th>AI-found remarks</th>
             </tr></thead>
             <tbody>{stats.map(s => (
               <tr key={s.bank} className="border-t border-border font-mono">
                 <td className="py-1 pr-3 font-sans font-medium">{s.bank}</td><td className="pr-3">{s.total}</td><td className="pr-3">{s.withFrozen}</td>
-                <td className="pr-3">{s.published}</td><td className="pr-3">{s.sep}</td><td className="pr-3">{s.bis}</td><td>{s.aiRemarks}</td>
+                <td className="pr-3">{s.published}</td><td className="pr-3">{s.sep}</td><td className="pr-3">{s.bis}</td>
+                <td className="pr-3">{s.fedSite}</td><td>{s.aiRemarks}</td>
               </tr>))}
             </tbody>
           </table>
@@ -272,6 +285,45 @@ export default function AdminScoring() {
           </div>
         )}
         {runErr && <p className="text-xs text-destructive">{runErr} — if calls time out, the batch size is too large for the function time limit.</p>}
+      </section>
+
+      {/* Regional Fed presidents' speeches: preview */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <h2 className="text-sm font-semibold">Regional Fed presidents&rsquo; speeches (preview)</h2>
+        <p className="text-xs text-muted-foreground leading-snug">
+          Read-only. Shows what the next scrapes would import from the regional Federal Reserve Banks&rsquo; own sites
+          (New York, Boston, Richmond, Kansas City, Dallas, San Francisco): up to four new pages per bank, newest first. A page
+          is imported only when it names the speaker as the bank&rsquo;s President and that bank had an FOMC vote in the
+          year of the speech (New York always; the others by the fixed rotation). Each scrape then imports a few, with the
+          full text and the page URL, and scores them like every other communication. Nothing is written here.
+        </p>
+        <Button size="sm" onClick={runFedReport} disabled={fedBusy}>{fedBusy ? 'Checking…' : 'Preview'}</Button>
+        {fedRows && (
+          <div className="space-y-2">
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground"><tr className="text-left">
+                  <th className="py-1 pr-3">Bank</th><th className="pr-3">Result</th><th className="pr-3">Date</th>
+                  <th className="pr-3">Speaker</th><th>Title / page</th>
+                </tr></thead>
+                <tbody>{fedRows.map((r, i) => (
+                  <tr key={i} className="border-t border-border align-top">
+                    <td className="py-1 pr-3 whitespace-nowrap">{r.bank.replace('Federal Reserve Bank of ', '')}</td>
+                    <td className={`pr-3 ${/import/.test(r.result) ? 'text-primary' : 'text-muted-foreground'}`}>{r.result}</td>
+                    <td className="pr-3 font-mono whitespace-nowrap">{r.date ?? ''}</td>
+                    <td className="pr-3 whitespace-nowrap">{r.speaker ?? ''}</td>
+                    <td><a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary underline break-all">{r.title ?? r.url}</a>
+                      {r.words ? <span className="text-muted-foreground"> · {r.words} words</span> : null}</td>
+                  </tr>))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Full result (copy and paste this back):</p>
+            <textarea readOnly className="w-full h-32 text-[11px] font-mono rounded border border-border bg-background p-2"
+              value={JSON.stringify(fedRows, null, 1)} onFocus={e => e.currentTarget.select()} />
+          </div>
+        )}
+        {fedErr && <p className="text-xs text-destructive">{fedErr}</p>}
       </section>
 
       {/* Member speech sources: read-only probe */}
