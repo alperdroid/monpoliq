@@ -99,7 +99,7 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
     return (
       <div className="text-center py-3">
         <p className="text-xs text-muted-foreground">
-          {error ? (error as Error).message || 'Contradiction analysis unavailable' : `No contradictions detected for ${bank}`}
+          {error ? (error as Error).message || 'Contradiction analysis unavailable' : data?.unavailable ? data.summary : `No contradictions detected for ${bank}`}
         </p>
       </div>
     );
