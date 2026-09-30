@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { publishedIndex, currentPolicyRate, MEETINGS_2026, POLICY_ACTIONS } from "../_shared/scoring-weights.ts";
+import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,8 +14,6 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -193,7 +192,7 @@ PREDICTION STABILITY:
 - Maintain consistency with underlying sentiment scores unless external shocks override
 - Dovish tone alone does NOT justify high cut probability — data dependency means the Fed can sound cautious while holding
 
-You MUST respond with ONLY a valid JSON object (no markdown, no explanation) matching this exact schema:
+Submit your answer through the submit_predictions tool; it has this shape:
 {
   "fed": {
     "next_decision": "hike" | "hold" | "cut",
@@ -306,56 +305,73 @@ MINUTES LANGUAGE SHIFT INTEGRATION:
 Current date: ${new Date().toISOString().split("T")[0]}
 Consider current market expectations, geopolitical tensions, and any emerging risks that may override historical data patterns.`;
 
-    // ── 4. Call Lovable AI (Gemini) ──
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
+    // ── 4. Ask Claude ──
+    const decision = (desc: string) => ({
+      type: "object",
+      properties: {
+        next_decision: { type: "string", enum: ["hike", "hold", "cut"] },
+        hike_probability: { type: "number" },
+        hold_probability: { type: "number" },
+        cut_probability: { type: "number" },
+        confidence: { type: "number" },
+        reasoning: { type: "string" },
       },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
+      required: ["next_decision", "hike_probability", "hold_probability", "cut_probability", "confidence", "reasoning"],
+      additionalProperties: false,
+      description: desc,
     });
-
-    if (!aiResp.ok) {
-      const errText = await aiResp.text();
-      console.error("AI gateway error:", aiResp.status, errText);
-      // On error, return cached prediction if available
-      if (cached && cached.length > 0) {
-        console.log("AI error, returning stale cached prediction");
-        return new Response(JSON.stringify(cached[0].predictions), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, please try again shortly." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI error: ${aiResp.status}`);
-    }
-
-    const aiData = await aiResp.json();
-    let content = aiData.choices?.[0]?.message?.content || "";
-    content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-
-    let prediction;
+    let prediction: any;
     try {
-      prediction = JSON.parse(content);
-    } catch {
-      console.error("Failed to parse AI response:", content);
-      // Return cached on parse error
+      ({ input: prediction } = await claudeToolCall<any>({
+        system: systemPrompt,
+        user: userPrompt,
+        effort: "high",
+        tool: {
+          name: "submit_predictions",
+          description: "Submit the Fed, ECB, EUR/USD and US 10Y predictions (probabilities 0-1, each bank's three summing to 1).",
+          input_schema: {
+            type: "object",
+            properties: {
+              fed: decision("Next FOMC decision"),
+              ecb: decision("Next ECB Governing Council decision"),
+              eurusd: {
+                type: "object",
+                properties: {
+                  direction: { type: "string", enum: ["bullish", "bearish", "neutral"] },
+                  signal_strength: { type: "number" },
+                  confidence: { type: "number" },
+                  reasoning: { type: "string" },
+                },
+                required: ["direction", "signal_strength", "confidence", "reasoning"],
+                additionalProperties: false,
+              },
+              us10y: {
+                type: "object",
+                properties: {
+                  direction: { type: "string", enum: ["bullish", "bearish", "neutral"] },
+                  yield_bias: { type: "string", enum: ["higher", "lower", "stable"] },
+                  signal_strength: { type: "number" },
+                  confidence: { type: "number" },
+                  reasoning: { type: "string" },
+                },
+                required: ["direction", "yield_bias", "signal_strength", "confidence", "reasoning"],
+                additionalProperties: false,
+              },
+            },
+            required: ["fed", "ecb", "eurusd", "us10y"],
+            additionalProperties: false,
+          },
+        },
+      }));
+    } catch (e) {
+      // Claude unavailable or failed: serve the last prediction rather than nothing
       if (cached && cached.length > 0) {
+        console.log("Claude error, returning stale cached prediction:", e instanceof Error ? e.message : e);
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      throw new Error("AI returned invalid JSON");
+      throw e;
     }
 
     // Validate and normalize probabilities
@@ -363,26 +379,6 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       const p = prediction[bank];
       if (!p) throw new Error(`Missing ${bank} prediction`);
       
-      // Post-hoc: enforce realistic Fed expectations (no cuts priced in 2026)
-      if (bank === "fed") {
-        p.hold_probability = Math.max(p.hold_probability || 0, 0.60);
-        p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
-        p.hike_probability = Math.min(p.hike_probability || 0, 0.10);
-        if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
-          p.next_decision = "hold";
-        }
-      }
-
-      // Post-hoc: enforce realistic ECB expectations (no cuts expected, hike risk exists)
-      if (bank === "ecb") {
-        p.hold_probability = Math.max(p.hold_probability || 0, 0.50);
-        p.cut_probability = Math.min(p.cut_probability || 0, 0.30);
-        p.hike_probability = Math.max(p.hike_probability || 0, 0.05);
-        if (p.hold_probability > p.cut_probability && p.hold_probability > p.hike_probability) {
-          p.next_decision = "hold";
-        }
-      }
-
       // ── Blend with market-implied probabilities (weight scales with meeting distance) ──
       const mkt = bank === "fed" ? fedMktProbs : ecbMktProbs;
       const w = bank === "fed" ? fedMktW : ecbMktW;
@@ -453,6 +449,9 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
+    if (e instanceof ClaudeUnavailable) {
+      return new Response(unavailableBody(e), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     console.error("monetary-intelligence error:", e);
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),

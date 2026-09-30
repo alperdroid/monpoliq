@@ -9,54 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, User } from 'lucide-react';
 import { getCommunicationItems, getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
 import { SpeakerDNAPanel } from '@/components/speakers/SpeakerDNA';
+import { currentMembers, speakerOf, ROSTER_VERIFIED } from '@/data/committee-roster';
 
-/**
- * Known speaker reference data — metrics computed from real items.
- * `until` marks a departure date: items after it are ignored and the member is
- * dropped from the roster. Independently, anyone with no communication in the
- * last ACTIVE_WINDOW_DAYS is treated as no longer on the committee, so the
- * roster prunes itself month over month without manual edits.
- */
-const ACTIVE_WINDOW_DAYS = 120;
-
-const SPEAKER_REFS: { name: string; patterns: string[]; role: string; institution: string; bank: string; until?: string }[] = [
-  // Jerome Powell left the Board — kept only for historical matching up to his departure.
-  { name: 'Jerome Powell', patterns: ['powell'], role: 'Chair (former)', institution: 'Federal Reserve Board', bank: 'FED', until: '2026-06-01' },
-  { name: 'Michael Barr', patterns: ['barr'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
-
-  { name: 'Christopher Waller', patterns: ['waller'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
-  { name: 'Michelle Bowman', patterns: ['bowman'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
-  { name: 'John Williams', patterns: ['williams'], role: 'President', institution: 'Fed Reserve Bank of New York', bank: 'FED' },
-  { name: 'Lisa Cook', patterns: ['cook'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
-  { name: 'Adriana Kugler', patterns: ['kugler'], role: 'Governor', institution: 'Federal Reserve Board', bank: 'FED' },
-  { name: 'Philip Jefferson', patterns: ['jefferson'], role: 'Vice Chair', institution: 'Federal Reserve Board', bank: 'FED' },
-  { name: 'Thomas Barkin', patterns: ['barkin'], role: 'President', institution: 'Fed Reserve Bank of Richmond', bank: 'FED' },
-  { name: 'Raphael Bostic', patterns: ['bostic'], role: 'President', institution: 'Fed Reserve Bank of Atlanta', bank: 'FED' },
-  { name: 'Mary Daly', patterns: ['daly'], role: 'President', institution: 'Fed Reserve Bank of San Francisco', bank: 'FED' },
-  { name: 'Austan Goolsbee', patterns: ['goolsbee'], role: 'President', institution: 'Fed Reserve Bank of Chicago', bank: 'FED' },
-  { name: 'Neel Kashkari', patterns: ['kashkari'], role: 'President', institution: 'Fed Reserve Bank of Minneapolis', bank: 'FED' },
-  { name: 'Alberto Musalem', patterns: ['musalem'], role: 'President', institution: 'Fed Reserve Bank of St. Louis', bank: 'FED' },
-  { name: 'Beth Hammack', patterns: ['hammack'], role: 'President', institution: 'Fed Reserve Bank of Cleveland', bank: 'FED' },
-  { name: 'Christine Lagarde', patterns: ['lagarde'], role: 'President', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Isabel Schnabel', patterns: ['schnabel'], role: 'Executive Board Member', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Piero Cipollone', patterns: ['cipollone'], role: 'Executive Board Member', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Philip Lane', patterns: ['lane'], role: 'Chief Economist', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Luis de Guindos', patterns: ['guindos'], role: 'Vice-President', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Frank Elderson', patterns: ['elderson'], role: 'Executive Board Member', institution: 'European Central Bank', bank: 'ECB' },
-  { name: 'Joachim Nagel', patterns: ['nagel'], role: 'President', institution: 'Deutsche Bundesbank', bank: 'ECB' },
-  { name: 'François Villeroy de Galhau', patterns: ['villeroy'], role: 'Governor', institution: 'Banque de France', bank: 'ECB' },
-  { name: 'Klaas Knot', patterns: ['knot'], role: 'President', institution: 'De Nederlandsche Bank', bank: 'ECB' },
-  { name: 'Mário Centeno', patterns: ['centeno'], role: 'Governor', institution: 'Banco de Portugal', bank: 'ECB' },
-  { name: 'Mārtiņš Kazāks', patterns: ['kazāks', 'kazaks'], role: 'Governor', institution: 'Bank of Latvia', bank: 'ECB' },
-  { name: 'Robert Holzmann', patterns: ['holzmann'], role: 'Governor', institution: 'Oesterreichische Nationalbank', bank: 'ECB' },
-  { name: 'Madis Muller', patterns: ['muller', 'müller'], role: 'Governor', institution: 'Bank of Estonia', bank: 'ECB' },
-  { name: 'Yannis Stournaras', patterns: ['stournaras'], role: 'Governor', institution: 'Bank of Greece', bank: 'ECB' },
-  { name: 'Olli Rehn', patterns: ['rehn'], role: 'Governor', institution: 'Bank of Finland', bank: 'ECB' },
-  { name: 'Gediminas Šimkus', patterns: ['simkus', 'šimkus'], role: 'Chairman', institution: 'Bank of Lithuania', bank: 'ECB' },
-  { name: 'Boris Vujčić', patterns: ['vujčić', 'vujcic'], role: 'Governor', institution: 'Croatian National Bank', bank: 'ECB' },
-  { name: 'Gabriel Makhlouf', patterns: ['makhlouf'], role: 'Governor', institution: 'Central Bank of Ireland', bank: 'ECB' },
-  { name: 'Pierre Wunsch', patterns: ['wunsch'], role: 'Governor', institution: 'National Bank of Belgium', bank: 'ECB' },
-];
+/** Current members of the two committees (verified roster); metrics are computed from real items. */
+const SPEAKER_REFS = currentMembers();
 
 interface DerivedSpeaker {
   name: string;
@@ -74,17 +30,10 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
   const cutoff30d = new Date();
   cutoff30d.setDate(cutoff30d.getDate() - 30);
   const cs30 = cutoff30d.toISOString().split('T')[0];
-  const activeCutoff = new Date();
-  activeCutoff.setDate(activeCutoff.getDate() - ACTIVE_WINDOW_DAYS);
-  const csActive = activeCutoff.toISOString().split('T')[0];
 
   return SPEAKER_REFS.map(ref => {
-    const matched = items.filter(i => {
-      const tl = i.title.toLowerCase();
-      if (i.bank !== ref.bank) return false;
-      if (ref.until && i.item_date > ref.until) return false;
-      return ref.patterns.some(p => tl.includes(p));
-    });
+    // attributed to this member only (a predecessor with the same surname pattern keeps their own items)
+    const matched = items.filter(i => i.bank === ref.bank && speakerOf(i.title, i.bank, i.item_date) === ref);
 
     const scored = matched.filter(i => Math.abs(i.net_score) > 0.001);
     const avgTone = scored.length ? Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000 : 0;
@@ -106,8 +55,7 @@ function deriveSpeakers(items: SentimentItem[]): DerivedSpeaker[] {
       recent_tone_change: toneChange,
     };
   })
-    // Current committee only: must have spoken inside the rolling activity window.
-    .filter(s => s.communication_count > 0 && s.latest_communication_date >= csActive);
+    .filter(s => s.communication_count > 0);
 }
 
 
@@ -141,7 +89,7 @@ const Speakers = () => {
         <div>
           <h1 className="text-lg font-semibold">Speaker Intelligence</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Current committees only — members with no communication in the last {ACTIVE_WINDOW_DAYS} days drop off automatically.
+            Current committee members only (roster verified {ROSTER_VERIFIED}).
           </p>
         </div>
 

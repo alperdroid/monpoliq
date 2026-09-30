@@ -71,7 +71,9 @@ export async function fetchAIPredictions(): Promise<AIPredictionResponse> {
     throw new Error(`Prediction failed: ${err}`);
   }
 
-  return resp.json();
+  const data = await resp.json();
+  if (data?.unavailable) throw new Error(`Paused: ${data.error || 'AI service unavailable'}`);
+  return data;
 }
 
 /** Convert AI response to the existing PredictionOutput type */
@@ -118,12 +120,14 @@ export interface MarketInstrument {
   bank: string;
   reference_date: string;
   price: number;
-  change_24h: number;
+  /** Null when no published figure was found. */
+  change_24h: number | null;
   yield_value?: number;
   spread_bps?: number;
-  market_hike_prob?: number;
-  market_hold_prob?: number;
-  market_cut_prob?: number;
+  /** Published market-implied probabilities (FedWatch / €STR pricing); null when none was found. */
+  market_hike_prob?: number | null;
+  market_hold_prob?: number | null;
+  market_cut_prob?: number | null;
   ai_hike_prob?: number;
   ai_hold_prob?: number;
   ai_cut_prob?: number;
@@ -133,7 +137,9 @@ export interface MarketInstrument {
 
 export interface MarketDataResponse {
   instruments: MarketInstrument[];
-  sources?: Record<string, { value: number; date: string; source: string }>;
+  sources?: Record<string, string>;
+  /** Pages Claude read (web search) for the market pricing. */
+  web_sources?: { url: string; title: string }[];
   generated_at?: string;
 }
 
@@ -157,7 +163,7 @@ export async function fetchMarketData(): Promise<MarketDataResponse> {
   }
 
   const data = await response.json();
-  if ((data as any)?.unavailable) throw new Error((data as any).rate_limited ? 'Paused: AI service is busy, try again in a minute' : 'Paused: AI credits are used up');
+  if ((data as any)?.unavailable) throw new Error(`Paused: ${(data as any).error || 'AI service unavailable'}`);
   // Handle both old format (array) and new format (object with instruments)
   if (Array.isArray(data)) {
     return { instruments: data };

@@ -17,7 +17,14 @@ export interface CalibratableItem {
   policy_dimensions?: Record<string, unknown> | null;
 }
 
-const CHAIRS = /powell|warsh|lagarde/i;   // Fed Chair Warsh (2026), ECB President Lagarde
+// Fed Chair (Powell until 22 May 2026, then Warsh) and ECB President (Lagarde), by the item's date.
+const CHAIRS: { re: RegExp; from?: string; until?: string }[] = [
+  { re: /powell/i, until: '2026-05-22' },
+  { re: /warsh/i, from: '2026-05-22' },
+  { re: /lagarde/i },
+];
+const isChair = (speaker: string, date: string) =>
+  CHAIRS.some(c => c.re.test(speaker) && (!c.from || date >= c.from) && (!c.until || date < c.until));
 
 /** Pull the speaker out of a communication title ("Nagel: Act now …", "Lagarde, Vujčić: …"). */
 export function extractSpeaker(title: string): string | null {
@@ -103,7 +110,7 @@ export function calibrateItem<T extends CalibratableItem>(
   const base = baselines.get(speaker.toLowerCase());
   if (!base) return it;
 
-  const wRaw = CHAIRS.test(speaker) ? 0.75 : 0.6;
+  const wRaw = isChair(speaker, it.item_date || '') ? 0.75 : 0.6;
   const z = (it.net_score - base.mean) / base.sd;
   const deviation = Math.tanh(z / 2);
   const calibrated = Math.max(-1, Math.min(1, wRaw * it.net_score + (1 - wRaw) * deviation));

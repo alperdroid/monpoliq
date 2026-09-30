@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { Dna } from 'lucide-react';
+import { currentMembers, speakerOf } from '@/data/committee-roster';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 interface DNAProfile {
@@ -18,48 +19,15 @@ interface DNAProfile {
   inflationDrift: number;
 }
 
-const SPEAKERS = [
-  { name: 'Powell', patterns: ['powell'], bank: 'FED' },
-  { name: 'Waller', patterns: ['waller'], bank: 'FED' },
-  { name: 'Bowman', patterns: ['bowman'], bank: 'FED' },
-  { name: 'Williams', patterns: ['williams'], bank: 'FED' },
-  { name: 'Cook', patterns: ['cook'], bank: 'FED' },
-  { name: 'Kugler', patterns: ['kugler'], bank: 'FED' },
-  { name: 'Jefferson', patterns: ['jefferson'], bank: 'FED' },
-  { name: 'Barkin', patterns: ['barkin'], bank: 'FED' },
-  { name: 'Bostic', patterns: ['bostic'], bank: 'FED' },
-  { name: 'Daly', patterns: ['daly'], bank: 'FED' },
-  { name: 'Goolsbee', patterns: ['goolsbee'], bank: 'FED' },
-  { name: 'Kashkari', patterns: ['kashkari'], bank: 'FED' },
-  { name: 'Musalem', patterns: ['musalem'], bank: 'FED' },
-  { name: 'Hammack', patterns: ['hammack'], bank: 'FED' },
-  { name: 'Lagarde', patterns: ['lagarde'], bank: 'ECB' },
-  { name: 'Schnabel', patterns: ['schnabel'], bank: 'ECB' },
-  { name: 'Cipollone', patterns: ['cipollone'], bank: 'ECB' },
-  { name: 'Lane', patterns: ['lane'], bank: 'ECB' },
-  { name: 'Guindos', patterns: ['guindos'], bank: 'ECB' },
-  { name: 'Elderson', patterns: ['elderson'], bank: 'ECB' },
-  { name: 'Nagel', patterns: ['nagel'], bank: 'ECB' },
-  { name: 'Villeroy', patterns: ['villeroy'], bank: 'ECB' },
-  { name: 'Knot', patterns: ['knot'], bank: 'ECB' },
-  { name: 'Centeno', patterns: ['centeno'], bank: 'ECB' },
-  { name: 'Kazāks', patterns: ['kazāks', 'kazaks'], bank: 'ECB' },
-  { name: 'Holzmann', patterns: ['holzmann'], bank: 'ECB' },
-  { name: 'Muller', patterns: ['muller', 'müller'], bank: 'ECB' },
-  { name: 'Stournaras', patterns: ['stournaras'], bank: 'ECB' },
-  { name: 'Rehn', patterns: ['rehn'], bank: 'ECB' },
-  { name: 'Simkus', patterns: ['simkus', 'šimkus'], bank: 'ECB' },
-  { name: 'Vujčić', patterns: ['vujčić', 'vujcic'], bank: 'ECB' },
-  { name: 'Makhlouf', patterns: ['makhlouf'], bank: 'ECB' },
-  { name: 'Wunsch', patterns: ['wunsch'], bank: 'ECB' },
-];
+/** Current committee members (verified roster), labelled by surname as before. */
+const SPEAKERS = currentMembers().map(m => ({ member: m, name: m.name.split(' ').slice(-1)[0], bank: m.bank }));
 
 function computeDNA(items: SentimentItem[]): DNAProfile[] {
   const comms = items.filter(i => !i.is_statistical);
 
   return SPEAKERS.map(sp => {
     const matched = comms
-      .filter(i => i.bank === sp.bank && sp.patterns.some(p => i.title.toLowerCase().includes(p)))
+      .filter(i => i.bank === sp.bank && speakerOf(i.title, i.bank, i.item_date) === sp.member)
       .sort((a, b) => a.item_date.localeCompare(b.item_date));
 
     if (matched.length < 2) return null;

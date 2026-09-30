@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,7 +13,6 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableKey = Deno.env.get("LOVABLE_API_KEY")!;
     const sb = createClient(supabaseUrl, serviceKey);
 
     // Fetch recent comms (90 days) for both banks
@@ -151,24 +151,13 @@ ECB Features:
 - Label distribution: ${JSON.stringify(ecbFeatures.labelDist)}
 - Recent titles: ${ecbFeatures.recentTitles.map((t: any) => `${t.date}: "${t.title}" (${t.score})`).join("\n")}`;
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You are a quantitative monetary policy analyst." },
-          { role: "user", content: prompt },
-        ],
-        tools: [{
-          type: "function",
-          function: {
+    const { input: assessment } = await claudeToolCall<any>({
+      system: "You are a quantitative monetary policy analyst.",
+      user: prompt,
+      tool: {
             name: "pivot_assessment",
             description: "Return pivot probability assessment for FED and ECB",
-            parameters: {
+            input_schema: {
               type: "object",
               properties: {
                 fed: {
@@ -197,33 +186,8 @@ ECB Features:
               required: ["fed", "ecb"],
               additionalProperties: false,
             },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "pivot_assessment" } },
-      }),
+      },
     });
-
-    if (!aiResp.ok) {
-      const errText = await aiResp.text();
-      console.error("AI error:", aiResp.status, errText);
-      if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: "AI service is busy, try again in a minute", unavailable: true, rate_limited: true, upstream_status: 429 }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiResp.status === 402 || aiResp.status === 403) {
-        return new Response(JSON.stringify({ error: "AI credits are used up", unavailable: true, upstream_status: aiResp.status }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI error: ${aiResp.status}`);
-    }
-
-    const aiData = await aiResp.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("No tool call in response");
-
-    const assessment = JSON.parse(toolCall.function.arguments);
 
     const result = {
       fed: { ...assessment.fed, features: fedFeatures },
@@ -243,6 +207,9 @@ ECB Features:
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
+    if (e instanceof ClaudeUnavailable) {
+      return new Response(unavailableBody(e), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     console.error("pivot-probability error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },

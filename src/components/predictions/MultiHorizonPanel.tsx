@@ -28,7 +28,7 @@ async function fetchMultiHorizon(): Promise<HorizonForecast> {
   });
   if (!resp.ok) throw new Error(await resp.text());
   const d = await resp.json();
-  if ((d as any)?.unavailable) throw new Error((d as any).rate_limited ? 'Paused: AI service is busy, try again in a minute' : 'Paused: AI credits are used up');
+  if ((d as any)?.unavailable) throw new Error(`Paused: ${(d as any).error || 'AI service unavailable'}`);
   return d;
 }
 

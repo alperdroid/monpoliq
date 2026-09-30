@@ -1,9 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { MEETINGS_2026 } from "../_shared/scoring-weights.ts";
+import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const CACHE_HOURS = 4;   // each refresh spends web searches; market pricing is quoted a few times a day
 
 async function fredLatest(seriesId: string, apiKey: string): Promise<{ value: number; date: string } | null> {
   try {
@@ -17,190 +22,150 @@ async function fredLatest(seriesId: string, apiKey: string): Promise<{ value: nu
   } catch { return null; }
 }
 
+const prob = { type: ["number", "null"] };
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const FRED_API_KEY = Deno.env.get("FRED_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
     if (!FRED_API_KEY) throw new Error("FRED_API_KEY is not configured");
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const cacheKey = `${today}:${Math.floor(now.getUTCHours() / CACHE_HOURS)}`;
+    const force = (() => { try { return new URL(req.url).searchParams.get("force") === "1"; } catch { return false; } })();
+    if (!force) {
+      const { data: hit } = await sb.from("analysis_cache").select("result")
+        .eq("analysis_type", "market-futures").eq("bank", "ALL").eq("data_hash", cacheKey).maybeSingle();
+      if (hit?.result) return new Response(JSON.stringify(hit.result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
-    // Fetch actual current policy rates from FRED
+    // Current policy rates from FRED
     const [fedFunds, ecbRate] = await Promise.all([
       fredLatest('DFF', FRED_API_KEY),
       fredLatest('ECBDFR', FRED_API_KEY),
     ]);
+    if (!fedFunds || !ecbRate) throw new Error("FRED policy rates unavailable");
+    const ffRate = fedFunds.value;
+    const ecbDep = ecbRate.value;
 
-    const ffRate = fedFunds?.value ?? 3.64;
-    const ecbDep = ecbRate?.value ?? 2.00;
+    // Next meetings from the verified decision calendar (_shared/scoring-weights.ts)
+    const nextFomc = (MEETINGS_2026.FED || []).filter(d => d >= today).slice(0, 3);
+    const nextEcb = (MEETINGS_2026.ECB || []).filter(d => d >= today).slice(0, 3);
+    const fomcList = nextFomc.map((d, i) => `${i + 1}. FOMC ${d} — id: "ZQ_FOMC_${d.replace(/-/g, '')}"`).join('\n');
+    const ecbList = nextEcb.map((d, i) => `${i + 1}. ECB ${d} — id: "ER_ECB_${d.replace(/-/g, '')}"`).join('\n');
 
-    // Compute spot-equivalent futures prices
-    const fedSpotPrice = Math.round((100 - ffRate) * 1000) / 1000;
-    const ecbSpotPrice = Math.round((100 - ecbDep) * 1000) / 1000;
+    const prompt = `Today is ${today}. Find the CURRENT market pricing of these upcoming central bank decisions.
 
-    // 2026 meeting schedule
-    const fomcDates = ['2026-01-29','2026-03-19','2026-04-29','2026-06-11','2026-07-30','2026-09-17','2026-11-05','2026-12-17'];
-    const ecbDates = ['2026-02-05','2026-03-19','2026-04-30','2026-06-11','2026-07-23','2026-09-10','2026-10-29','2026-12-17'];
-
-    const nextFomc = fomcDates.filter(d => d >= today).slice(0, 3);
-    const nextEcb = ecbDates.filter(d => d >= today).slice(0, 3);
-
-    const fomcList = nextFomc.map((d, i) => `${i+1}. FOMC ${d} — id: "ZQ_FOMC_${d.replace(/-/g,'')}"`).join('\n');
-    const ecbList = nextEcb.map((d, i) => `${i+1}. ECB ${d} — id: "ER_ECB_${d.replace(/-/g,'')}"`).join('\n');
-
-    const prompt = `Today is ${today}. Report the current interest rate futures market pricing for these upcoming central bank meetings.
-
-VERIFIED CURRENT RATES (from FRED API, retrieved today):
-- US Federal Funds Effective Rate: ${ffRate}% (as of ${fedFunds?.date || today})
-  → Fed Funds Futures spot-equivalent price: ${fedSpotPrice} (= 100 - ${ffRate})
-  → Current Fed target range: ${(ffRate - 0.125).toFixed(2)}%–${(ffRate + 0.125).toFixed(2)}%
-- ECB Deposit Facility Rate: ${ecbDep}% (as of ${ecbRate?.date || today})
-  → €STR Futures spot-equivalent price: ${ecbSpotPrice} (= 100 - ${ecbDep})
-
-CRITICAL: The futures prices you report MUST be consistent with these verified rates:
-- For the nearest Fed meeting, the futures price should be very close to ${fedSpotPrice} (within ±0.05) if markets expect a hold
-- For the nearest ECB meeting, the futures price should be very close to ${ecbSpotPrice} if hold, or ~${(ecbSpotPrice + 0.25).toFixed(2)} if a 25bp cut is priced in
-- Further-out meetings can deviate more but must still be anchored to the current rate
+Current policy rates (FRED, verified):
+- Fed funds effective rate ${ffRate}% (as of ${fedFunds.date})
+- ECB deposit facility rate ${ecbDep}% (as of ${ecbRate.date})
 
 MEETINGS:
 FED (FOMC):
-${fomcList}
+${fomcList || "(none scheduled)"}
 
 ECB (Governing Council):
-${ecbList}
+${ecbList || "(none scheduled)"}
 
-For each meeting report: futures price, implied rate (= 100 - price), market probabilities (hike/hold/cut from FedWatch or equivalent), your AI assessment probabilities, and daily change.
+Use web search to find published market-implied probabilities from the last few days: CME FedWatch for the Fed;
+€STR / ECB OIS pricing as reported by Reuters, Bloomberg, the FT or bank research for the ECB.
 
-Rules:
-- Use exact IDs and dates above
-- Probabilities sum to 1.0
-- Prices MUST be anchored to the FRED rates above — do NOT use outdated rate levels`;
+For each meeting report:
+- market_hike_prob / market_hold_prob / market_cut_prob: ONLY figures you found in a source dated within the last 7 days.
+  If you cannot find one for a meeting, use null for all three. Never estimate or recall them from memory.
+- implied_rate: the market-implied policy rate after that meeting if published; otherwise the current rate.
+- change_24h: change in the implied rate over the last day if published, otherwise null.
+- ai_hike_prob / ai_hold_prob / ai_cut_prob: your own assessment (always filled).
+- source_note: where the market figures come from (publisher and date), or "not found".
+Probabilities are 0-1 and each set of three sums to 1. Use the exact ids and dates above.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: `You are a financial data terminal. The current Fed Funds rate is ${ffRate}% and ECB deposit rate is ${ecbDep}%. These are FACTS from FRED. All futures prices must be consistent with these current rates. Report actual market expectations based on these anchors.` },
-          { role: "user", content: prompt }
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "provide_market_data",
-              description: "Report current futures market pricing anchored to verified FRED rates",
-              parameters: {
+    const { input, sources } = await claudeToolCall<{ instruments: any[] }>({
+      system: "You are a rates-market analyst. You report market pricing only from sources you have read; when a figure is not published, you say so (null) instead of estimating it.",
+      user: prompt,
+      webSearches: 6,
+      tool: {
+        name: "provide_market_data",
+        description: "Report market pricing of the upcoming Fed and ECB decisions, with nulls where no published figure was found",
+        input_schema: {
+          type: "object",
+          properties: {
+            instruments: {
+              type: "array",
+              items: {
                 type: "object",
                 properties: {
-                  instruments: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        id: { type: "string" },
-                        name: { type: "string" },
-                        category: { type: "string", enum: ["rate_futures"] },
-                        bank: { type: "string", enum: ["FED", "ECB"] },
-                        reference_date: { type: "string" },
-                        price: { type: "number" },
-                        implied_rate: { type: "number" },
-                        change_24h: { type: "number" },
-                        market_hike_prob: { type: "number" },
-                        market_hold_prob: { type: "number" },
-                        market_cut_prob: { type: "number" },
-                        ai_hike_prob: { type: "number" },
-                        ai_hold_prob: { type: "number" },
-                        ai_cut_prob: { type: "number" },
-                      },
-                      required: ["id", "name", "category", "bank", "reference_date", "price", "implied_rate", "change_24h",
-                        "market_hike_prob", "market_hold_prob", "market_cut_prob",
-                        "ai_hike_prob", "ai_hold_prob", "ai_cut_prob"]
-                    }
-                  }
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  bank: { type: "string", enum: ["FED", "ECB"] },
+                  reference_date: { type: "string" },
+                  implied_rate: { type: "number" },
+                  change_24h: prob,
+                  market_hike_prob: prob,
+                  market_hold_prob: prob,
+                  market_cut_prob: prob,
+                  ai_hike_prob: { type: "number" },
+                  ai_hold_prob: { type: "number" },
+                  ai_cut_prob: { type: "number" },
+                  source_note: { type: "string" },
                 },
-                required: ["instruments"]
-              }
-            }
-          }
-        ],
-        tool_choice: { type: "function", function: { name: "provide_market_data" } }
-      }),
+                required: ["id", "name", "bank", "reference_date", "implied_rate", "change_24h",
+                  "market_hike_prob", "market_hold_prob", "market_cut_prob",
+                  "ai_hike_prob", "ai_hold_prob", "ai_cut_prob", "source_note"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["instruments"],
+          additionalProperties: false,
+        },
+      },
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("API error:", response.status, errorText);
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "AI service is busy, try again in a minute", unavailable: true, rate_limited: true, upstream_status: 429 }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402 || response.status === 403) {
-        return new Response(JSON.stringify({ error: "AI credits are used up", unavailable: true, upstream_status: response.status }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`API call failed: ${errorText}`);
-    }
-
-    const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall || toolCall.function?.name !== "provide_market_data") {
-      throw new Error("Invalid response format");
-    }
-
-    const result = JSON.parse(toolCall.function.arguments);
-
-    // Hard enforcement: clamp prices to be within realistic range of FRED rates
-    const instruments = (result.instruments || []).map((inst: any) => {
+    const instruments = (input.instruments || []).map((inst: any) => {
       const anchor = inst.bank === "FED" ? ffRate : ecbDep;
-      const spotPrice = 100 - anchor;
-
-      // Clamp: implied rate must be within ±100bp of current rate
-      let impliedRate = 100 - inst.price;
-      if (Math.abs(impliedRate - anchor) > 1.0) {
-        // Force back to a reasonable range
-        impliedRate = anchor;
-        inst.price = spotPrice;
-      }
-      inst.implied_rate = Math.round(impliedRate * 1000) / 1000;
+      // implied rate within ±100bp of the current rate; otherwise fall back to the current rate
+      let implied = Number(inst.implied_rate);
+      if (!Number.isFinite(implied) || Math.abs(implied - anchor) > 1.0) implied = anchor;
+      inst.category = "rate_futures";
+      inst.implied_rate = Math.round(implied * 1000) / 1000;
       inst.price = Math.round((100 - inst.implied_rate) * 1000) / 1000;
 
-      // Normalize probabilities
       for (const prefix of ['market_', 'ai_']) {
-        const sum = (inst[`${prefix}hike_prob`] || 0) + (inst[`${prefix}hold_prob`] || 0) + (inst[`${prefix}cut_prob`] || 0);
-        if (sum > 0) {
-          inst[`${prefix}hike_prob`] = Math.round(((inst[`${prefix}hike_prob`] || 0) / sum) * 100) / 100;
-          inst[`${prefix}hold_prob`] = Math.round(((inst[`${prefix}hold_prob`] || 0) / sum) * 100) / 100;
-          inst[`${prefix}cut_prob`] = Math.round(((inst[`${prefix}cut_prob`] || 0) / sum) * 100) / 100;
-        }
+        const keys = ['hike', 'hold', 'cut'].map(k => `${prefix}${k}_prob`);
+        if (keys.some(k => inst[k] == null)) { if (prefix === 'market_') for (const k of keys) inst[k] = null; continue; }
+        const sum = keys.reduce((s, k) => s + (Number(inst[k]) || 0), 0);
+        if (sum > 0) for (const k of keys) inst[k] = Math.round(((Number(inst[k]) || 0) / sum) * 100) / 100;
       }
-
       return inst;
     });
 
-    return new Response(JSON.stringify({
+    const result = {
       instruments,
       sources: {
-        fed: `CME Fed Funds Futures (current rate: ${ffRate}%, FRED:DFF as of ${fedFunds?.date || today})`,
-        ecb: `€STR Futures (current rate: ${ecbDep}%, FRED:ECBDFR as of ${ecbRate?.date || today})`,
+        fed: `Fed funds rate ${ffRate}% (FRED:DFF, ${fedFunds.date}); market probabilities from published pricing (see links)`,
+        ecb: `ECB deposit rate ${ecbDep}% (FRED:ECBDFR, ${ecbRate.date}); market probabilities from published pricing (see links)`,
       },
+      web_sources: sources.filter((s, i, a) => a.findIndex(x => x.url === s.url) === i),
       generated_at: new Date().toISOString(),
-    }), {
+    };
+
+    await sb.from("analysis_cache").upsert({
+      analysis_type: "market-futures", bank: "ALL", data_hash: cacheKey, result,
+    }, { onConflict: "analysis_type,bank,data_hash" });
+
+    return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
   } catch (error) {
+    if (error instanceof ClaudeUnavailable) {
+      return new Response(unavailableBody(error), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     console.error("Market data error:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),

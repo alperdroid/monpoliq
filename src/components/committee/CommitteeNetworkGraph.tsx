@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
+import { currentMembers, speakerOf } from '@/data/committee-roster';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 interface Node {
@@ -18,15 +19,7 @@ interface Edge {
   similarity: number;
 }
 
-const SPEAKERS = [
-  { name: 'Powell', bank: 'FED' }, { name: 'Waller', bank: 'FED' },
-  { name: 'Bowman', bank: 'FED' }, { name: 'Williams', bank: 'FED' },
-  { name: 'Cook', bank: 'FED' }, { name: 'Kugler', bank: 'FED' },
-  { name: 'Jefferson', bank: 'FED' },
-  { name: 'Lagarde', bank: 'ECB' }, { name: 'Schnabel', bank: 'ECB' },
-  { name: 'Cipollone', bank: 'ECB' }, { name: 'Lane', bank: 'ECB' },
-  { name: 'Guindos', bank: 'ECB' }, { name: 'Elderson', bank: 'ECB' },
-];
+const SPEAKERS = currentMembers().map(m => ({ member: m, name: m.name.split(' ').slice(-1)[0], bank: m.bank }));
 
 function computeGraph(items: SentimentItem[], bankFilter: string): { nodes: Node[]; edges: Edge[] } {
   const comms = items.filter(i => !i.is_statistical);
@@ -34,7 +27,7 @@ function computeGraph(items: SentimentItem[], bankFilter: string): { nodes: Node
 
   for (const sp of SPEAKERS) {
     if (bankFilter !== 'all' && sp.bank !== bankFilter) continue;
-    const matched = comms.filter(i => i.bank === sp.bank && i.title.toLowerCase().includes(sp.name.toLowerCase()));
+    const matched = comms.filter(i => i.bank === sp.bank && speakerOf(i.title, i.bank, i.item_date) === sp.member);
     if (matched.length < 2) continue;
     speakerData[sp.name] = {
       scores: matched.map(m => m.net_score),

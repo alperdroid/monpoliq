@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { currentMembers, isFomcVoter, ECB_VOTING_GROUP_1, ROSTER_VERIFIED } from '@/data/committee-roster';
 import { cn } from '@/lib/utils';
 import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,6 +27,30 @@ interface CommitteeMember {
 
 const CURRENT_YEAR = new Date().getFullYear();
 
+/** Current members, Board/Executive Board first, with FOMC voting years around the current year. */
+function rosterMembers(): CommitteeMember[] {
+  const years = [CURRENT_YEAR - 2, CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2];
+  const order: Record<string, number> = { 'fed-board': 0, 'fed-bank': 1, 'ecb-board': 0, 'ecb-ncb': 1 };
+  return currentMembers()
+    .map(m => {
+      return {
+        id: m.name,
+        name: m.name,
+        bank: m.bank,
+        role: m.role,
+        institution: m.institution,
+        is_permanent_voter: m.body === 'fed-board' || m.fedBank === 'New York',
+        voting_years: years.filter(y => isFomcVoter(m, y)),
+        is_core_board: m.body === 'fed-board' || m.body === 'ecb-board',
+        term_start: m.since ?? null,
+        term_end: m.termEnd ?? null,
+        notes: m.note ?? null,
+        _order: order[m.body],
+      };
+    })
+    .sort((a, b) => a.bank.localeCompare(b.bank) || a._order - b._order || Number(b.is_permanent_voter) - Number(a.is_permanent_voter));
+}
+
 function isVoterInYear(member: CommitteeMember, year: number): boolean {
   if (member.is_permanent_voter) return true;
   return (member.voting_years || []).includes(year);
@@ -36,20 +60,9 @@ const Committee = () => {
   const [bankFilter, setBankFilter] = useState<string>('all');
   const [yearFilter, setYearFilter] = useState<number>(CURRENT_YEAR);
 
-  const { data: members = [], isLoading } = useQuery({
-    queryKey: ['committee-members'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('committee_members')
-        .select('*')
-        .order('bank')
-        .order('is_permanent_voter', { ascending: false })
-        .order('is_core_board', { ascending: false })
-        .order('name');
-      if (error) throw new Error(error.message);
-      return (data || []) as unknown as CommitteeMember[];
-    },
-  });
+  // Current members from the verified roster (src/data/committee-roster.ts)
+  const isLoading = false;
+  const members = useMemo(() => rosterMembers(), []);
 
   const { data: allItems = [] } = useQuery({
     queryKey: ['all-sentiment-items'],
@@ -82,7 +95,7 @@ const Committee = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Inside the Committee</h1>
         <span className="text-xs text-muted-foreground font-mono">
-          {isLoading ? 'Loading…' : `${members.length} members`}
+          {isLoading ? 'Loading…' : `${members.length} members · verified ${ROSTER_VERIFIED}`}
         </span>
       </div>
 
@@ -213,7 +226,7 @@ const Committee = () => {
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               The FOMC has 12 voting members: 7 Board of Governors + NY Fed President (permanent) + 4 rotating Reserve Bank presidents.
-              The 11 non-NY presidents rotate across three groups, each voting roughly every third year. Non-voters still attend,
+              The 11 other presidents rotate in four groups: Chicago and Cleveland alternate every year, the other nine vote every third year. Non-voters still attend,
               participate in discussions, and influence the committee's thinking.
             </p>
           </div>
@@ -281,7 +294,7 @@ const Committee = () => {
               <div className="col-span-4">Notes</div>
             </div>
             {filteredEcb.filter(m => !m.is_core_board).map(member => {
-              const isGroup1 = member.notes?.includes('Group 1');
+              const isGroup1 = ECB_VOTING_GROUP_1.includes(member.institution);
               return (
                 <div key={member.id} className="grid grid-cols-12 gap-2 p-3 border-b border-border last:border-0 text-xs items-center">
                   <div className="col-span-3 font-medium truncate">{member.name}</div>
@@ -293,7 +306,7 @@ const Committee = () => {
                       </span>
                     ) : (
                       <span className="text-[9px] font-semibold text-chart-4 bg-chart-4/10 px-1.5 py-0.5 rounded-full">
-                        Group 2 (11/15)
+                        Group 2 (11/16)
                       </span>
                     )}
                   </div>
@@ -310,9 +323,9 @@ const Committee = () => {
               <h3 className="text-xs font-semibold">ECB Governing Council Rotation</h3>
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              The ECB Governing Council has 26 members: 6 Executive Board (always vote) + 20 NCB Governors (rotating).
+              The ECB Governing Council has 27 members: 6 Executive Board (always vote) + 21 NCB Governors (rotating; Bulgaria joined in 2026).
               <strong> Group 1</strong> (5 largest economies: DE, FR, IT, ES, NL) shares 4 votes — each governor votes ~80% of meetings.
-              <strong> Group 2</strong> (remaining 15 governors) shares 11 votes — each governor votes ~73% of meetings.
+              <strong> Group 2</strong> (remaining 16 governors) shares 11 votes — each governor votes ~69% of meetings.
               All governors attend and participate regardless of voting status.
             </p>
           </div>

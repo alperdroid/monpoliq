@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { Zap } from 'lucide-react';
+import { speakerOf } from '@/data/committee-roster';
 import type { SentimentItem } from '@/lib/api/sentiment';
 
 interface SurpriseAlert {
@@ -15,25 +16,9 @@ interface SurpriseAlert {
   totalSurprise: number;
 }
 
-const SPEAKER_PATTERNS = [
-  { name: 'Powell', patterns: ['powell'] },
-  { name: 'Waller', patterns: ['waller'] },
-  { name: 'Bowman', patterns: ['bowman'] },
-  { name: 'Williams', patterns: ['williams'] },
-  { name: 'Cook', patterns: ['cook'] },
-  { name: 'Kugler', patterns: ['kugler'] },
-  { name: 'Jefferson', patterns: ['jefferson'] },
-  { name: 'Lagarde', patterns: ['lagarde'] },
-  { name: 'Schnabel', patterns: ['schnabel'] },
-  { name: 'Cipollone', patterns: ['cipollone'] },
-  { name: 'Lane', patterns: ['lane'] },
-  { name: 'Guindos', patterns: ['guindos'] },
-  { name: 'Elderson', patterns: ['elderson'] },
-];
 
-function findSpeaker(title: string): string {
-  const tl = title.toLowerCase();
-  return SPEAKER_PATTERNS.find(s => s.patterns.some(p => tl.includes(p)))?.name || 'Unknown';
+function findSpeaker(item: SentimentItem): string {
+  return speakerOf(item.title, item.bank, item.item_date)?.name.split(' ').slice(-1)[0] || 'Unknown';
 }
 
 interface SurpriseIndexProps {
@@ -48,7 +33,7 @@ export function SurpriseIndex({ allItems }: SurpriseIndexProps) {
     // Compute speaker baselines
     const speakerScores: Record<string, number[]> = {};
     for (const item of comms) {
-      const speaker = findSpeaker(item.title);
+      const speaker = findSpeaker(item);
       if (!speakerScores[speaker]) speakerScores[speaker] = [];
       speakerScores[speaker].push(item.net_score);
     }
@@ -78,7 +63,7 @@ export function SurpriseIndex({ allItems }: SurpriseIndexProps) {
     const recent = comms.filter(i => i.item_date >= cs);
 
     const alerts: SurpriseAlert[] = recent.map(item => {
-      const speaker = findSpeaker(item.title);
+      const speaker = findSpeaker(item);
       const spAvg = speakerAvg[speaker] || 0;
       const bAvg = bankAvg[item.bank] || 0;
       const bStd = bankStd[item.bank] || 0.1;

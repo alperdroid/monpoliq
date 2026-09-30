@@ -6,7 +6,8 @@ import { TrendingUp, TrendingDown, Minus, Clock } from 'lucide-react';
 
 import { type MarketInstrument, fetchMarketData } from '@/lib/api/predictions';
 
-function PriceChange({ value }: { value: number }) {
+function PriceChange({ value }: { value: number | null | undefined }) {
+  if (value == null) return null;
   const color = value > 0 ? 'text-green-600' : value < 0 ? 'text-red-600' : 'text-muted-foreground';
   return (
     <span className={`text-[9px] font-mono ${color}`}>
@@ -87,16 +88,28 @@ function RateFuturesTable({ items }: { items: MarketInstrument[] }) {
               <PriceChange value={item.change_24h} />
             </TableCell>
             <TableCell className="text-center py-2">
-              <div className="text-xs font-mono">{((item.market_hike_prob ?? 0) * 100).toFixed(0)}%</div>
-              <ProbabilityDiff market={item.market_hike_prob ?? 0} ai={item.ai_hike_prob ?? 0} type="hike" />
+              {item.market_hike_prob == null ? (
+                <div className="text-xs font-mono text-muted-foreground" title="No published market pricing found">—</div>
+              ) : (<>
+                <div className="text-xs font-mono">{(item.market_hike_prob * 100).toFixed(0)}%</div>
+                <ProbabilityDiff market={item.market_hike_prob} ai={item.ai_hike_prob ?? 0} type="hike" />
+              </>)}
             </TableCell>
             <TableCell className="text-center py-2">
-              <div className="text-xs font-mono">{((item.market_hold_prob ?? 0) * 100).toFixed(0)}%</div>
-              <ProbabilityDiff market={item.market_hold_prob ?? 0} ai={item.ai_hold_prob ?? 0} type="hold" />
+              {item.market_hold_prob == null ? (
+                <div className="text-xs font-mono text-muted-foreground" title="No published market pricing found">—</div>
+              ) : (<>
+                <div className="text-xs font-mono">{(item.market_hold_prob * 100).toFixed(0)}%</div>
+                <ProbabilityDiff market={item.market_hold_prob} ai={item.ai_hold_prob ?? 0} type="hold" />
+              </>)}
             </TableCell>
             <TableCell className="text-center py-2">
-              <div className="text-xs font-mono">{((item.market_cut_prob ?? 0) * 100).toFixed(0)}%</div>
-              <ProbabilityDiff market={item.market_cut_prob ?? 0} ai={item.ai_cut_prob ?? 0} type="cut" />
+              {item.market_cut_prob == null ? (
+                <div className="text-xs font-mono text-muted-foreground" title="No published market pricing found">—</div>
+              ) : (<>
+                <div className="text-xs font-mono">{(item.market_cut_prob * 100).toFixed(0)}%</div>
+                <ProbabilityDiff market={item.market_cut_prob} ai={item.ai_cut_prob ?? 0} type="cut" />
+              </>)}
             </TableCell>
             <TableCell className="text-center py-2 text-[9px] text-muted-foreground">
               {(() => {
@@ -269,7 +282,18 @@ export function MarketSentimentTable() {
 
         <div className="mt-3 text-[10px] text-muted-foreground">
           Interest rate futures pricing • {rateFutures.length} contracts tracked
+          {marketResponse?.generated_at && <> • as of {new Date(marketResponse.generated_at).toLocaleString()}</>}
         </div>
+        {!!marketResponse?.web_sources?.length && (
+          <div className="mt-2 text-[10px] text-muted-foreground space-y-0.5">
+            <div>Market pricing sources:</div>
+            {marketResponse.web_sources.slice(0, 6).map(src => (
+              <a key={src.url} href={src.url} target="_blank" rel="noreferrer" className="block truncate underline hover:text-foreground">
+                {src.title || src.url}
+              </a>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
