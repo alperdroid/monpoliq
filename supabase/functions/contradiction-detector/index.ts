@@ -156,9 +156,19 @@ Identify the most significant contradictions (up to 5).`;
       const errText = await aiResp.text();
       console.error("AI error:", aiResp.status, errText);
       if (aiResp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited" }), {
+        return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+      if (aiResp.status === 402 || aiResp.status === 403) {
+        // Terminal (no retry). Answer 200 with an "unavailable" payload so the page degrades gracefully.
+        return new Response(JSON.stringify({
+          contradictions: [],
+          unavailable: true,
+          summary: "Contradiction analysis is paused: AI credits are used up. Add credits to re-enable it.",
+          bank,
+          upstream_status: aiResp.status,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       throw new Error(`AI error: ${aiResp.status}`);
     }

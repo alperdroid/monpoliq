@@ -20,7 +20,8 @@ interface ContradictionResult {
   contradictions: Contradiction[];
   summary: string;
   bank: string;
-  generated_at: string;
+  generated_at?: string;
+  unavailable?: boolean;
 }
 
 async function fetchContradictions(bank: string): Promise<ContradictionResult> {
@@ -32,7 +33,13 @@ async function fetchContradictions(bank: string): Promise<ContradictionResult> {
     headers: { 'Authorization': `Bearer ${anonKey}`, 'apikey': anonKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({ bank }),
   });
-  if (!resp.ok) throw new Error(await resp.text());
+  if (!resp.ok) {
+    let message = 'Contradiction analysis unavailable';
+    try { const j = await resp.json(); if (j?.error) message = j.error; } catch { /* keep default */ }
+    const err = new Error(message) as Error & { status?: number };
+    err.status = resp.status;
+    throw err;
+  }
   return resp.json();
 }
 
@@ -69,7 +76,11 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
     queryKey: ['contradictions', bank],
     queryFn: () => fetchContradictions(bank),
     staleTime: 1000 * 60 * 60,
-    retry: 1,
+    retry: (count, err) => {
+      const s = (err as { status?: number })?.status;
+      if (s && s < 500 && s !== 429) return false;
+      return count < 1;
+    },
   });
 
   if (isLoading) {
@@ -88,7 +99,7 @@ export function ContradictionFlags({ bank }: ContradictionFlagsProps) {
     return (
       <div className="text-center py-3">
         <p className="text-xs text-muted-foreground">
-          {error ? 'Contradiction analysis unavailable' : `No contradictions detected for ${bank}`}
+          {error ? (error as Error).message || 'Contradiction analysis unavailable' : data?.unavailable ? data.summary : `No contradictions detected for ${bank}`}
         </p>
       </div>
     );
