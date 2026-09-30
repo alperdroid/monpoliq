@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
+import { aiToolCall, AIUnavailable, unavailableBody } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -121,7 +121,7 @@ For each bank, produce three horizon forecasts:
 2. Meeting outcome: next meeting decision probabilities (MUST match main model above)
 3. Policy path (1-3 months): bias direction`;
 
-    const { input: forecast } = await claudeToolCall<any>({
+    const { input: forecast } = await aiToolCall<any>({
       system: "You are a quantitative monetary policy forecaster.",
       user: prompt,
       tool: {
@@ -239,7 +239,7 @@ For each bank, produce three horizon forecasts:
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    if (e instanceof ClaudeUnavailable) {
+    if (e instanceof AIUnavailable) {
       return new Response(unavailableBody(e), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     console.error("multi-horizon error:", e);

@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
+import { aiToolCall, AIUnavailable, unavailableBody } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -151,7 +151,7 @@ ECB Features:
 - Label distribution: ${JSON.stringify(ecbFeatures.labelDist)}
 - Recent titles: ${ecbFeatures.recentTitles.map((t: any) => `${t.date}: "${t.title}" (${t.score})`).join("\n")}`;
 
-    const { input: assessment } = await claudeToolCall<any>({
+    const { input: assessment } = await aiToolCall<any>({
       system: "You are a quantitative monetary policy analyst.",
       user: prompt,
       tool: {
@@ -207,7 +207,7 @@ ECB Features:
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    if (e instanceof ClaudeUnavailable) {
+    if (e instanceof AIUnavailable) {
       return new Response(unavailableBody(e), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     console.error("pivot-probability error:", e);

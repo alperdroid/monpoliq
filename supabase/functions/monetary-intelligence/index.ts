@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { publishedIndex, currentPolicyRate, MEETINGS_2026, POLICY_ACTIONS } from "../_shared/scoring-weights.ts";
-import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
+import { aiToolCall, AIUnavailable, unavailableBody } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -305,7 +305,7 @@ MINUTES LANGUAGE SHIFT INTEGRATION:
 Current date: ${new Date().toISOString().split("T")[0]}
 Consider current market expectations, geopolitical tensions, and any emerging risks that may override historical data patterns.`;
 
-    // ── 4. Ask Claude ──
+    // ── 4. Ask the model (Gemini) ──
     const decision = (desc: string) => ({
       type: "object",
       properties: {
@@ -322,10 +322,9 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
     });
     let prediction: any;
     try {
-      ({ input: prediction } = await claudeToolCall<any>({
+      ({ input: prediction } = await aiToolCall<any>({
         system: systemPrompt,
         user: userPrompt,
-        effort: "high",
         tool: {
           name: "submit_predictions",
           description: "Submit the Fed, ECB, EUR/USD and US 10Y predictions (probabilities 0-1, each bank's three summing to 1).",
@@ -364,9 +363,9 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
         },
       }));
     } catch (e) {
-      // Claude unavailable or failed: serve the last prediction rather than nothing
+      // AI unavailable or failed: serve the last prediction rather than nothing
       if (cached && cached.length > 0) {
-        console.log("Claude error, returning stale cached prediction:", e instanceof Error ? e.message : e);
+        console.log("AI error, returning stale cached prediction:", e instanceof Error ? e.message : e);
         return new Response(JSON.stringify(cached[0].predictions), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -449,7 +448,7 @@ Consider current market expectations, geopolitical tensions, and any emerging ri
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    if (e instanceof ClaudeUnavailable) {
+    if (e instanceof AIUnavailable) {
       return new Response(unavailableBody(e), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     console.error("monetary-intelligence error:", e);

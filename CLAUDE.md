@@ -25,10 +25,12 @@ supabase/functions/. The project was built with Lovable and syncs with GitHub.
 - Gemini (LOVABLE_API_KEY) is allowed ONLY for: scraping/discovery (member-remark search,
   cross-language dedup, ECB URL fallback) and SEP projections (isSepDoc path + SEP delta scoring).
   Never route other communications to scoreWithGemini().
-- The Predictions page functions (monetary-intelligence, multi-horizon, pivot-probability, market-futures) use
-  the Claude API through _shared/claude.ts (secret ANTHROPIC_API_KEY): forecasting only, never scoring.
-  market-futures takes market-implied probabilities only from published pricing found by web search (sources
-  returned in web_sources); when none is found they stay null, never estimated. Cached 4h in analysis_cache.
+- The Predictions page functions (monetary-intelligence, multi-horizon, pivot-probability, market-futures) are
+  forecasting, not scoring, and call Gemini through _shared/ai.ts: Google's Gemini API when the secret
+  GEMINI_API_KEY is set (AI Studio key, free tier; GEMINI_MODEL, default gemini-3-flash-preview), else the
+  Lovable gateway (LOVABLE_API_KEY). market-futures takes market-implied probabilities only from published
+  pricing found through Google Search grounding (sources in web_sources); without a grounded search they stay
+  null, never estimated. Cached 4h in analysis_cache.
 - Committee members (Committee/Speakers pages, speaker analytics) come from src/data/committee-roster.ts
   (verified roster with dates). Update it when a member changes; departed members keep an `until` date.
 - Items Layer 1 marks 'operational' (policy_dimensions.relevance) are never scored: they stay at 0, are

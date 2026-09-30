@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { MEETINGS_2026 } from "../_shared/scoring-weights.ts";
-import { claudeToolCall, ClaudeUnavailable, unavailableBody } from "../_shared/claude.ts";
+import { aiToolCall, AIUnavailable, unavailableBody } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -84,10 +84,10 @@ For each meeting report:
 - source_note: where the market figures come from (publisher and date), or "not found".
 Probabilities are 0-1 and each set of three sums to 1. Use the exact ids and dates above.`;
 
-    const { input, sources } = await claudeToolCall<{ instruments: any[] }>({
+    const { input, sources, grounded } = await aiToolCall<{ instruments: any[] }>({
       system: "You are a rates-market analyst. You report market pricing only from sources you have read; when a figure is not published, you say so (null) instead of estimating it.",
       user: prompt,
-      webSearches: 6,
+      webSearch: true,
       tool: {
         name: "provide_market_data",
         description: "Report market pricing of the upcoming Fed and ECB decisions, with nulls where no published figure was found",
@@ -130,10 +130,16 @@ Probabilities are 0-1 and each set of three sums to 1. Use the exact ids and dat
       const anchor = inst.bank === "FED" ? ffRate : ecbDep;
       // implied rate within ±100bp of the current rate; otherwise fall back to the current rate
       let implied = Number(inst.implied_rate);
-      if (!Number.isFinite(implied) || Math.abs(implied - anchor) > 1.0) implied = anchor;
+      if (!grounded || !Number.isFinite(implied) || Math.abs(implied - anchor) > 1.0) implied = anchor;
       inst.category = "rate_futures";
       inst.implied_rate = Math.round(implied * 1000) / 1000;
       inst.price = Math.round((100 - inst.implied_rate) * 1000) / 1000;
+      // Without a live search the model can only recall or guess market pricing: report none.
+      if (!grounded) {
+        inst.market_hike_prob = inst.market_hold_prob = inst.market_cut_prob = null;
+        inst.change_24h = null;
+        inst.source_note = "not searched (live search needs GEMINI_API_KEY)";
+      }
 
       for (const prefix of ['market_', 'ai_']) {
         const keys = ['hike', 'hold', 'cut'].map(k => `${prefix}${k}_prob`);
@@ -163,7 +169,7 @@ Probabilities are 0-1 and each set of three sums to 1. Use the exact ids and dat
     });
 
   } catch (error) {
-    if (error instanceof ClaudeUnavailable) {
+    if (error instanceof AIUnavailable) {
       return new Response(unavailableBody(error), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     console.error("Market data error:", error);
