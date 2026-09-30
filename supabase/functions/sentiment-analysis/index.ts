@@ -14,6 +14,10 @@ import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
 import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
 import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
+import {
+  FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
+  isFomcVoter, type FedSpeechSource,
+} from '../_shared/fed-speeches.ts';
 import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
   REMARK_SOURCES, GDELT_WINDOW_DAYS, remarkSurname, verifyArticle, gdeltUrl, parseGdelt, rankCandidates, daysBetween,
@@ -2307,17 +2311,22 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
 
 // ── Member communications ──
 // MEMBER_SOURCE=bis (default): BIS speech texts (euro-area NCB governors, regional Fed
-//   presidents), each with its published URL and full text. 'ai' or 'both' add the Gemini
+//   presidents) plus, for the FED, presidents' speeches from the regional banks' own sites;
+//   each with its published URL and full text. 'ai' or 'both' add the Gemini
 //   remark search, which recalls from memory and produced misdated 2024 remarks; opt-in only.
 //   'off' for none.
 async function fetchMemberCommunications(bank: string, aiKey: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
   const src = (Deno.env.get('MEMBER_SOURCE') || 'bis').toLowerCase();
   if (src === 'off') return [];
-  const [ai, bis] = await Promise.all([
+  const real = src === 'bis' || src === 'both';
+  const [ai, bis, fedSite] = await Promise.all([
     src === 'ai' || src === 'both' ? fetchMediaInterviews(bank, aiKey, existing) : Promise.resolve([] as RawComm[]),
-    src === 'bis' || src === 'both' ? fetchBisMemberSpeeches(bank, existing, cutoffDate) : Promise.resolve([] as RawComm[]),
+    real ? fetchBisMemberSpeeches(bank, existing, cutoffDate) : Promise.resolve([] as RawComm[]),
+    // Off until the admin preview has been checked: set the secret FED_SITE_SPEECHES=on.
+    real && bank === 'FED' && Deno.env.get('FED_SITE_SPEECHES') === 'on'
+      ? fetchFedSiteSpeeches(existing, cutoffDate).then(r => r.items) : Promise.resolve([] as RawComm[]),
   ]);
-  return [...bis, ...await verifyAiRemarks(ai, bank)];
+  return [...bis, ...fedSite, ...await verifyAiRemarks(ai, bank)];
 }
 
 // ── Verifying AI-found remarks against a real source (see _shared/remark-sources.ts) ──
@@ -2489,6 +2498,83 @@ async function probeMemberSources() {
   return await Promise.all(targets.map(t => probeOne(t).catch(e => ({ ...t, status: 'error', error: String(e) }))));
 }
 
+// ── Regional Fed presidents' speeches from the banks' own sites (see _shared/fed-speeches.ts) ──
+// Each call reads up to `perSource` new pages per bank, newest first, so a normal scrape stays
+// short and successive scrapes work back through the past year. Pages that are permanently not
+// usable (not the president, too old, unreadable) are remembered in analysis_cache
+// ('fed-speech-skip') so they are not fetched again. report=true reads only and writes nothing.
+interface FedSpeechRow { bank: string; url: string; result: string; speaker?: string; title?: string; date?: string | null; words?: number }
+
+async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, perSource = 3, report = false) {
+  const sbUrl = Deno.env.get('SUPABASE_URL')!, sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
+  const known = new Set<string>();
+  try {
+    const [stored, skipped] = await Promise.all([
+      fetch(`${sbUrl}/rest/v1/sentiment_items?select=url&bank=eq.FED&source=eq.${encodeURIComponent(FED_SITE_SOURCE)}&limit=10000`, { headers: hd }),
+      fetch(`${sbUrl}/rest/v1/analysis_cache?select=data_hash&analysis_type=eq.fed-speech-skip&bank=eq.FED&limit=10000`, { headers: hd }),
+    ]);
+    if (stored.ok) for (const x of await stored.json()) if (x.url) known.add(x.url);
+    if (skipped.ok) for (const x of await skipped.json()) known.add(x.data_hash);
+  } catch (e) { console.error('Fed speeches: could not load known URLs', e); }
+
+  const skip = async (url: string, reason: string) => {
+    if (report) return;
+    await fetch(`${sbUrl}/rest/v1/analysis_cache?on_conflict=analysis_type,bank,data_hash`, {
+      method: 'POST', headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ analysis_type: 'fed-speech-skip', bank: 'FED', data_hash: url, result: { reason, checked_at: new Date().toISOString() } }),
+    }).catch(() => {});
+  };
+
+  const one = async (src: FedSpeechSource) => {
+    const items: RawComm[] = [], rows: FedSpeechRow[] = [];
+    const r = await sf(src.url, 20000);
+    if (!r || !r.ok) { rows.push({ bank: src.bank, url: src.url, result: `source unavailable (${r?.status ?? 'no response'})` }); return { items, rows }; }
+    const body = await r.text();
+    const cands = (src.kind === 'feed'
+      ? feedItems(body)
+      : listingLinks(body, r.url || src.url, src.link!).map(u => ({ url: u, title: '', date: linkDate(u) })))
+      .filter(c => !known.has(c.url) && (!c.date || (c.date >= cutoffDate && isFomcVoter(src.bank, c.date))))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));                 // dated newest first; undated keep page order
+    rows.push({ bank: src.bank, url: src.url, result: `${cands.length} new candidate page(s)` });
+    let fetched = 0;
+    for (const c of cands) {
+      if (fetched >= perSource) break;
+      fetched++;
+      const pr = await sf(c.url, 15000);
+      if (!pr || !pr.ok) { rows.push({ bank: src.bank, url: c.url, result: `page unavailable (${pr?.status ?? 'no response'})` }); continue; }
+      const html = await pr.text();
+      const text = extractText(html);
+      const speaker = presidentByline(text);
+      if (!speaker) { rows.push({ bank: src.bank, url: c.url, result: 'skipped: not the president' }); await skip(c.url, 'not the president'); continue; }
+      const date = c.date || pageDate(text);
+      if (!date) { rows.push({ bank: src.bank, url: c.url, speaker, result: 'skipped: no date found' }); continue; }
+      if (date < cutoffDate) {
+        rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: older than the window' }); await skip(c.url, 'older than window');
+        if (!c.date) break;                                                         // undated listing is newest first: the rest is older
+        continue;
+      }
+      if (!isFomcVoter(src.bank, date)) {
+        rows.push({ bank: src.bank, url: c.url, speaker, date, result: `skipped: not an FOMC voter in ${date.slice(0, 4)}` });
+        await skip(c.url, 'not an FOMC voter that year');
+        continue;
+      }
+      if (!isReadableProse(text, 300)) { rows.push({ bank: src.bank, url: c.url, speaker, date, result: 'skipped: text unreadable or too short' }); await skip(c.url, 'unreadable'); continue; }
+      const title = speechTitle(speaker, c.title || pageTitle(html));
+      if (existing.has(`${title}|${date}`)) { rows.push({ bank: src.bank, url: c.url, speaker, title, date, result: 'already stored' }); continue; }
+      const words = text.split(/\s+/).length;
+      rows.push({ bank: src.bank, url: c.url, speaker, title, date, words, result: report ? 'would import' : 'import' });
+      items.push({ title, text, date, url: c.url, source: FED_SITE_SOURCE, bank: 'FED' });
+    }
+    return { items, rows };
+  };
+
+  const results = await Promise.all(FED_SPEECH_SOURCES.map(s => one(s).catch(e => ({ items: [] as RawComm[], rows: [{ bank: s.bank, url: s.url, result: 'error: ' + String(e) }] }))));
+  const items = results.flatMap(x => x.items);
+  console.log(`Fed-site president speeches: ${items.length} new`);
+  return { items, rows: results.flatMap(x => x.rows) };
+}
+
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
   const out: RawComm[] = [];
   try {
@@ -2499,6 +2585,7 @@ async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutof
     for (const m of members) {
       const date = m.delivered || m.published;
       if (!date || date < cutoffDate) continue;
+      if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
       const title = monpoliqTitle(m);
       if (existing.has(`${title}|${date}`)) continue;
       let text = await fetchPageText(m.url);
@@ -2609,7 +2696,7 @@ Deno.serve(async (req) => {
 
     // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
     //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
-    if (body.mode === 'scoring-status' || body.mode === 'rescore-frozen' || body.mode === 'resolve-remarks' || body.mode === 'probe-member-sources') {
+    if (['scoring-status', 'rescore-frozen', 'resolve-remarks', 'probe-member-sources', 'fed-speeches-report'].includes(body.mode)) {
       if (!(await isAdminRequest(req, sbUrl))) {
         return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
           status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
@@ -2628,6 +2715,15 @@ Deno.serve(async (req) => {
       const out: Record<string, unknown> = {};
       for (const b of banks) out[b] = await rescoreFrozen(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 40, 100));
       return new Response(JSON.stringify({ mode: 'rescore-frozen', run_id: run.run_id, apply: body.apply === true, result: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+    // Read-only: what the next scrapes would import from the regional Fed banks' sites.
+    //   { "mode": "fed-speeches-report", "per_source": 4, "days": 365 }
+    if (body.mode === 'fed-speeches-report') {
+      const existing = await loadExistingItems('FED', sbUrl, sbKey);
+      const r = await fetchFedSiteSpeeches(existing, cs, Math.min(body.per_source || 4, 10), true);
+      return new Response(JSON.stringify({ mode: 'fed-speeches-report', run_id: run.run_id, cutoff: cs, rows: r.rows }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }
