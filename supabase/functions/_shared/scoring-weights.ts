@@ -412,3 +412,37 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
   };
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The published index: the exact numbers the Dashboard shows (headline, comms-only,
+// stats-only), for functions that consume the stance rather than recompute it.
+// Mirrors commsWindow / publishedIndex in src/lib/scoring-weights.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const COMMS_WINDOW_DAYS = 45;
+export const STATS_WINDOW_DAYS = 60;
+
+function lastMeetingDate(bank: string, now: Date = new Date()): string | null {
+  const today = now.toISOString().split('T')[0];
+  const past = (MEETINGS_2026[bank.toUpperCase()] || []).filter(d => d <= today).sort();
+  return past.length ? past[past.length - 1] : null;
+}
+
+/** Communications in the trailing window, plus binding (tier-1) documents since the last meeting. */
+export function commsWindow<T extends WeightableItem>(items: T[], bank: string, days: number, now: Date = new Date()): T[] {
+  const cutoff = new Date(now.getTime() - days * DAY).toISOString().split('T')[0];
+  const lastMeeting = lastMeetingDate(bank, now);
+  return items.filter(i => {
+    if (i.bank !== bank.toUpperCase() || i.is_statistical) return false;
+    if (i.item_date >= cutoff) return true;
+    return !!lastMeeting && documentTier(i.source || '', i.title || '') === 1 && i.item_date >= lastMeeting;
+  });
+}
+
+/** Headline (avg), comms-only (text.avg) and stats-only (stats.avg), as on the Dashboard. */
+export function publishedIndex(items: WeightableItem[], bank: string, now: Date = new Date()): BlendResult {
+  const statCut = new Date(now.getTime() - STATS_WINDOW_DAYS * DAY).toISOString().split('T')[0];
+  const comms = commsWindow(items, bank, COMMS_WINDOW_DAYS, now);
+  const stats = items.filter(i => i.bank === bank.toUpperCase() && i.is_statistical && i.item_date >= statCut);
+  return blendedAggregate([...comms, ...stats], bank, now);
+}

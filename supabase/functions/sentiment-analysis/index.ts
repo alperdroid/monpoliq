@@ -1359,12 +1359,14 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score&bank=eq.${bank}&is_statistical=eq.false&net_score=eq.0&order=item_date.desc&limit=600`,
+      `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&net_score=eq.0&order=item_date.desc&limit=600`,
       { headers: hd },
     );
     if (!resp.ok) return 0;
-    const rows: { id: string; source: string; title: string; url: string; item_date: string }[] = await resp.json();
-    const targets = rows.filter(r => r.url && POLICY_TITLE_FOR_REPAIR.test(`${r.source} ${r.title}`)).slice(0, 8);
+    const rows: { id: string; source: string; title: string; url: string; item_date: string; reasons: string[] | null; policy_dimensions: Record<string, any> | null }[] = await resp.json();
+    // Operational items are never scored; AI-found remarks are scored only from their verified extract.
+    const targets = rows.filter(r => r.url && r.policy_dimensions?.relevance !== 'operational' && !REMARK_SOURCES.includes(r.source)
+      && POLICY_TITLE_FOR_REPAIR.test(`${r.source} ${r.title}`)).slice(0, 8);
     let fixed = 0;
     for (const r of targets) {
       const text = await fetchPageText(r.url);
@@ -1379,8 +1381,10 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
           label: ai.label,
           hawk_pts: ai.score > 0 ? Math.round(ai.score * 10) : 0,
           dove_pts: ai.score < 0 ? Math.round(-ai.score * 10) : 0,
-          reasons: ['ai:' + (ai.reasoning || 'rescored')],
+          reasons: ['ai:' + (ai.reasoning || 'rescored'), ...(r.reasons || []).filter(x => !/^ai:|^layer3:/.test(x))],
           word_count: text.split(/\s+/).length,
+          // record which scorer produced it, as on every other scored row
+          policy_dimensions: { ...(r.policy_dimensions || {}), ...(ai.dimensions || {}), ...(ai.audit ? { scoring_audit: ai.audit } : {}) },
         }),
       });
       if (patch.ok) { fixed++; console.log(`${bank}: rescored "${r.title}" (${r.item_date}) → ${ai.score}`); }
@@ -2274,14 +2278,17 @@ function ag(sub: It[], bank?: string) {
 // two scorers can be compared. apply=true also overwrites net_score / label, which
 // is what you run once, for the whole history, right before setting
 // SCORER_MODE=frozen, so speaker baselines are rebuilt on one consistent scale.
+// Speaker calibration of the score being replaced (speaker-calibration.ts); stale once net_score is rescored.
+const LEGACY_AI_FIELDS = ['speaker', 'speaker_baseline', 'speaker_sd', 'speaker_n', 'raw_score', 'deviation', 'calibrated_score'];
+
 async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: boolean, offset = 0, limit = 40): Promise<{ scored: number; skipped: number; next_offset: number | null }> {
   const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
   const resp = await fetch(
-    `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&offset=${offset}&limit=${limit}`,
+    `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&offset=${offset}&limit=${limit}`,
     { headers: hd },
   );
   if (!resp.ok) return { scored: 0, skipped: 0, next_offset: null };
-  const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; policy_dimensions: Record<string, any> | null }[] = await resp.json();
+  const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; reasons: string[] | null; policy_dimensions: Record<string, any> | null }[] = await resp.json();
   let scored = 0, skipped = 0;
   for (const r of rows) {
     const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
@@ -2299,6 +2306,10 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
     const pd = { ...(r.policy_dimensions || {}) };
     const priorAi = pd.scoring_audit?.ai_score ?? r.net_score;
     if (apply) {
+      // The calibration of the old score no longer describes this one: kept under legacy_ai for reference.
+      const legacy: Record<string, unknown> = { ...(pd.legacy_ai || {}) };
+      for (const k of LEGACY_AI_FIELDS) if (k in pd) { legacy[k] = pd[k]; delete pd[k]; }
+      if (Object.keys(legacy).length) pd.legacy_ai = legacy;
       Object.assign(pd, f.dimensions || {});                        // deterministic sub-dimensions for the UI
       pd.scoring_audit = { ...(f.audit || {}), ai_score: priorAi };   // keep the old Gemini score for reference
     } else {
@@ -2307,6 +2318,8 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
     const body: Record<string, unknown> = { policy_dimensions: pd };
     if (apply) Object.assign(body, {
       net_score: f.score, label: f.label,
+      // the frozen evidence replaces the old explanation; the Layer-1 verdict stays, the calibration note goes
+      reasons: ['ai:' + f.reasoning, ...(r.reasons || []).filter(x => !/^ai:|^layer3:/.test(x))],
       hawk_pts: f.score > 0 ? Math.round(f.score * 10) : 0, dove_pts: f.score < 0 ? Math.round(-f.score * 10) : 0,
     });
     const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {

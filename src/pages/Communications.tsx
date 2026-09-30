@@ -12,21 +12,17 @@ import { RefreshCw, ExternalLink, MessageSquare } from 'lucide-react';
 import { ContradictionFlags } from '@/components/analytics/ContradictionFlags';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { publishedIndex, type WeightableItem } from '@/lib/scoring-weights';
 
-/** Compute 45-day average from comm items only */
+/** 45-day communications index, the Dashboard's comms-only number (tier, decay and speaker-cap weighted). */
 function compute45dCommScore(items: SentimentItem[], bank: string) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 45);
-  const cs = cutoff.toISOString().split('T')[0];
-  const recent = items.filter(i => i.bank === bank && i.item_date >= cs && Math.abs(i.net_score) > 0.001);
-  if (!recent.length) return null;
+  const idx = publishedIndex(items as unknown as WeightableItem[], bank);
+  if (!idx.text.n) return null;
+  const avg = idx.text.avg;
   return {
-    avg: Math.round(recent.reduce((s, i) => s + i.net_score, 0) / recent.length * 1000) / 1000,
-    count: recent.length,
-    label: (() => {
-      const avg = recent.reduce((s, i) => s + i.net_score, 0) / recent.length;
-      return avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL';
-    })(),
+    avg,
+    count: idx.text.n,
+    label: avg <= -0.5 ? 'STRONGLY DOVISH' : avg < -0.1 ? 'DOVISH' : avg >= 0.5 ? 'STRONGLY HAWKISH' : avg > 0.1 ? 'HAWKISH' : 'NEUTRAL',
   };
 }
 

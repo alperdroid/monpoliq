@@ -4,6 +4,7 @@ import { AlertTriangle, Activity, TrendingUp, TrendingDown, Minus, MessageSquare
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import type { AIPredictionResponse } from '@/lib/api/predictions';
 import type { SentimentItem } from '@/lib/api/sentiment';
+import { publishedIndex, weightedAggregate, type WeightableItem } from '@/lib/scoring-weights';
 
 interface CIEWidgetProps {
   allItems: SentimentItem[];
@@ -31,19 +32,13 @@ export function CIEWidget({ allItems, aiPrediction, isPredictionLoading }: CIEWi
       const comms45 = comms.filter(i => i.item_date >= cs45);
       const comms7 = comms.filter(i => i.item_date >= cs7);
       const stats60 = stats.filter(i => i.item_date >= cs60);
-      const all = [...comms45, ...stats60];
 
-      const avgOf = (arr: SentimentItem[]) => {
-        const scored = arr.filter(i => Math.abs(i.net_score) > 0.001);
-        return scored.length > 0
-          ? scored.reduce((s, i) => s + i.net_score, 0) / scored.length
-          : 0;
-      };
-
-      const commsAvg45 = avgOf(comms45);
-      const commsAvg7 = avgOf(comms7);
-      const statsAvg60 = avgOf(stats60);
-      const combinedAvg = avgOf(all);
+      // Same numbers as the Dashboard headline cards: tier, decay and speaker-cap weighted.
+      const idx = publishedIndex(allItems as unknown as WeightableItem[], bank, now);
+      const commsAvg45 = idx.text.avg;
+      const commsAvg7 = weightedAggregate(comms7 as unknown as WeightableItem[], bank, now).avg;
+      const statsAvg60 = idx.stats.avg;
+      const combinedAvg = idx.avg;
 
       const cie = commsAvg45;
       const trend = commsAvg7 - commsAvg45;

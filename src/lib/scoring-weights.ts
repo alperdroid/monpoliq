@@ -361,3 +361,14 @@ export function blendedAggregate(all: WeightableItem[], bank?: string, now: Date
   };
 
 }
+
+export const COMMS_WINDOW_DAYS = 45;
+export const STATS_WINDOW_DAYS = 60;
+
+/** Headline (avg), comms-only (text.avg) and stats-only (stats.avg): the Dashboard's published index. */
+export function publishedIndex(items: WeightableItem[], bank: string, now: Date = new Date()): BlendResult {
+  const statCut = new Date(now.getTime() - STATS_WINDOW_DAYS * DAY).toISOString().split('T')[0];
+  const comms = commsWindow(items, bank, COMMS_WINDOW_DAYS, now);
+  const stats = items.filter(i => i.bank === bank.toUpperCase() && i.is_statistical && i.item_date >= statCut);
+  return blendedAggregate([...comms, ...stats], bank, now);
+}
