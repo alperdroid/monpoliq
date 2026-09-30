@@ -72,7 +72,11 @@ export function MinutesDiffCloud() {
     queryKey: ['minutes-diff', bank],
     queryFn: () => fetchMinutesDiff(bank),
     staleTime: 1000 * 60 * 30,
-    retry: 1,
+    retry: (count, err) => {
+      const s = (err as { context?: { status?: number }; status?: number })?.context?.status ?? (err as { status?: number })?.status;
+      if (s && s < 500 && s !== 429) return false;
+      return count < 1;
+    },
   });
 
   const addedTexts = new Set((data?.added || []).map(a => a.text.toLowerCase()));

@@ -149,6 +149,12 @@ Return a JSON object with this exact structure using the tool provided.`;
     if (!aiResp.ok) {
       const errText = await aiResp.text();
       console.error("AI error:", aiResp.status, errText);
+      if (aiResp.status === 402 || aiResp.status === 403) {
+        return new Response(JSON.stringify({
+          error: "Minutes comparison is paused: AI credits are used up. It will resume once credits are added.",
+          unavailable: true, upstream_status: aiResp.status,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
       throw new Error(`AI gateway error: ${aiResp.status}`);
     }
 
