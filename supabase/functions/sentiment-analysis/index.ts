@@ -18,6 +18,7 @@ import {
   FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
   isFomcVoter, pageText, metaAuthor, byPresident, type FedSpeechSource,
 } from '../_shared/fed-speeches.ts';
+import { BUNDESBANK_PRESIDENT, BUNDESBANK_SOURCE, bundesbankVerdict, titleKey } from '../_shared/bundesbank.ts';
 import { bisArchiveTargets, REGIONAL_FED_TARGETS, feedLinks, speechLinks, linkDate, dateRange, type ProbeTarget } from '../_shared/source-probe.ts';
 import {
   REMARK_SOURCES, GDELT_WINDOW_DAYS, remarkSurname, verifyArticle, gdeltUrl, parseGdelt, rankCandidates, daysBetween,
@@ -2133,6 +2134,10 @@ async function fetchRssRaw(cs: string, bank: string): Promise<RawComm[]> {
         const pub = td(ri.pubDate)!;
         const result = textResults[j];
         const pageText = result.status === 'fulfilled' ? result.value : '';
+        if (f.lbl === BUNDESBANK_SOURCE) {                   // English items by the President only (see _shared/bundesbank.ts)
+          const v = bundesbankVerdict(ri.title, pageText);
+          if (!v.keep) { console.log(`Bundesbank: skipped (${v.reason}): ${ri.title}`); continue; }
+        }
         rawComms.push({ title: ri.title, text: pageText, date: pub, url: ri.link, source: f.lbl, bank });
       }
     }
@@ -2591,6 +2596,52 @@ async function fetchFedSiteSpeeches(existing: Set<string>, cutoffDate: string, p
   return { items, rows: results.flatMap(x => x.rows) };
 }
 
+// Admin: apply the Bundesbank feed rule to rows already stored. apply=false only reports.
+//   part 'bundesbank': re-read each stored Bundesbank item; remove German copies, other board
+//     members' items and unreadable pages (paged; a removed row shifts the next page back).
+//   part 'bis': remove BIS copies of the President's speeches that the Bundesbank feed already has.
+async function bundesbankCheck(part: string, apply: boolean, offset: number, limit: number, sbUrl: string, sbKey: string) {
+  const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
+  const get = async (q: string) => { const r = await fetch(`${sbUrl}/rest/v1/sentiment_items?${q}`, { headers: hd }); return r.ok ? await r.json() : []; };
+  const remove = async (ids: string[]) => {
+    if (!apply || !ids.length) return 0;
+    const r = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=in.(${ids.join(',')})`, { method: 'DELETE', headers: { ...hd, 'Prefer': 'return=minimal' } });
+    if (!r.ok) console.error('bundesbank-check delete failed:', r.status, await r.text());
+    return r.ok ? ids.length : 0;
+  };
+  const report: { id: string; date: string; title: string; keep: boolean; reason: string; url?: string }[] = [];
+
+  if (part === 'bis') {
+    const bis: { id: string; title: string; item_date: string; url: string }[] = await get(
+      `select=id,title,item_date,url&bank=eq.ECB&source=eq.${encodeURIComponent('Member Speech (BIS)')}` +
+      `&title=ilike.${encodeURIComponent(BUNDESBANK_PRESIDENT + ':*')}&limit=500`);
+    const bb: { title: string; item_date: string }[] = await get(
+      `select=title,item_date&bank=eq.ECB&source=eq.${encodeURIComponent(BUNDESBANK_SOURCE)}&limit=2000`);
+    for (const r of bis) {
+      const k = titleKey(r.title, BUNDESBANK_PRESIDENT);
+      const dup = bb.find(b => titleKey(b.title) === k && daysBetween(b.item_date, r.item_date) <= 7);
+      report.push({ id: r.id, date: r.item_date, title: r.title, url: r.url, keep: !dup,
+        reason: dup ? `copy of Bundesbank item "${dup.title.split(' | ')[0]}"` : 'no Bundesbank copy found: kept' });
+    }
+    const removed = await remove(report.filter(x => !x.keep).map(x => x.id));
+    return { rows: report, removed, next_offset: null };
+  }
+
+  const rows: { id: string; title: string; item_date: string; url: string }[] = await get(
+    `select=id,title,item_date,url&bank=eq.ECB&source=eq.${encodeURIComponent(BUNDESBANK_SOURCE)}` +
+    `&order=item_date.desc,id.asc&offset=${offset}&limit=${limit}`);
+  for (let i = 0; i < rows.length; i += 5) {
+    const batch = rows.slice(i, i + 5);
+    const texts = await Promise.all(batch.map(r => r.url ? fetchPageText(r.url) : Promise.resolve('')));
+    batch.forEach((r, j) => {
+      const v = bundesbankVerdict(r.title, texts[j]);
+      report.push({ id: r.id, date: r.item_date, title: r.title, url: r.url, keep: v.keep, reason: v.reason });
+    });
+  }
+  const removed = await remove(report.filter(x => !x.keep).map(x => x.id));
+  return { rows: report, removed, next_offset: rows.length === limit ? offset + rows.length - removed : null };
+}
+
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
   const out: RawComm[] = [];
   try {
@@ -2602,6 +2653,7 @@ async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutof
       const date = m.delivered || m.published;
       if (!date || date < cutoffDate) continue;
       if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
+      if (/bundesbank/i.test(m.institution)) continue;                              // taken from the Bundesbank feed (with interviews)
       const title = monpoliqTitle(m);
       if (existing.has(`${title}|${date}`)) continue;
       let text = await fetchPageText(m.url);
@@ -2712,7 +2764,7 @@ Deno.serve(async (req) => {
 
     // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
     //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
-    if (['scoring-status', 'rescore-frozen', 'resolve-remarks', 'probe-member-sources', 'fed-speeches-report'].includes(body.mode)) {
+    if (['scoring-status', 'rescore-frozen', 'resolve-remarks', 'probe-member-sources', 'fed-speeches-report', 'bundesbank-check'].includes(body.mode)) {
       if (!(await isAdminRequest(req, sbUrl))) {
         return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
           status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
@@ -2731,6 +2783,15 @@ Deno.serve(async (req) => {
       const out: Record<string, unknown> = {};
       for (const b of banks) out[b] = await rescoreFrozen(b, sbUrl, sbKey, body.apply === true, body.offset || 0, Math.min(body.limit || 40, 100));
       return new Response(JSON.stringify({ mode: 'rescore-frozen', run_id: run.run_id, apply: body.apply === true, result: out }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
+    // Stored Bundesbank items vs the feed rule (English, by the President); BIS duplicates of his speeches.
+    //   { "mode": "bundesbank-check", "part": "bundesbank" | "bis", "apply": false, "offset": 0, "limit": 20 }
+    if (body.mode === 'bundesbank-check') {
+      const r = await bundesbankCheck(body.part === 'bis' ? 'bis' : 'bundesbank', body.apply === true,
+        body.offset || 0, Math.min(body.limit || 20, 30), sbUrl, sbKey);
+      return new Response(JSON.stringify({ mode: 'bundesbank-check', run_id: run.run_id, apply: body.apply === true, ...r }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }

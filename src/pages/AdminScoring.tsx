@@ -96,6 +96,36 @@ export default function AdminScoring() {
     setFedBusy(false);
   };
 
+  type BbRow = { id: string; date: string; title: string; keep: boolean; reason: string; url?: string; part: string };
+  const [bbRows, setBbRows] = useState<BbRow[] | null>(null);
+  const [bbApply, setBbApply] = useState(false);
+  const [bbConfirm, setBbConfirm] = useState(false);
+  const [bbBusy, setBbBusy] = useState(false);
+  const [bbErr, setBbErr] = useState<string | null>(null);
+  const runBundesbank = async () => {
+    setBbConfirm(false); setBbBusy(true); setBbErr(null); setBbRows([]);
+    const acc: BbRow[] = [];
+    try {
+      let offset: number | null = 0;
+      while (offset !== null) {
+        const { data, error } = await supabase.functions.invoke('sentiment-analysis', {
+          body: { mode: 'bundesbank-check', part: 'bundesbank', apply: bbApply, offset, limit: 20 },
+        });
+        if (error) throw error;
+        acc.push(...((data?.rows ?? []) as Omit<BbRow, 'part'>[]).map(r => ({ ...r, part: 'Bundesbank feed' })));
+        setBbRows([...acc]);
+        offset = data?.next_offset ?? null;
+      }
+      const { data, error } = await supabase.functions.invoke('sentiment-analysis', {
+        body: { mode: 'bundesbank-check', part: 'bis', apply: bbApply },
+      });
+      if (error) throw error;
+      acc.push(...((data?.rows ?? []) as Omit<BbRow, 'part'>[]).map(r => ({ ...r, part: 'BIS copy' })));
+      setBbRows([...acc]);
+    } catch (e) { setBbErr(String((e as Error).message || e)); }
+    setBbBusy(false);
+  };
+
   const [probing, setProbing] = useState(false);
   const [probe, setProbe] = useState<Record<string, unknown>[] | null>(null);
   const [probeErr, setProbeErr] = useState<string | null>(null);
@@ -285,6 +315,56 @@ export default function AdminScoring() {
           </div>
         )}
         {runErr && <p className="text-xs text-destructive">{runErr} — if calls time out, the batch size is too large for the function time limit.</p>}
+      </section>
+
+      {/* Bundesbank items: keep only English items by the President */}
+      <section className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <h2 className="text-sm font-semibold">Bundesbank items: check</h2>
+        <p className="text-xs text-muted-foreground leading-snug">
+          The Bundesbank feed covers its whole board and lists most items in English and German. Only the President sits
+          on the ECB Governing Council, and the frozen scorer reads English. This re-reads every stored Bundesbank item and
+          marks it keep (English, by the President) or remove (German copy, another board member, or unreadable), then
+          checks for BIS copies of his speeches that the Bundesbank feed already has. Unchecked: report only. Checked:
+          deletes the rows marked remove. Run the backfill afterwards to rescore the kept ones.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={bbApply} disabled={bbBusy} onCheckedChange={v => setBbApply(v === true)} />
+            Apply (delete rows marked remove)
+          </label>
+          <Button size="sm" disabled={bbBusy} onClick={() => (bbApply ? setBbConfirm(true) : runBundesbank())}>
+            {bbBusy ? 'Checking…' : 'Run'}
+          </Button>
+        </div>
+        {bbRows && bbRows.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-mono">
+              checked {bbRows.length} · keep {bbRows.filter(r => r.keep).length} · remove {bbRows.filter(r => !r.keep).length}
+              {bbBusy ? ' · running' : ''}
+            </p>
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground"><tr className="text-left">
+                  <th className="py-1 pr-3">Date</th><th className="pr-3">Where</th><th className="pr-3">Title</th>
+                  <th className="pr-3">Result</th><th>Reason</th>
+                </tr></thead>
+                <tbody>{bbRows.map(r => (
+                  <tr key={r.part + r.id} className="border-t border-border align-top">
+                    <td className="py-1 pr-3 font-mono whitespace-nowrap">{r.date}</td>
+                    <td className="pr-3 whitespace-nowrap">{r.part}</td>
+                    <td className="pr-3">{r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">{r.title}</a> : r.title}</td>
+                    <td className={`pr-3 whitespace-nowrap ${r.keep ? 'text-primary' : 'text-destructive'}`}>{r.keep ? 'keep' : 'remove'}</td>
+                    <td className="text-muted-foreground">{r.reason}</td>
+                  </tr>))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Full result (copy and paste this back):</p>
+            <textarea readOnly className="w-full h-32 text-[11px] font-mono rounded border border-border bg-background p-2"
+              value={JSON.stringify(bbRows.map(({ id, url, ...r }) => r), null, 1)} onFocus={e => e.currentTarget.select()} />
+          </div>
+        )}
+        {bbErr && <p className="text-xs text-destructive">{bbErr}</p>}
       </section>
 
       {/* Regional Fed presidents' speeches: preview */}
@@ -494,6 +574,22 @@ export default function AdminScoring() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={runBackfill}>{apply ? 'Overwrite' : 'Run'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bbConfirm} onOpenChange={setBbConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete the Bundesbank rows marked remove?</AlertDialogTitle>
+            <AlertDialogDescription>
+              German copies, other board members&rsquo; items, unreadable pages and BIS copies of the President&rsquo;s
+              speeches are deleted from the index. Run the backup query first if you want to be able to restore them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runBundesbank}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
