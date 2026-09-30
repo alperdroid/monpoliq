@@ -28,7 +28,7 @@ async function fetchMultiHorizon(): Promise<HorizonForecast> {
   });
   if (!resp.ok) throw new Error(await resp.text());
   const d = await resp.json();
-  if ((d as any)?.unavailable) throw new Error('Paused: AI credits are used up');
+  if ((d as any)?.unavailable) throw new Error((d as any).rate_limited ? 'Paused: AI service is busy, try again in a minute' : 'Paused: AI credits are used up');
   return d;
 }
 
@@ -121,7 +121,7 @@ export function MultiHorizonPanel() {
   if (error || !data) {
     return (
       <div className="rounded-lg border border-destructive/30 bg-card p-4 text-center">
-        <p className="text-xs text-muted-foreground">Multi-horizon forecasts unavailable{error instanceof Error && error.message.startsWith('Paused') ? ' — paused: AI credits are used up' : ''}</p>
+        <p className="text-xs text-muted-foreground">Multi-horizon forecasts unavailable{error instanceof Error && error.message.startsWith('Paused') ? ' — ' + error.message.charAt(0).toLowerCase() + error.message.slice(1) : ''}</p>
       </div>
     );
   }
