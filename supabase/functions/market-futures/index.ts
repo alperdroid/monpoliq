@@ -140,6 +140,11 @@ Rules:
     if (!response.ok) {
       const errorText = await response.text();
       console.error("API error:", response.status, errorText);
+      if (response.status === 402 || response.status === 403) {
+        return new Response(JSON.stringify({ error: "AI credits are used up", unavailable: true, upstream_status: response.status }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       throw new Error(`API call failed: ${errorText}`);
     }
 

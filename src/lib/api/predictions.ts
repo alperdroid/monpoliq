@@ -157,6 +157,7 @@ export async function fetchMarketData(): Promise<MarketDataResponse> {
   }
 
   const data = await response.json();
+  if ((data as any)?.unavailable) throw new Error('Paused: AI credits are used up');
   // Handle both old format (array) and new format (object with instruments)
   if (Array.isArray(data)) {
     return { instruments: data };
