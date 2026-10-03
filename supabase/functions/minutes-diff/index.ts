@@ -13,7 +13,6 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const apiKey = Deno.env.get("LOVABLE_API_KEY")!;
     const sb = createClient(supabaseUrl, supabaseKey);
 
     const { bank = "FED" } = await req.json().catch(() => ({ bank: "FED" }));
