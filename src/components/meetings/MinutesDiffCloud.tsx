@@ -32,7 +32,10 @@ async function fetchMinutesDiff(bank: string): Promise<MinutesDiffResult> {
   const { data, error } = await supabase.functions.invoke('minutes-diff', {
     body: { bank },
   });
-  if (error) throw error;
+  if (error) {
+    // Never let a backend failure blank the page: show a short note in the panel instead.
+    return { bank, current: null, previous: null, added: [], removed: [], summary: '', generated_at: '', error: 'Minutes comparison is temporarily unavailable, try again shortly' };
+  }
   return data as MinutesDiffResult;
 }
 
