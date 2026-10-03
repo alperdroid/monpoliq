@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { aiToolCall, AIUnavailable, unavailableBody } from "../_shared/ai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,76 +88,50 @@ Then identify which phrases are NEW (appeared in current but not previous cycle)
 
 Return a JSON object with this exact structure using the tool provided.`;
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: "You are a monetary policy language analyst specializing in central bank communications." },
-          { role: "user", content: prompt },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "minutes_diff",
-            description: "Return minutes diff analysis with phrases for current and previous meetings, plus added/removed phrases",
-            parameters: {
-              type: "object",
-              properties: {
-                current_phrases: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      text: { type: "string" },
-                      weight: { type: "number", description: "Importance weight 1-10" },
-                      category: { type: "string", enum: ["inflation", "growth", "employment", "financial_conditions", "forward_guidance", "risks", "other"] },
-                    },
-                    required: ["text", "weight", "category"],
-                  },
-                },
-                previous_phrases: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      text: { type: "string" },
-                      weight: { type: "number" },
-                      category: { type: "string", enum: ["inflation", "growth", "employment", "financial_conditions", "forward_guidance", "risks", "other"] },
-                    },
-                    required: ["text", "weight", "category"],
-                  },
-                },
-                added: {
-                  type: "array",
-                  items: { type: "object", properties: { text: { type: "string" }, significance: { type: "string" } }, required: ["text", "significance"] },
-                },
-                removed: {
-                  type: "array",
-                  items: { type: "object", properties: { text: { type: "string" }, significance: { type: "string" } }, required: ["text", "significance"] },
-                },
-                summary: { type: "string", description: "2-3 sentence summary of the key language shifts" },
-              },
-              required: ["current_phrases", "previous_phrases", "added", "removed", "summary"],
+    const phraseSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          text: { type: "string" },
+          weight: { type: "number", description: "Importance weight 1-10" },
+          category: { type: "string", enum: ["inflation", "growth", "employment", "financial_conditions", "forward_guidance", "risks", "other"] },
+        },
+        required: ["text", "weight", "category"],
+      },
+    };
+    const diffSchema = {
+      type: "array",
+      items: { type: "object", properties: { text: { type: "string" }, significance: { type: "string" } }, required: ["text", "significance"] },
+    };
+    let parsed: any;
+    try {
+      const r = await aiToolCall<any>({
+        system: "You are a monetary policy language analyst specializing in central bank communications.",
+        user: prompt,
+        tool: {
+          name: "minutes_diff",
+          description: "Return minutes diff analysis with phrases for current and previous meetings, plus added/removed phrases",
+          input_schema: {
+            type: "object",
+            properties: {
+              current_phrases: phraseSchema,
+              previous_phrases: phraseSchema,
+              added: diffSchema,
+              removed: diffSchema,
+              summary: { type: "string", description: "2-3 sentence summary of the key language shifts" },
             },
+            required: ["current_phrases", "previous_phrases", "added", "removed", "summary"],
           },
-        }],
-        tool_choice: { type: "function", function: { name: "minutes_diff" } },
-      }),
-    });
-
-    if (!aiResp.ok) {
-      const errText = await aiResp.text();
-      console.error("AI error:", aiResp.status, errText);
-      throw new Error(`AI gateway error: ${aiResp.status}`);
+        },
+      });
+      parsed = r.input;
+    } catch (e) {
+      if (e instanceof AIUnavailable) {
+        return new Response(unavailableBody(e), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      throw e;
     }
-
-    const aiData = await aiResp.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("No tool call in AI response");
-
-    const parsed = JSON.parse(toolCall.function.arguments);
 
     const result = {
       bank,
