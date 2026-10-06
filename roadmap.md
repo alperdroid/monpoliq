@@ -1,3 +1,3 @@
 - [x] Remove Scoring Inputs from the dashboard.
-- [ ] Explain and consolidate duplicate speech entries in the evidence ledger without changing scores.
-- [ ] Verify the dashboard and duplicate-document regression tests.
+- [x] Explain and consolidate duplicate speech entries in the evidence ledger without changing scores.
+- [x] Verify the dashboard and duplicate-document regression tests.
