@@ -8,6 +8,7 @@ import { documentTier, TIER_LABEL } from '@/lib/scoring-weights';
 import type { SentimentItem } from '@/lib/api/sentiment';
 import type { FrozenAudit } from '@/lib/scoring-provenance';
 import { ScoreProvenanceBadges } from '@/components/analytics/ScoreProvenanceBadges';
+import { groupEvidenceDocuments } from '@/lib/evidence-documents';
 
 const DIMS = [
   { key: 'inflation_persistence', label: 'Inflation persistence', weight: 0.45 },
@@ -128,7 +129,7 @@ function RefBadge({ loc: r }: { loc: EvidenceRef | null }) {
   );
 }
 
-function EvidenceRow({ row }: { row: Row }) {
+function EvidenceRow({ row, copies = [] }: { row: Row; copies?: SentimentItem[] }) {
   const [open, setOpen] = useState(false);
   const { item, audit, snippets } = row;
   const tier = documentTier(item.source || '', item.title || '');
@@ -153,6 +154,7 @@ function EvidenceRow({ row }: { row: Row }) {
             <span className="text-[10px] font-mono text-muted-foreground">
               {snippets.length} snippet{snippets.length === 1 ? '' : 's'}
             </span>
+            {copies.length > 1 && <span className="text-[11px] text-muted-foreground">{copies.length} source copies</span>}
           </div>
           <p className="text-[13px] font-semibold leading-snug">{item.title}</p>
         </div>
@@ -164,6 +166,16 @@ function EvidenceRow({ row }: { row: Row }) {
 
       {open && (
         <div className="border-t border-border p-3 space-y-2.5">
+          {copies.length > 1 && (
+            <div className="space-y-2 border-b border-border pb-3">
+              <p className="text-[13px] text-muted-foreground">
+                Same speech, different extracted text copies. The headline uses the original publisher's stored score; each source record is preserved below.
+              </p>
+              {copies.filter(copy => copy !== item).map(copy => (
+                <EvidenceRow key={`${copy.source}|${copy.url}`} row={rowOf(copy)} />
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             {ex?.pages ? <span>{ex.pages.toLocaleString()} page{ex.pages === 1 ? '' : 's'} extracted</span> : null}
             {ex?.words ? <span>{ex.words.toLocaleString()} words</span> : null}
@@ -294,18 +306,18 @@ export function EvidenceLedger({ allItems }: { allItems: SentimentItem[] }) {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return allItems
-      .filter(i => i.bank === bank && !i.is_statistical)
-      .map(rowOf)
-      .filter(r => r.snippets.length > 0)
-      .filter(r => !q || r.item.title.toLowerCase().includes(q) ||
-        r.snippets.some(s => s.quote.toLowerCase().includes(q)))
+    return groupEvidenceDocuments(allItems
+      .filter(i => i.bank === bank && !i.is_statistical))
+      .map(group => ({ ...rowOf(group.primary), copies: group.copies }))
+      .filter(r => r.copies.some(copy => rowOf(copy).snippets.length > 0))
+      .filter(r => !q || r.copies.some(copy => copy.title.toLowerCase().includes(q) ||
+        rowOf(copy).snippets.some(s => s.quote.toLowerCase().includes(q))))
       .sort((a, b) => (a.item.item_date < b.item.item_date ? 1 : -1));
   }, [allItems, bank, query]);
 
   const visible = showAll ? rows : rows.slice(0, 8);
-  const located = rows.reduce((n, r) => n + r.snippets.filter(s => s.ref?.page).length, 0);
-  const total = rows.reduce((n, r) => n + r.snippets.length, 0);
+  const located = rows.reduce((n, r) => n + r.copies.reduce((sum, copy) => sum + rowOf(copy).snippets.filter(s => s.ref?.page).length, 0), 0);
+  const total = rows.reduce((n, r) => n + r.copies.reduce((sum, copy) => sum + rowOf(copy).snippets.length, 0), 0);
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-sm">
@@ -353,7 +365,7 @@ export function EvidenceLedger({ allItems }: { allItems: SentimentItem[] }) {
         </p>
       ) : (
         <div className="space-y-2">
-          {visible.map(r => <EvidenceRow key={`${r.item.source}|${r.item.title}|${r.item.item_date}`} row={r} />)}
+          {visible.map(r => <EvidenceRow key={`${r.item.source}|${r.item.title}|${r.item.item_date}`} row={r} copies={r.copies} />)}
         </div>
       )}
 
