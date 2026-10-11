@@ -89,7 +89,8 @@ export function TaxonomyMatrix({ meetings }: Props) {
         for (const item of m.items) {
           const pd = (item as any).policy_dimensions as Record<string, string | null> | null;
           if (!pd || !pd[dimKey]) continue;
-          const val = pd[dimKey]!;
+           const val = pd[dimKey];
+           if (!val) continue;
           if (counts[val] !== undefined) {
             counts[val]++;
             total++;
@@ -103,18 +104,14 @@ export function TaxonomyMatrix({ meetings }: Props) {
     });
   }, [sorted]);
 
-  const hasAnyData = dimData.some(d => d.meetingDistributions.some(md => md.total > 0));
-
-  if (!hasAnyData) {
-    return (
-      <p className="text-xs text-muted-foreground italic py-4">
-        No taxonomy data yet — click <strong>"Run Taxonomy Analysis"</strong> to classify communications.
-      </p>
-    );
-  }
-
   return (
     <div className="space-y-5">
+      {sorted.filter(m => !m.items.some(item => Object.keys(DIMENSIONS).some(key => typeof item.policy_dimensions?.[key] === 'string'))).map(m => (
+        <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 text-[13px]">
+          <span className="font-medium">{m.label.split('—')[0].trim()}</span>
+          <span className="text-muted-foreground">{m.items.length ? 'Statement awaiting classification' : 'Official statement not yet retrieved'}</span>
+        </div>
+      ))}
       {dimData.map(({ dimKey, dim, valKeys, meetingDistributions }) => {
         const anyData = meetingDistributions.some(md => md.total > 0);
         if (!anyData) return null;
