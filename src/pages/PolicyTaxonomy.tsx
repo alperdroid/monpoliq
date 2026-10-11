@@ -5,7 +5,7 @@ import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { TaxonomyMatrix } from '@/components/meetings/TaxonomyMatrix';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Loader2, Layers } from 'lucide-react';
+import { Loader2, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 import { hasTaxonomyDimensions, statementItemsForMeeting, taxonomyCacheKey } from '../../supabase/functions/_shared/policy-taxonomy';

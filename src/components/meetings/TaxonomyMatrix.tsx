@@ -104,8 +104,6 @@ export function TaxonomyMatrix({ meetings }: Props) {
     });
   }, [sorted]);
 
-  const hasAnyData = dimData.some(d => d.meetingDistributions.some(md => md.total > 0));
-
   return (
     <div className="space-y-5">
       {sorted.filter(m => !m.items.some(item => Object.keys(DIMENSIONS).some(key => typeof item.policy_dimensions?.[key] === 'string'))).map(m => (
