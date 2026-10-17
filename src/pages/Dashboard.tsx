@@ -278,6 +278,24 @@ const Dashboard = () => {
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-semibold">Sentiment Fluctuation (Monthly Avg)</h3>
+            <div className="ml-auto">
+              {user ? (
+                <button
+                  type="button"
+                  onClick={downloadIndexHistory}
+                  className="text-[10px] uppercase tracking-wider text-primary border border-primary/25 hover:bg-primary/10 px-2 py-1 rounded transition-colors font-medium"
+                >
+                  <Download className="w-3 h-3 inline mr-1" /> Download CSV
+                </button>
+              ) : (
+                <Link
+                  to="/login"
+                  className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-primary border border-border px-2 py-1 rounded transition-colors font-medium"
+                >
+                  Sign in to download
+                </Link>
+              )}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={fluctuationData}>
