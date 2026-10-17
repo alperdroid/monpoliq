@@ -75,6 +75,21 @@ function monthlyAverages(items: SentimentItem[], bank?: string) {
 
 
 const Dashboard = () => {
+  const { user } = useAuth();
+  const downloadIndexHistory = () => {
+    const rows = allMonths.map(month => [
+      month,
+      fedMonthly.find(m => m.month === month)?.avg ?? '',
+      fedMonthly.find(m => m.month === month)?.count ?? 0,
+      ecbMonthly.find(m => m.month === month)?.avg ?? '',
+      ecbMonthly.find(m => m.month === month)?.count ?? 0,
+    ]);
+    downloadCsv(
+      rows,
+      ['month', 'fed_index', 'fed_items', 'ecb_index', 'ecb_items'],
+      `monpol-index-history-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+  };
   const { data: allItems = [] } = useQuery({
     queryKey: ['all-sentiment-items'],
     queryFn: () => getCachedSentimentItems(),
