@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { downloadCsv } from '@/lib/download-csv';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { BankPanel } from '@/components/dashboard/BankPanel';
@@ -17,7 +19,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, Brain } from 'lucide-react';
+import { TrendingUp, Brain, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
 import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
@@ -73,6 +75,21 @@ function monthlyAverages(items: SentimentItem[], bank?: string) {
 
 
 const Dashboard = () => {
+  const { user } = useAuth();
+  const downloadIndexHistory = () => {
+    const rows = allMonths.map(month => [
+      month,
+      fedMonthly.find(m => m.month === month)?.avg ?? '',
+      fedMonthly.find(m => m.month === month)?.count ?? 0,
+      ecbMonthly.find(m => m.month === month)?.avg ?? '',
+      ecbMonthly.find(m => m.month === month)?.count ?? 0,
+    ]);
+    downloadCsv(
+      rows,
+      ['month', 'fed_index', 'fed_items', 'ecb_index', 'ecb_items'],
+      `monpol-index-history-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+  };
   const { data: allItems = [] } = useQuery({
     queryKey: ['all-sentiment-items'],
     queryFn: () => getCachedSentimentItems(),
@@ -261,6 +278,24 @@ const Dashboard = () => {
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-primary" />
             <h3 className="text-sm font-semibold">Sentiment Fluctuation (Monthly Avg)</h3>
+            <div className="ml-auto">
+              {user ? (
+                <button
+                  type="button"
+                  onClick={downloadIndexHistory}
+                  className="text-[10px] uppercase tracking-wider text-primary border border-primary/25 hover:bg-primary/10 px-2 py-1 rounded transition-colors font-medium"
+                >
+                  <Download className="w-3 h-3 inline mr-1" /> Download CSV
+                </button>
+              ) : (
+                <Link
+                  to="/login"
+                  className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-primary border border-border px-2 py-1 rounded transition-colors font-medium"
+                >
+                  Sign in to download
+                </Link>
+              )}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={fluctuationData}>
