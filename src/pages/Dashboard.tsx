@@ -3,7 +3,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { downloadCsv } from '@/lib/download-csv';
 import { indexHistoryRows, monthlyAverages } from '@/lib/index-history';
 import { Button } from '@/components/ui/button';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { BankPanel } from '@/components/dashboard/BankPanel';
 import { PredictionPanel } from '@/components/dashboard/PredictionPanel';
@@ -11,6 +13,7 @@ import { SignalBadge } from '@/components/analytics/SignalBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   getCachedSentimentItems,
+  getIndexHistoryItems,
   type SentimentItem,
 } from '@/lib/api/sentiment';
 import {
@@ -52,14 +55,26 @@ function computeAvg(items: SentimentItem[]) {
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const downloadIndexHistory = () => {
-    if (!user) return;
-    const rows = indexHistoryRows(allItems);
-    downloadCsv(
-      rows,
-      ['month', 'fed_index', 'fed_items', 'ecb_index', 'ecb_items'],
-      `monpol-index-history-${new Date().toISOString().slice(0, 10)}.csv`,
-    );
+  const queryClient = useQueryClient();
+  const [downloading, setDownloading] = useState(false);
+  // The page loads the last two years; the export reads every scored item back to 2015 (light columns).
+  const downloadIndexHistory = async () => {
+    if (!user || downloading) return;
+    setDownloading(true);
+    try {
+      const history = await queryClient.fetchQuery({
+        queryKey: ['index-history-items'], queryFn: getIndexHistoryItems, staleTime: 1000 * 60 * 30,
+      });
+      downloadCsv(
+        indexHistoryRows(history),
+        ['month', 'fed_index', 'fed_items', 'ecb_index', 'ecb_items'],
+        `monpol-index-history-${new Date().toISOString().slice(0, 10)}.csv`,
+      );
+    } catch (e) {
+      toast.error(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDownloading(false);
+    }
   };
   const { data: allItems = [] } = useQuery({
     queryKey: ['all-sentiment-items'],
@@ -256,9 +271,10 @@ const Dashboard = () => {
                   variant="outline"
                   size="sm"
                   onClick={downloadIndexHistory}
+                  disabled={downloading}
                   className="text-[10px] uppercase tracking-wider text-primary border border-primary/25 hover:bg-primary/10 px-2 py-1 rounded transition-colors font-medium"
                 >
-                  <Download className="w-3 h-3 inline mr-1" /> Download CSV
+                  <Download className="w-3 h-3 inline mr-1" /> {downloading ? 'Preparing…' : 'Download CSV'}
                 </Button>
               ) : (
                 <Link

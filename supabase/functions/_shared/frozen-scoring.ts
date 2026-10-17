@@ -1,15 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Layer 2 switch: combines the frozen scorer with the existing Gemini scorer.
+// Layer 2: every communication is scored by the frozen scorer, and only by it.
 //
-// SCORER_MODE (Supabase secret / env var)
-//   ai           today's behaviour: Gemini sets net_score. Frozen not run.
-//   shadow       Gemini sets net_score; frozen score is computed and stored in
-//                policy_dimensions.scoring_audit.frozen for side-by-side comparison.
-//                ← start here for 2-4 weeks, then compare on the methodology page.
-//   frozen       frozen scorer sets net_score; Gemini still runs for the three
-//                sub-dimensions, the narrative reasoning, and as a third opinion.
-//   frozen-only  frozen scorer only; no Gemini call for SCORING. (Gemini may still be used
-//                elsewhere for scraping, and SEP projections keep their Gemini path.)
+// The frozen scorer (frozen-scorer.ts + its bundles) is deterministic: the same
+// text always gets the same score. No LLM sets, adjusts or blends a score. The
+// SCORER_MODE secret (ai | shadow | frozen | frozen-only) is retired: whatever it
+// says, scoring runs as 'frozen-only'.
 //
 // Nothing downstream changes: the result keeps the AIScore shape, so relevance
 // filtering (Layer 1) and speaker calibration / tiers / decay / speaker cap /
@@ -17,11 +12,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { scoreText, DIM_VERSION, type DocClass, type FrozenScore } from './frozen-scorer.ts';
 
-export type ScorerMode = 'ai' | 'shadow' | 'frozen' | 'frozen-only';
+export type ScorerMode = 'frozen-only';
 
+/** Always 'frozen-only'. The SCORER_MODE secret no longer switches scoring to Gemini. */
 export function scorerMode(): ScorerMode {
-  const m = (globalThis as any).Deno?.env.get('SCORER_MODE') ?? 'shadow';
-  return (['ai', 'shadow', 'frozen', 'frozen-only'].includes(m) ? m : 'shadow') as ScorerMode;
+  return 'frozen-only';
 }
 
 /** Minimal shape shared with sentiment-analysis/index.ts AIScore. */
@@ -77,40 +72,10 @@ function evidenceText(f: FrozenScore): string {
   return parts.join(' | ');
 }
 
-/**
- * Wraps the existing Gemini scorer. `gemini` is the original scoreWithAI
- * (renamed scoreWithGemini) bound to its arguments.
- */
-export async function scoreCombined(
-  text: string,
-  gemini: () => Promise<ScoreLike>,
-  mode: ScorerMode = scorerMode(),
-  docClass: DocClass = 'general',
-): Promise<ScoreLike> {
-  if (mode === 'ai') return gemini();
-
+/** Scores a document with the frozen scorer. A document with no policy sentences stays unscored (0). */
+export function scoreCombined(text: string, docClass: DocClass = 'general'): ScoreLike {
+  const mode = scorerMode();
   const f = scoreText(text, 0.1, docClass);
-  if (mode === 'frozen-only') {
-    if (!f.scored) return { score: 0, label: 'neutral', reasoning: 'not scored — no policy-relevant sentences', audit: { frozen: frozenAudit(f) } };
-    return { score: f.net_score, label: f.label, reasoning: evidenceText(f), dimensions: f.dimensions, audit: uiAudit(f, mode) };
-  }
-
-  let ai: ScoreLike;
-  try { ai = await gemini(); } catch { ai = { score: 0, label: 'neutral', reasoning: 'ai error' }; }
-
-  const disagree = f.scored && Math.abs(ai.score) > 0.2 && Math.abs(f.net_score) > 0.2 &&
-                   Math.sign(ai.score) !== Math.sign(f.net_score);
-  const audit = { ...(ai.audit || {}), mode, frozen: frozenAudit(f), ai_score: ai.score, ai_label: ai.label, disagreement: disagree };
-
-  if (mode === 'shadow' || !f.scored) {
-    return { ...ai, audit };
-  }
-  // mode === 'frozen'
-  return {
-    score: f.net_score,
-    label: f.label,
-    reasoning: evidenceText(f) + (ai.reasoning ? ` || ai: ${ai.reasoning}` : ''),
-    dimensions: ai.dimensions,          // sub-dimensions still come from Gemini
-    audit,
-  };
+  if (!f.scored) return { score: 0, label: 'neutral', reasoning: 'not scored — no policy-relevant sentences', audit: { frozen: frozenAudit(f) } };
+  return { score: f.net_score, label: f.label, reasoning: evidenceText(f), dimensions: f.dimensions, audit: uiAudit(f, mode) };
 }

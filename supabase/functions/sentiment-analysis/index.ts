@@ -1,19 +1,24 @@
-// ── Sentiment Analysis v4.0 — AI-Powered + Press Conferences + Dedup ──
-// Communication items scored by Gemini AI for contextual understanding.
-// Statistical items use numeric formula scoring.
+// ── Sentiment Analysis — frozen scorer + press conferences + dedup + history from 2015 ──
+// Communication items are scored by the frozen scorer only (no LLM sets a score).
+// Statistical items use numeric formula scoring; SEP documents the change in FOMC median projections (FRED).
 // Consumer Expectations Surveys → reclassified as statistical.
 // Fed Funds excluded (it's the target variable, not a predictor).
 // Duplicate inflation prints within same month → counted once.
-// FOMC & ECB press conference transcripts now scraped and analyzed.
-// Aggregation: dynamic time-decay × contextual document tier × surprise-weighted stats.
+// FOMC & ECB press conference transcripts scraped and analyzed; admin mode backfill-history imports 2015 onwards.
+// Aggregation: dynamic time-decay × contextual document tier × statistical reliability.
 
 import { weightedAggregate, blendedAggregate, documentTier } from '../_shared/scoring-weights.ts';
-import { applyConsensusSurprise } from '../_shared/consensus-surprise.ts';
 import { partitionForScoring } from '../_shared/relevance-filter.ts';
 import { applySpeakerCalibration } from '../_shared/speaker-calibration.ts';
-import { detectForwardGuidance, type GuidanceResult } from '../_shared/forward-guidance.ts';
 import { scoreCombined, scorerMode } from '../_shared/frozen-scoring.ts';
-import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle } from '../_shared/member-sources.ts';
+import { SEP_SERIES, parseVintageRows, compareSep, scoreSEPDelta, type VintageRow } from '../_shared/sep-projections.ts';
+import { fomcMeetingsBetween, ecbMeetingsBetween } from '../_shared/meeting-calendar.ts';
+import {
+  parseFedSpeechIndex, fedSpeechTitle, parseEcbIndex, isEcbDecision, ecbBoardSpeaker, ecbSpeechTitle,
+  bisReviewUrl, parseBisReviewPage, coversWindow, type EcbLink,
+} from '../_shared/history-sources.ts';
+import { ECB_SERIES, ecbDataUrl, parseEcbCsv, ecbRows, balanceSheetYoY, releaseDate, type Obs } from '../_shared/stat-series.ts';
+import { BIS_FEED, parseBisRss, classifyMember, monpoliqTitle, isEuroAreaMember, type BisItem } from '../_shared/member-sources.ts';
 import {
   FED_SPEECH_SOURCES, FED_SITE_SOURCE, feedItems, listingLinks, pageDate, presidentByline, pageTitle, speechTitle,
   isFomcVoter, pageText, metaAuthor, byPresident, type FedSpeechSource,
@@ -336,19 +341,6 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
 /** Real page boundary marker inside extracted document text. */
 export const PAGE_SEP = '\f';
 
-export interface EvidenceRef {
-  /** 1-based page number (PDFs); 1 for single-page HTML documents. */
-  page: number;
-  /** 1-based sentence-line index within that page. */
-  line: number;
-  /** Character offset of the quote inside the full extracted text. */
-  char_start: number;
-  /** The full sentence-line the quote sits in, for context. */
-  context: string;
-  /** Total pages in the extracted document. */
-  pages: number;
-}
-
 // ── Scoring provenance ──────────────────────────────────────────────────────
 // Every published score must be traceable to the exact text version it was
 // computed from, the parser settings that produced that text, and the run that
@@ -401,65 +393,6 @@ export function beginRun(mode: string): RunMeta {
   return RUN;
 }
 export function currentRun(): RunMeta { return RUN; }
-
-
-const normalize = (s: string) => s.toLowerCase().replace(/[\u2018\u2019\u201c\u201d]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
-const splitLines = (s: string) => s.split(/(?<=[.?!])\s+/).map(l => l.trim()).filter(Boolean);
-
-/**
- * Locate a verbatim evidence quote inside the extracted document text and
- * return a citable page/line reference. The model often stitches several
- * sentences together with "...", so each fragment is tried separately, longest
- * first. Matching runs on normalized text (case, quotes and punctuation are
- * ignored) and the normalized hit is mapped back to the sentence-line it sits
- * in. If nothing can be matched the reference is omitted rather than guessed.
- */
-export function locateEvidence(quote: string, fullText: string): EvidenceRef | null {
-  if (!quote || !fullText) return null;
-  const fragments = [quote, ...quote.split(/\.\.\.|…/)]
-    .map(f => normalize(f))
-    .filter(f => f.length >= 15)
-    .sort((a, b) => b.length - a.length);
-  if (fragments.length === 0) return null;
-
-  const pages = fullText.split(PAGE_SEP);
-  let consumed = 0;
-  for (let p = 0; p < pages.length; p++) {
-    const pageText = pages[p];
-    const lines = splitLines(pageText);
-    // Normalized page text plus the normalized start offset of every line, so a
-    // quote spanning a sentence break still resolves to its opening line.
-    const normLines = lines.map(normalize);
-    const starts: number[] = [];
-    let acc = 0;
-    for (const nl of normLines) { starts.push(acc); acc += nl.length + 1; }
-    const normPage = normLines.join(' ');
-
-    for (const frag of fragments) {
-      const keys = [frag, frag.slice(0, 60), frag.slice(0, 30)];
-      let hit = -1;
-      for (const k of keys) {
-        if (k.length < 15) continue;
-        hit = normPage.indexOf(k);
-        if (hit >= 0) break;
-      }
-      if (hit < 0) continue;
-      let line = 0;
-      for (let i = 0; i < starts.length; i++) if (starts[i] <= hit) line = i;
-      const rawAt = pageText.indexOf(lines[line]);
-      return {
-        page: p + 1,
-        line: line + 1,
-        char_start: consumed + (rawAt >= 0 ? rawAt : 0),
-        context: lines.slice(line, line + 2).join(' ').slice(0, 600),
-        pages: pages.length,
-      };
-    }
-    consumed += pageText.length + PAGE_SEP.length;
-  }
-  return null;
-}
-
 
 
 /**
@@ -556,262 +489,16 @@ function xn(title: string): number | null {
 }
 
 // ══════════════════════════════════════════════════════════════
-// ── AI-POWERED SCORING via Gemini (Lovable AI Gateway) ──
+// ── LAYER 2: SCORING — frozen scorer only, no LLM ──
 // ══════════════════════════════════════════════════════════════
-
-const AI_SCORING_PROMPT = `You are a senior monetary policy analyst. Score this central bank communication on the hawkish-dovish spectrum.
-
-CRITICAL — READ THE CONCLUSIONS, NOT JUST THE TOPIC:
-- A blog titled "Lower inflation, weaker activity" is DOVISH because the CONCLUSION is weaker economy and falling prices — even if it discusses tariffs.
-- A blog about tariffs is NOT automatically hawkish. Read what the authors CONCLUDE about the impact on the economy.
-- Focus on the POLICY IMPLICATIONS the authors draw, not just the subject matter.
-
-ENERGY / SUPPLY-SIDE RISKS:
-- "Risks to price stability" from energy, fossil fuels, or supply shocks = UPSIDE INFLATION RISK = HAWKISH (not dovish!)
-- Discussions warning that commodity dependence or supply disruptions could push prices higher are HAWKISH signals
-- Green transition advocacy WITHOUT direct monetary policy implications → score near 0.0 (structural topic)
-- Only score energy topics as dovish if the conclusion is that energy prices are FALLING or will ease inflation
-
-SCORING RULES:
-- Score from -1.0 (extremely dovish) to +1.0 (extremely hawkish), with 0.0 being neutral
-- DEFAULT TO NEUTRAL: if the conclusion is mixed, balanced, conditional, or not explicitly directional → score in [-0.15, +0.15].
-- Reserve scores beyond ±0.5 for unambiguous, explicit hike/cut signals, dissents, or strong directional guidance.
-- Do NOT inflate to hawkish just because the text mentions inflation, tariffs, supply shocks, or "vigilance" — score it hawkish ONLY if the speaker concludes tighter policy / longer-for-longer is warranted.
-- Symmetric calibration: mentions of disinflation, growth weakness, or downside risks should be scored dovish with the same threshold strictness.
-- DOVISH signals (-0.2 to -1.0): rate cuts, easing bias, weak growth concerns, disinflation, labor softening, dissent favoring cuts, downside risks, falling inflation forecasts
-- HAWKISH signals (+0.2 to +1.0): explicit rate hikes/holds-for-longer, tightening bias, persistent inflation concern with policy implication, upside risks to inflation linked to a policy response
-- NEUTRAL (near 0.0): administrative matters, non-monetary topics (digital euro, climate structural reform, banking supervision, counterfeit notes, appointments, green transition without policy implications), data-dependent language without direction
-- Government deficit/fiscal policy discussions: score near 0.0 unless they explicitly discuss monetary policy responses
-- If the speech is NOT about monetary policy, score 0.0
-- Pay attention to DISSENT: if a speaker dissented in favor of cutting, that's very dovish
-- Pay attention to NUANCE: "data-dependent" alone is neutral; "data-dependent and we see progress" leans dovish
-
-ENTITY-LEVEL SUB-DIMENSIONS (Layer 2) — score each on the FIXED anchor ladder below.
-Do not free-hand a number: pick the anchor whose description the text actually matches, and only
-move ±0.1 off an anchor to reflect how emphatic the wording is.
-
-ANCHOR LADDER (identical for all three dimensions):
-   0.0  → the text does not address this dimension, or is genuinely two-sided on it
-  ±0.2  → mentioned once, hedged or conditional ("could", "some", "we are watching")
-  ±0.5  → stated as the speaker's assessment of the current situation, unhedged
-  ±0.8  → stated as the dominant concern of the document, repeated or quantified
-  ±1.0  → stated as the binding reason for the policy decision itself
-
-1. inflation_persistence — where the text puts price pressure (HICP/PCE, wages, expectations).
-   POSITIVE (+) = pressure is persistent, above target, broadening, or expectations drifting up.
-   NEGATIVE (−) = disinflation on track, pressure fading, expectations anchored or falling.
-   +1.0 example: "inflation is too high and that is why we raised rates today"
-   −0.5 example: "underlying inflation has continued to ease as we expected"
-
-2. policy_stance — how restrictive the speaker frames current or needed policy.
-   POSITIVE (+) = keep restrictive, higher-for-longer, hike, resist cutting, dissent for a hike.
-   NEGATIVE (−) = easing bias, cut delivered or signalled, policy seen as too tight, dissent for a cut.
-   +1.0 example: a delivered hike or "we are not close to cutting"
-   −1.0 example: a delivered cut or "further easing will be appropriate"
-   HOLD RULES (apply strictly — a hold is a continuation, not a new signal):
-     • Announcing an unchanged rate, on its own, is 0.0. The words "maintain the target range"
-       or "keep rates unchanged" carry NO directional score by themselves.
-     • Only go beyond ±0.2 on a hold if the text adds explicit forward direction:
-       ±0.2 hedged direction ("we can be patient", "we are watching"),
-       ±0.5 unhedged direction ("rates will need to stay at these levels for some time" / "cuts are coming"),
-       ±0.8/±1.0 only if that direction is the dominant, repeated message of the document.
-     • Voting record adjustment: dissents in favour of cutting push this dimension DOWN
-       (−0.2 for one or two dissenters, −0.3 if three or more); dissents for hiking push it up
-       by the same amounts. Apply this after picking the anchor, then clamp to [−1, +1].
-     • Never score a hold positive merely because the current level is described as restrictive.
-
-
-3. growth_labor_drag — the state of demand and the labour market as the speaker describes it.
-   POSITIVE (+) = economy resilient, labour market tight, demand robust (i.e. no case for easing).
-   NEGATIVE (−) = growth slowing, unemployment rising, recession or downside risk emphasised.
-   +0.5 example: "the labour market remains solid"
-   −0.8 example: "hiring has slowed markedly and downside risks have increased"
-
-Quote the words you scored from: for each non-zero dimension put a short verbatim snippet in
-"evidence". The headline score must be consistent with the dimensions you report.
-
-Respond with ONLY a JSON object (no markdown):
-{"score": <number>, "label": "hawkish"|"dovish"|"neutral", "reasoning": "<1 sentence>",
- "dimensions": {"inflation_persistence": <number>, "policy_stance": <number>, "growth_labor_drag": <number>},
- "evidence": {"inflation_persistence": "<quote or empty>", "policy_stance": "<quote or empty>", "growth_labor_drag": "<quote or empty>"}}`;
-
-
-// ── Deterministic hold guard + forward-guidance override ────────────────────
-// A decision to keep rates unchanged is a continuation, not a new directional
-// signal. The policy_stance dimension is therefore capped at ±0.2 on hold
-// documents UNLESS the scored passage contains explicit forward-policy
-// language (see _shared/forward-guidance.ts) pointing in the same direction as
-// the score. Dissents are then applied mechanically from the vote split.
-const HOLD_ANNOUNCEMENT = /\b(maintain|maintaining|keep|keeping|leave|leaving|left|unchanged|no change)\b[^.]{0,80}\b(target range|rate|rates|policy rate|federal funds)\b|\b(target range|rates?)\b[^.]{0,40}\b(unchanged|at its current level)\b/i;
-const HOLD_TITLE = /statement|monetary policy decision|press conf|minutes|account/i;
-const HOLD_CAP = 0.2;
-
-/** Text around the quote, so guidance one sentence away still counts. */
-function quoteContext(quote: string, fullText: string, radius = 700): string {
-  if (!quote || !fullText) return quote || '';
-  const needle = quote.slice(0, 60);
-  const i = fullText.indexOf(needle);
-  if (i < 0) return quote;
-  return fullText.slice(Math.max(0, i - radius), i + needle.length + radius);
-}
-
-function applyHoldGuard(
-  stance: number,
-  quote: string,
-  fullText: string,
-  title: string,
-): { value: number; notes: string[]; guidance: GuidanceResult } {
-  const notes: string[] = [];
-  const guidance = detectForwardGuidance(quoteContext(quote, fullText));
-  if (!HOLD_TITLE.test(title)) return { value: stance, notes, guidance };
-  let v = stance;
-
-  const isHold = HOLD_ANNOUNCEMENT.test(quote);
-  if (isHold && Math.abs(v) > HOLD_CAP) {
-    const aligned =
-      guidance.found &&
-      guidance.direction !== 'ambiguous' &&
-      Math.sign(v) === (guidance.direction === 'hawkish' ? 1 : -1);
-    if (!aligned) {
-      v = Math.sign(v) * HOLD_CAP;
-      notes.push(
-        guidance.found
-          ? `forward guidance reads ${guidance.direction} but the stance score points the other way → capped at ±${HOLD_CAP.toFixed(2)}`
-          : `hold announcement with no explicit forward-policy language → capped at ±${HOLD_CAP.toFixed(2)}`,
-      );
-    } else {
-      // Only explicit guidance lifts the clamp; conditional guidance lifts it
-      // part-way (mid-point between the cap and the model's score).
-      if (guidance.strength < 1) {
-        v = Math.sign(v) * (HOLD_CAP + (Math.abs(v) - HOLD_CAP) * guidance.strength);
-        notes.push(`conditional ${guidance.direction} guidance ("${guidance.cues[0].phrase}") → clamp lifted partially`);
-      } else {
-        notes.push(`explicit ${guidance.direction} forward guidance ("${guidance.cues[0].phrase}") → clamp overridden`);
-      }
-    }
-  }
-
-  // Vote split, e.g. "by a 9 to 3 vote": dissenters move the stance against the
-  // majority. Direction of dissent is read from nearby cut/hike wording.
-  const vote = /\b(\d{1,2})\s*(?:to|-|–)\s*(\d{1,2})\s*vote\b/i.exec(fullText);
-  if (vote) {
-    const dissent = Math.min(Number(vote[1]), Number(vote[2]));
-    if (dissent >= 1) {
-      const window = fullText.slice(Math.max(0, vote.index - 400), vote.index + 900);
-      const forCut = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(lower|cut|reduc)/i.test(window);
-      const forHike = /(dissent|preferred|voted against|favou?red)[^.]{0,120}\b(higher|hike|increas|raise)/i.test(window);
-      const step = dissent >= 3 ? 0.3 : 0.2;
-      if (forCut && !forHike) { v -= step; notes.push(`${dissent} dissent(s) favouring easing → −${step.toFixed(2)}`); }
-      else if (forHike && !forCut) { v += step; notes.push(`${dissent} dissent(s) favouring tightening → +${step.toFixed(2)}`); }
-    }
-  }
-  v = Math.round(Math.max(-1, Math.min(1, v)) * 1000) / 1000;
-  return { value: v, notes, guidance };
-}
-
-
-// ── Standardization layer (auditable, deterministic) ──
-// The model returns a headline score AND three sub-dimension scores. We do NOT
-// take the headline at face value: we recompute a deterministic composite from
-// the dimensions with fixed published weights and average the two. The stored
-// score is therefore reproducible from numbers the UI can show.
-export const SCORING_PROMPT_VERSION = 'v6.2-forward-guidance-2026-08';
-export const DIMENSION_WEIGHTS = {
-  inflation_persistence: 0.45,
-  policy_stance: 0.40,
-  growth_labor_drag: 0.15,
-} as const;
-/** Blend of the model's own headline vs the dimension composite. */
-export const AI_HEADLINE_WEIGHT = 0.5;
-/** Scores inside this band are published as exactly neutral. */
-export const NEUTRAL_BAND = 0.10;
 
 interface AIScore {
   score: number;
   label: string;
   reasoning: string;
-  dimensions?: { inflation_persistence: number; policy_stance: number; growth_labor_drag: number };
-  /** Technical audit trail for the UI: how the published score was derived. */
-  audit?: {
-    model: string;
-    prompt_version: string;
-    temperature: number;
-    ai_headline: number;
-    dimension_composite: number;
-    weights: typeof DIMENSION_WEIGHTS;
-    ai_headline_weight: number;
-    neutral_band: number;
-    input_chars: number;
-    published: number;
-    /** Verbatim snippet the model scored each dimension from. */
-    evidence?: { inflation_persistence: string; policy_stance: string; growth_labor_drag: string };
-    /** Page/line reference of each snippet inside the extracted document. */
-    evidence_refs?: Partial<Record<'inflation_persistence' | 'policy_stance' | 'growth_labor_drag', EvidenceRef>>;
-    /** Extraction provenance for the panel: pages found, words extracted, chars sent. */
-    extraction?: { pages: number; words: number; doc_chars: number; sampled: boolean };
-    /** Hold-guard record: the model's raw stance and which adjustments were applied. */
-    stance_adjustments?: { raw_policy_stance: number; applied: string[] };
-    /** Forward-guidance detector output: what lifted (or failed to lift) the hold clamp. */
-    forward_guidance?: GuidanceResult;
-    /**
-     * Full provenance chain: which text version, produced by which reader and
-     * parser settings, sampled how, scored by which run.
-     */
-    provenance?: {
-      text_sha256: string;
-      text_chars: number;
-      extractor: string;
-      extractor_version: string;
-      parser_settings: typeof PARSER_SETTINGS;
-      prose_gate_min_words: number;
-      sampling: { budget: number; begin: number; middle: number; end: number; sampled: boolean; sent_chars: number };
-      source_url?: string;
-      http_status?: number;
-      content_type?: string;
-      fetched_at?: string;
-      run_id: string;
-      run_mode: string;
-      run_started_at: string;
-      attempt: number;
-      scored_at: string;
-    };
-
-  };
-}
-
-
-
-// Detect if an item is a major policy document that needs stronger AI model
-function isPolicyDocForScoring(title: string, source: string): boolean {
-  const tl = (title + ' ' + source).toLowerCase();
-  const keywords = [
-    'minutes', 'accounts', 'account', 'press conf', 'statement',
-    'monetary policy', 'fomc', 'governing council',
-  ];
-  return keywords.some(k => tl.includes(k));
-}
-
-// Layer 2 entry point. Every communication (statements, minutes, press conferences,
-// accounts, speeches, interviews, member remarks) is scored here; SCORER_MODE decides
-// whether the frozen scorer or Gemini sets net_score (see _shared/frozen-scoring.ts).
-async function scoreWithAI(
-  title: string,
-  text: string,
-  bank: string,
-  apiKey: string,
-  source?: string,
-): Promise<AIScore> {
-  const mode = scorerMode();
-  // SEP documents are projection tables, not prose: they keep the Gemini path
-  // (and are later overwritten by the SEP delta scoring, which also uses Gemini to read the tables).
-  if (isSepDoc(title, source || '') && apiKey) return await scoreWithGemini(title, text, bank, apiKey, source);
-  if (!apiKey && mode !== 'frozen-only') {
-    // no Gemini key: fall back to the deterministic scorer rather than skip the document
-    return await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: 'no ai key' }), 'frozen-only',
-      isDecisionDoc(title, source || '') ? 'decision' : 'general') as AIScore;
-  }
-  const docClass = isDecisionDoc(title, source || '') ? 'decision' : 'general';
-  return await scoreCombined(text, () => scoreWithGemini(title, text, bank, apiKey, source), mode, docClass) as AIScore;
+  dimensions?: Record<string, number>;
+  /** Technical audit trail for the UI: the frozen scorer's evidence plus extraction provenance. */
+  audit?: Record<string, any>;
 }
 
 // Decision documents (FOMC statement, ECB "Monetary policy decisions" press release) are scored
@@ -826,238 +513,39 @@ function isSepDoc(title: string, source: string): boolean {
   return /fomc sep|summary of economic projections/i.test(`${source} ${title}`);
 }
 
-async function scoreWithGemini(
-  title: string,
-  text: string,
-  bank: string,
-  apiKey: string,
-  source?: string,
-): Promise<AIScore> {
-  const isPolicy = isPolicyDocForScoring(title, source || '');
-
-  // Nothing is ever scored on unusable text: a document whose extraction failed
-  // is returned as unscored so the aggregate ignores it, instead of letting the
-  // model invent a lean it cannot support.
-  if (!isReadableProse(text, isPolicy ? 200 : 40)) {
-    return {
-      score: 0,
-      label: 'neutral',
-      reasoning: 'not scored — the source text could not be extracted as readable prose',
-    };
+// Layer 2 entry point. Every communication (statements, minutes, press conferences, accounts,
+// speeches, interviews, member remarks, surveys) is scored here, by the frozen scorer only
+// (_shared/frozen-scoring.ts). SEP documents are projection tables, not prose: they are scored
+// from the change in the FOMC median projections (scoreSepFromFred), never from the text.
+async function scoreDocument(title: string, text: string, source = ''): Promise<AIScore> {
+  if (isSepDoc(title, source)) {
+    return { score: 0, label: 'neutral', reasoning: 'SEP: scored from the change in median projections (sep_delta), not from the text' };
   }
-
-  let truncated: string;
-  const budget = isPolicy ? 24000 : 6000;
-  const beginLen = isPolicy ? 14000 : 3000;
-  const midLen = isPolicy ? 6000 : 1500;
-  const endLen = isPolicy ? 4000 : 1500;
-  if (text.length <= budget) {
-    truncated = text;
-  } else {
-    // Long documents (press conferences, minutes): sample beginning + middle + end.
-    // The opening carries the decision and guidance, the Q&A carries the nuance.
-    const mid = Math.floor(text.length / 2);
-    truncated = text.slice(0, beginLen) +
-      '\n...[middle section truncated]...\n' +
-      text.slice(mid - Math.floor(midLen / 2), mid + Math.floor(midLen / 2)) +
-      '\n...[late section truncated]...\n' +
-      text.slice(-endLen);
+  // Nothing is ever scored on unusable text: a document whose extraction failed stays unscored.
+  // Same gate as the frozen rescore (rescoreFrozen), so live, history and rescored items agree.
+  if (!isReadableProse(text || '', 40)) {
+    return { score: 0, label: 'neutral', reasoning: 'not scored — the source text could not be extracted as readable prose' };
   }
-
-  // Identity of the exact text version scored, plus how it was obtained.
-  const textSha = await textFingerprint(text);
-  const extractionMeta = EXTRACTIONS.get(textSha);
-  const run = currentRun();
-
-
-  // Add special instructions for policy documents
-  let policyPreamble = '';
-  if (isPolicy) {
-    policyPreamble = `\n\nIMPORTANT: This is an official central bank policy document. Read the supplied text carefully and base the score ONLY on what it actually says:
-- Rate decisions (cut/hold/hike) and the vote split
-- Forward guidance language ("appropriate stance", "data-dependent", "further adjustment")
-- Risk assessments (upside/downside)
-- Dissent or disagreement among members
-- Inflation/growth outlook changes
-Quote-level evidence is required: the "reasoning" field must cite the specific wording from the text that drove the score. Such documents normally carry a clear signal (±0.2 to ±0.8), but NEVER assume a direction. If the supplied text is garbled, incomplete, or contains no policy content, return score 0 with reasoning stating that the text could not be analysed — do not guess a lean and do not justify a score by referring to these instructions.`;
-  }
-
-
-  const userMsg = `Bank: ${bank}
-Title: ${title}${policyPreamble}
-Content: ${truncated}`;
-
-  // Use stronger model for policy documents, lighter model for routine items
-  const model = isPolicy ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
-
-  // Policy documents get several attempts — a rate-limited gateway must never
-  // leave a binding statement/decision sitting at a bogus 0 score.
-  const attempts = isPolicy ? 4 : 2;
-  let lastErr = 'AI scoring unavailable';
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1)));
-    try {
-      const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          // Deterministic decoding: the same document must always produce the
-          // same score, otherwise the published number is not reproducible.
-          temperature: 0,
-          messages: [
-            { role: 'system', content: AI_SCORING_PROMPT },
-            { role: 'user', content: userMsg },
-          ],
-        }),
-      });
-
-      if (!resp.ok) {
-        console.error(`AI scoring failed (attempt ${attempt + 1}/${attempts}):`, resp.status, title.slice(0, 60));
-        lastErr = 'AI scoring unavailable';
-        continue;
-      }
-
-      const data = await resp.json();
-      let content = data.choices?.[0]?.message?.content || '';
-      content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-      const parsed = JSON.parse(content);
-      const cl = (v: unknown) => Math.round(Math.max(-1, Math.min(1, Number(v) || 0)) * 1000) / 1000;
-      const d = parsed.dimensions || {};
-      const dims = {
-        inflation_persistence: cl(d.inflation_persistence),
-        policy_stance: cl(d.policy_stance),
-        growth_labor_drag: cl(d.growth_labor_drag),
-      };
-
-      const rawStance = dims.policy_stance;
-      const rawEv = parsed.evidence || {};
-      const guard = applyHoldGuard(
-        rawStance,
-        typeof rawEv.policy_stance === 'string' ? rawEv.policy_stance : '',
-        text || '',
-        title || '',
-      );
-      dims.policy_stance = guard.value;
-
-      const aiHeadline = cl(parsed.score);
-      const composite = cl(
-        dims.inflation_persistence * DIMENSION_WEIGHTS.inflation_persistence +
-        dims.policy_stance * DIMENSION_WEIGHTS.policy_stance +
-        dims.growth_labor_drag * DIMENSION_WEIGHTS.growth_labor_drag,
-      );
-      const hasDims = Math.abs(dims.inflation_persistence) + Math.abs(dims.policy_stance) + Math.abs(dims.growth_labor_drag) > 0.001;
-      let score = hasDims
-        ? cl(AI_HEADLINE_WEIGHT * aiHeadline + (1 - AI_HEADLINE_WEIGHT) * composite)
-        : aiHeadline;
-      if (Math.abs(score) < NEUTRAL_BAND) score = 0;
-      const label = score > 0 ? 'hawkish' : score < 0 ? 'dovish' : 'neutral';
-
-      const ev = parsed.evidence || {};
-      const q = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 240) : '');
-      const evidence = {
-        inflation_persistence: q(ev.inflation_persistence),
-        policy_stance: q(ev.policy_stance),
-        growth_labor_drag: q(ev.growth_labor_drag),
-      };
-      // Cite each quote back to where it actually sits in the source document.
-      const evidence_refs: Record<string, EvidenceRef> = {};
-      for (const k of Object.keys(evidence) as (keyof typeof evidence)[]) {
-        const ref = evidence[k] ? locateEvidence(evidence[k], text) : null;
-        if (ref) evidence_refs[k] = ref;
-      }
-
-      return {
-        score,
-        label,
-        reasoning: parsed.reasoning || '',
-        dimensions: dims,
-        audit: {
-          model,
-          prompt_version: SCORING_PROMPT_VERSION,
-          temperature: 0,
-          ai_headline: aiHeadline,
-          dimension_composite: composite,
-          weights: DIMENSION_WEIGHTS,
-          stance_adjustments: guard.notes.length ? { raw_policy_stance: rawStance, applied: guard.notes } : undefined,
-          forward_guidance: {
-            found: guard.guidance.found,
-            direction: guard.guidance.direction,
-            strength: guard.guidance.strength,
-            cues: guard.guidance.cues,
-          },
-          ai_headline_weight: AI_HEADLINE_WEIGHT,
-          neutral_band: NEUTRAL_BAND,
-          input_chars: truncated.length,
-          published: score,
-          evidence,
-          evidence_refs,
-          extraction: {
-            pages: text.split(PAGE_SEP).length,
-            words: text.split(/\s+/).filter(Boolean).length,
-            doc_chars: text.length,
-            sampled: truncated.length < text.length,
-          },
-          provenance: {
-            text_sha256: textSha,
-            text_chars: text.length,
-            extractor: extractionMeta?.extractor ?? 'unknown',
-            extractor_version: extractionMeta?.extractor_version ?? 'n/a',
-            parser_settings: PARSER_SETTINGS,
-            prose_gate_min_words: isPolicy
-              ? PARSER_SETTINGS.prose_gate_min_words.policy
-              : PARSER_SETTINGS.prose_gate_min_words.other,
-            sampling: {
-              budget,
-              begin: beginLen,
-              middle: midLen,
-              end: endLen,
-              sampled: truncated.length < text.length,
-              sent_chars: truncated.length,
-            },
-            source_url: extractionMeta?.url,
-            http_status: extractionMeta?.http_status,
-            content_type: extractionMeta?.content_type,
-            fetched_at: extractionMeta?.fetched_at,
-            run_id: run.run_id,
-            run_mode: run.mode,
-            run_started_at: run.started_at,
-            attempt: attempt + 1,
-            scored_at: new Date().toISOString(),
-          },
-        },
-
-      };
-
-
-    } catch (e) {
-      console.error(`AI score parse error (attempt ${attempt + 1}/${attempts}):`, e);
-      lastErr = 'AI scoring error';
-    }
-  }
-  return { score: 0, label: 'neutral', reasoning: lastErr };
+  const s = scoreCombined(text, isDecisionDoc(title, source) ? 'decision' : 'general') as AIScore;
+  const sha = await textFingerprint(text);
+  const meta = EXTRACTIONS.get(sha);
+  s.audit = {
+    ...(s.audit || {}),
+    provenance: {
+      text_sha256: sha, text_chars: text.length,
+      extractor: meta?.extractor ?? 'unknown', extractor_version: meta?.extractor_version ?? 'n/a', parser_settings: PARSER_SETTINGS,
+      source_url: meta?.url, http_status: meta?.http_status, content_type: meta?.content_type, fetched_at: meta?.fetched_at,
+      run_id: RUN.run_id, run_mode: RUN.mode, run_started_at: RUN.started_at, scored_at: new Date().toISOString(),
+    },
+  };
+  return s;
 }
 
-async function scoreBatchWithAI(
-  items: { title: string; text: string; bank: string; source?: string }[],
-  apiKey: string,
-): Promise<AIScore[]> {
+async function scoreDocuments(items: { title: string; text: string; bank: string; source?: string }[]): Promise<AIScore[]> {
   const results: AIScore[] = [];
-  for (let i = 0; i < items.length; i += 3) {
-    const batch = items.slice(i, i + 3);
-    const batchResults = await Promise.allSettled(
-      batch.map(item => scoreWithAI(item.title, item.text, item.bank, apiKey, item.source))
-    );
-    for (const r of batchResults) {
-      results.push(r.status === 'fulfilled' ? r.value : { score: 0, label: 'neutral', reasoning: 'error' });
-    }
-    if (i + 3 < items.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+  for (const item of items) {
+    try { results.push(await scoreDocument(item.title, item.text, item.source)); }
+    catch { results.push({ score: 0, label: 'neutral', reasoning: 'error' }); }
   }
   return results;
 }
@@ -1066,207 +554,95 @@ async function scoreBatchWithAI(
 // ── SEP DELTA SCORING — Compare projections between meetings ──
 // ══════════════════════════════════════════════════════════════
 
-interface SEPProjections {
-  gdp_current: number | null;
-  gdp_next: number | null;
-  unemployment_current: number | null;
-  unemployment_next: number | null;
-  pce_current: number | null;
-  pce_next: number | null;
-  core_pce_current: number | null;
-  core_pce_next: number | null;
-  fed_funds_current: number | null;
-  fed_funds_next: number | null;
-  fed_funds_longer_run: number | null;
+// The projections come from FRED/ALFRED (FRED_API_KEY), not from reading the tables:
+// see _shared/sep-projections.ts. The delta formula itself is unchanged.
+const SEP_ROWS = new Map<string, VintageRow[]>();
+
+async function sepRows(fredKey: string): Promise<Record<string, VintageRow[]> | null> {
+  const ids = Object.values(SEP_SERIES).flat().filter(id => !SEP_ROWS.has(id));
+  await Promise.allSettled(ids.map(async id => {
+    const r = await sf(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${fredKey}` +
+      '&file_type=json&realtime_start=2014-01-01&realtime_end=9999-12-31', 20000);
+    if (!r || !r.ok) return;
+    SEP_ROWS.set(id, parseVintageRows(await r.json()));
+  }));
+  return SEP_ROWS.size ? Object.fromEntries(SEP_ROWS) : null;
 }
 
-const SEP_EXTRACTION_PROMPT = `You are an expert at reading FOMC Summary of Economic Projections (SEP) tables.
+interface SepScore { score: number; label: string; reasons: string[]; policy_dimensions: Record<string, unknown> }
 
-Extract the MEDIAN projections from this SEP document. The document contains tables with projections for:
-- Change in real GDP (%)
-- Unemployment rate (%)
-- PCE inflation (%)
-- Core PCE inflation (%)
-- Federal funds rate (%)
-
-For each variable, extract the median value for:
-- "current_year" = the year the meeting is in
-- "next_year" = the following year
-- "longer_run" = only for federal funds rate
-
-IMPORTANT: Look for the MEDIAN row in each table. The median is typically the middle value.
-If the text is garbled or you cannot reliably extract numbers, use null.
-
-Respond with ONLY a JSON object (no markdown):
-{
-  "gdp_current": <number or null>,
-  "gdp_next": <number or null>,
-  "unemployment_current": <number or null>,
-  "unemployment_next": <number or null>,
-  "pce_current": <number or null>,
-  "pce_next": <number or null>,
-  "core_pce_current": <number or null>,
-  "core_pce_next": <number or null>,
-  "fed_funds_current": <number or null>,
-  "fed_funds_next": <number or null>,
-  "fed_funds_longer_run": <number or null>
-}`;
-
-async function extractSEPProjections(text: string, meetingDate: string, apiKey: string): Promise<SEPProjections | null> {
-  if (!apiKey) return null;
-  try {
-    const truncated = text.length > 8000 ? text.slice(0, 8000) : text;
-    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'system', content: SEP_EXTRACTION_PROMPT },
-          { role: 'user', content: `Meeting date: ${meetingDate}\n\nSEP Document:\n${truncated}` },
-        ],
-      }),
-    });
-    if (!resp.ok) { console.error('SEP extraction AI failed:', resp.status); return null; }
-    const data = await resp.json();
-    let content = data.choices?.[0]?.message?.content || '';
-    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const parsed = JSON.parse(content);
-    const values = [parsed.gdp_current, parsed.unemployment_current, parsed.pce_current, parsed.core_pce_current, parsed.fed_funds_current];
-    const nonNull = values.filter((v: any) => v !== null && v !== undefined);
-    if (nonNull.length < 2) { console.log('SEP extraction got too few values (' + nonNull.length + '), skipping'); return null; }
-    console.log('SEP projections extracted for ' + meetingDate + ': GDP=' + parsed.gdp_current + ', UE=' + parsed.unemployment_current + ', PCE=' + parsed.pce_current + ', CorePCE=' + parsed.core_pce_current + ', FFR=' + parsed.fed_funds_current);
-    return parsed as SEPProjections;
-  } catch (e) { console.error('SEP extraction error:', e); return null; }
-}
-
-function scoreSEPDelta(current: SEPProjections, previous: SEPProjections): { score: number; label: string; reasons: string[] } {
-  const deltas: { name: string; delta: number; direction: string; weight: number }[] = [];
-  if (current.gdp_current != null && previous.gdp_current != null) deltas.push({ name: 'GDP current yr', delta: current.gdp_current - previous.gdp_current, direction: 'hh', weight: 2 });
-  if (current.gdp_next != null && previous.gdp_next != null) deltas.push({ name: 'GDP next yr', delta: current.gdp_next - previous.gdp_next, direction: 'hh', weight: 1.5 });
-  if (current.unemployment_current != null && previous.unemployment_current != null) deltas.push({ name: 'UE current yr', delta: current.unemployment_current - previous.unemployment_current, direction: 'lh', weight: 2 });
-  if (current.unemployment_next != null && previous.unemployment_next != null) deltas.push({ name: 'UE next yr', delta: current.unemployment_next - previous.unemployment_next, direction: 'lh', weight: 1.5 });
-  if (current.pce_current != null && previous.pce_current != null) deltas.push({ name: 'PCE current yr', delta: current.pce_current - previous.pce_current, direction: 'hh', weight: 3 });
-  if (current.pce_next != null && previous.pce_next != null) deltas.push({ name: 'PCE next yr', delta: current.pce_next - previous.pce_next, direction: 'hh', weight: 2 });
-  if (current.core_pce_current != null && previous.core_pce_current != null) deltas.push({ name: 'Core PCE current yr', delta: current.core_pce_current - previous.core_pce_current, direction: 'hh', weight: 3.5 });
-  if (current.core_pce_next != null && previous.core_pce_next != null) deltas.push({ name: 'Core PCE next yr', delta: current.core_pce_next - previous.core_pce_next, direction: 'hh', weight: 2.5 });
-  if (current.fed_funds_current != null && previous.fed_funds_current != null) deltas.push({ name: 'FFR current yr', delta: current.fed_funds_current - previous.fed_funds_current, direction: 'hh', weight: 3 });
-  if (current.fed_funds_next != null && previous.fed_funds_next != null) deltas.push({ name: 'FFR next yr', delta: current.fed_funds_next - previous.fed_funds_next, direction: 'hh', weight: 2.5 });
-  if (current.fed_funds_longer_run != null && previous.fed_funds_longer_run != null) deltas.push({ name: 'FFR longer-run', delta: current.fed_funds_longer_run - previous.fed_funds_longer_run, direction: 'hh', weight: 2 });
-
-  if (deltas.length === 0) return { score: 0, label: 'neutral', reasons: ['No comparable projections found'] };
-
-  let weightedSum = 0, totalWeight = 0;
-  const reasons: string[] = [];
-  for (const d of deltas) {
-    let rawSignal = d.delta / 0.3; // 0.3pp normalizer
-    if (d.direction === 'lh') rawSignal = -rawSignal;
-    rawSignal = Math.max(-1, Math.min(1, rawSignal));
-    weightedSum += rawSignal * d.weight;
-    totalWeight += d.weight;
-    if (Math.abs(d.delta) >= 0.05) {
-      const dir = (d.direction === 'hh' ? (d.delta > 0 ? '↑hawk' : '↓dove') : (d.delta > 0 ? '↓dove' : '↑hawk'));
-      reasons.push(`${d.name}: ${d.delta > 0 ? '+' : ''}${d.delta.toFixed(1)}pp ${dir}`);
-    }
+/** Score of the SEP published on `sepDate` (YYYY-MM-DD); null when FRED cannot be reached (retry next run). */
+async function scoreSepFromFred(sepDate: string, fredKey: string): Promise<SepScore | null> {
+  if (!fredKey) return null;
+  const rows = await sepRows(fredKey);
+  if (!rows) return null;
+  const cmp = compareSep(rows, sepDate);
+  if (!cmp) {
+    return { score: 0, label: 'neutral', reasons: ['sep_delta: no FRED projections for this SEP'],
+      policy_dimensions: { sep_source: 'fred-alfred', sep_projections: null } };
   }
-  const score = Math.round((weightedSum / totalWeight) * 1000) / 1000;
-  const clampedScore = Math.max(-1, Math.min(1, score));
-  const label = clampedScore > 0.05 ? 'hawkish' : clampedScore < -0.05 ? 'dovish' : 'neutral';
-  if (reasons.length === 0) reasons.push('Minimal changes from previous SEP');
-  return { score: clampedScore, label, reasons };
+  const d = scoreSEPDelta(cmp.current, cmp.previous);
+  return {
+    score: d.score, label: d.label, reasons: d.reasons.map(r => 'sep_delta:' + r),
+    policy_dimensions: { sep_source: 'fred-alfred', sep_projections: cmp.current, sep_previous: cmp.previous, sep_series: cmp.series },
+  };
 }
 
-async function runSEPDeltaScoring(sbUrl: string, sbKey: string, apiKey: string): Promise<{ updated: number }> {
+/** Scores every stored SEP not yet scored from FRED (this also replaces the old Gemini-read projections). */
+async function runSEPDeltaScoring(sbUrl: string, sbKey: string, fredKey: string): Promise<{ updated: number }> {
+  if (!fredKey) return { updated: 0 };
+  const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
   const resp = await fetch(
-    `${sbUrl}/rest/v1/sentiment_items?select=id,title,item_date,net_score,policy_dimensions,reasons&source=eq.FOMC SEP&order=item_date.asc&limit=50`,
-    { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
+    `${sbUrl}/rest/v1/sentiment_items?select=id,item_date,policy_dimensions&source=eq.FOMC SEP&order=item_date.asc&limit=200`,
+    { headers: hd },
   );
   if (!resp.ok) return { updated: 0 };
-  const sepItems = await resp.json();
-  if (!sepItems || sepItems.length === 0) return { updated: 0 };
-  console.log('SEP delta scoring: ' + sepItems.length + ' SEP items found');
-
-  let extractCount = 0;
-  for (const item of sepItems) {
-    const dims = item.policy_dimensions;
-    if (dims && dims.sep_projections && Object.values(dims.sep_projections).some((v: any) => v !== null)) continue;
-    const dateMatch = item.title.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (!dateMatch) continue;
-    const dateStr = dateMatch[3] + dateMatch[1] + dateMatch[2];
-
-    let sepText = '';
-    const sepHtmlUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl' + dateStr + '.htm';
-    const htmlResp = await sf(sepHtmlUrl, 12000);
-    if (htmlResp && htmlResp.ok) {
-      const html = await htmlResp.text();
-      if (!html.toLowerCase().includes('page not found') && html.length > 1000) sepText = extractText(html);
-    }
-    if (sepText.length < 500) {
-      const pdfUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
-      const pdfResp = await sf(pdfUrl, 15000);
-      if (pdfResp && pdfResp.ok) {
-        const ct = pdfResp.headers.get('content-type') || '';
-        if (ct.includes('pdf')) {
-          const buf = await pdfResp.arrayBuffer();
-          const decoder = new TextDecoder('latin1');
-          const raw = decoder.decode(new Uint8Array(buf));
-          const parenRe = /\(([^)]*)\)/g; let pm;
-          while ((pm = parenRe.exec(raw)) !== null) {
-            const t = pm[1].replace(/\\n/g, '\n').replace(/\\\(/g, '(').replace(/\\\)/g, ')');
-            if (t.length > 1) sepText += t + ' ';
-          }
-          sepText = sepText.replace(/\s+/g, ' ').trim();
-        }
-      }
-    }
-    if (sepText.length < 200) continue;
-    const projections = await extractSEPProjections(sepText, item.item_date, apiKey);
-    if (!projections) continue;
-    const newDims = { ...(dims || {}), sep_projections: projections };
-    await fetch(sbUrl + '/rest/v1/sentiment_items?id=eq.' + item.id, {
-      method: 'PATCH',
-      headers: { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ policy_dimensions: newDims }),
-    });
-    item.policy_dimensions = newDims;
-    extractCount++;
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  console.log('SEP projections extracted for ' + extractCount + ' items');
-
+  const items: { id: string; item_date: string; policy_dimensions: Record<string, unknown> | null }[] = await resp.json();
   let updated = 0;
-  for (let i = 1; i < sepItems.length; i++) {
-    const current = sepItems[i], previous = sepItems[i - 1];
-    const currProj = current.policy_dimensions?.sep_projections;
-    const prevProj = previous.policy_dimensions?.sep_projections;
-    if (!currProj || !prevProj) continue;
-    const deltaResult = scoreSEPDelta(currProj, prevProj);
-    console.log('SEP delta ' + current.item_date + ' vs ' + previous.item_date + ': score=' + deltaResult.score + ' (' + deltaResult.label + ') — ' + deltaResult.reasons.join(', '));
-    const updateResp = await fetch(sbUrl + '/rest/v1/sentiment_items?id=eq.' + current.id, {
+  for (const item of items.filter(it => it.policy_dimensions?.sep_source !== 'fred-alfred')) {
+    const r = await scoreSepFromFred(item.item_date, fredKey);
+    if (!r) break;
+    console.log(`SEP delta ${item.item_date}: score=${r.score} (${r.label}) — ${r.reasons.join(', ')}`);
+    const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${item.id}`, {
       method: 'PATCH',
-      headers: { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json' },
+      headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({
-        net_score: deltaResult.score, label: deltaResult.label,
-        hawk_pts: deltaResult.score > 0 ? Math.round(Math.abs(deltaResult.score) * 10) : 0,
-        dove_pts: deltaResult.score < 0 ? Math.round(Math.abs(deltaResult.score) * 10) : 0,
-        reasons: deltaResult.reasons.map(r => 'sep_delta:' + r),
+        net_score: r.score, label: r.label,
+        hawk_pts: r.score > 0 ? Math.round(r.score * 10) : 0,
+        dove_pts: r.score < 0 ? Math.round(-r.score * 10) : 0,
+        reasons: r.reasons,
+        policy_dimensions: { ...(item.policy_dimensions || {}), ...r.policy_dimensions },
       }),
     });
-    if (updateResp.ok) updated++;
+    if (patch.ok) updated++;
   }
   return { updated };
 }
 
+/** Every row of a PostgREST query (newest first), 1000 per request. */
+async function restRows<T>(url: string, sbKey: string, max = 50000): Promise<T[]> {
+  const out: T[] = [];
+  for (let offset = 0; offset < max; offset += 1000) {
+    const r = await fetch(`${url}&order=item_date.desc,id.asc&offset=${offset}&limit=1000`,
+      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } });
+    if (!r.ok) { console.error('restRows:', r.status, await r.text().catch(() => '')); break; }
+    const rows: T[] = await r.json();
+    out.push(...rows);
+    if (rows.length < 1000) break;
+  }
+  return out;
+}
+
+const isoDaysAgo = (days: number, from = new Date()) => new Date(from.getTime() - days * 86400000).toISOString().split('T')[0];
+
 // ── Load existing scored items from DB to skip re-scoring ──
-// Items with score=0 from press conferences/minutes are considered unscored and will be re-fetched
-async function loadExistingItems(bank: string, sbUrl: string, sbKey: string): Promise<Set<string>> {
+// Items with score=0 from press conferences/minutes are considered unscored and will be re-fetched.
+// Items dated from `from` (YYYY-MM-DD) up to `to`: the window a scrape or backfill call can see.
+async function loadExistingItems(bank: string, sbUrl: string, sbKey: string, from: string, to = '9999-12-31'): Promise<Set<string>> {
   try {
-    const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date,net_score,source&bank=eq.${bank}&is_statistical=eq.false&limit=1000`,
-      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
-    );
-    if (!resp.ok) return new Set();
-    const data = await resp.json();
+    const data = await restRows<any>(
+      `${sbUrl}/rest/v1/sentiment_items?select=title,item_date,net_score,source&bank=eq.${bank}&is_statistical=eq.false` +
+      `&item_date=gte.${from}&item_date=lte.${to}`, sbKey);
     // Skip items with 0 score from policy documents — they need re-scoring
     // BUT always keep FOMC SEP as existing — they're scored by delta comparison, not AI
     const policyKeywords = ['minutes', 'press conf', 'statement', 'accounts', 'account', 'monetary policy decision', 'rate decision'];
@@ -1355,7 +731,7 @@ async function pruneDuplicateComms(bank: string, sbUrl: string, sbKey: string): 
 // 0 by a failed AI call it is re-fetched from its stored URL and re-scored.
 const POLICY_TITLE_FOR_REPAIR = /monetary policy decision|monetary policy statement|fomc statement|rate decision|policy decision/i;
 
-async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string, aiKey: string): Promise<number> {
+async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string): Promise<number> {
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
@@ -1371,7 +747,7 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
     for (const r of targets) {
       const text = await fetchPageText(r.url);
       if (!text || text.length < 300) continue;
-      const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
+      const ai = await scoreDocument(r.title, text, r.source);
       if (Math.abs(ai.score) < 0.001) continue;
       const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
         method: 'PATCH',
@@ -1401,7 +777,7 @@ async function rescoreZeroPolicyDocs(bank: string, sbUrl: string, sbKey: string,
 // unreadable fragments. This refetches the stored URL, extracts real prose and
 // rescores; a document that still cannot be read is parked at 0 with an honest
 // reason instead of an invented lean.
-async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, aiKey: string, limit = 12, onlyMissingRefs = false, onlyStaleRubric = false): Promise<number> {
+async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, limit = 12, onlyMissingRefs = false, onlyStaleRubric = false): Promise<number> {
   try {
     const hd = { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey };
     const resp = await fetch(
@@ -1411,15 +787,16 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
     if (!resp.ok) return 0;
     const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; reasons: string[]; policy_dimensions?: Record<string, unknown> }[] = await resp.json();
     const suspect = /unavailable|truncated|redacted|garbled|could not|administrative|by their nature|assumed|without specific/i;
+    // Scored rows whose audit carries no frozen-scorer evidence yet.
     const hasRefs = (r: typeof rows[number]) => {
-      const audit = (r.policy_dimensions || {})['scoring_audit'] as { evidence_refs?: Record<string, unknown> } | undefined;
-      return !!audit?.evidence_refs && Object.keys(audit.evidence_refs).length > 0;
+      const audit = (r.policy_dimensions || {})['scoring_audit'] as { frozen?: { evidence?: unknown } } | undefined;
+      return !!audit?.frozen?.evidence;
     };
-    // Rows scored under an older rubric version must be re-read so the published
-    // score always reflects the current published methodology.
+    // Rows not scored by the frozen scorer (e.g. an old Gemini score) must be re-read so the
+    // published score always comes from the current frozen bundle.
     const staleRubric = (r: typeof rows[number]) => {
-      const audit = (r.policy_dimensions || {})['scoring_audit'] as { prompt_version?: string } | undefined;
-      return (audit?.prompt_version ?? '') !== SCORING_PROMPT_VERSION;
+      const audit = (r.policy_dimensions || {})['scoring_audit'] as { frozen?: unknown } | undefined;
+      return !audit?.frozen;
     };
     const targets = rows
       .filter(r => r.url && (/\.pdf$/i.test(r.url) || /transcript|press conf|projections|minutes|account|statement|monetary policy/i.test(r.title)))
@@ -1434,7 +811,7 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
     let fixed = 0;
     for (const r of targets) {
       const text = await fetchPageText(r.url);
-      const ai = await scoreWithAI(r.title, text, bank, aiKey, r.source);
+      const ai = await scoreDocument(r.title, text, r.source);
       // A citation backfill must never destroy an existing score: if the re-read
       // comes back unscoreable, leave the stored row untouched.
       if ((onlyMissingRefs || onlyStaleRubric) && !ai.dimensions) continue;
@@ -1449,7 +826,8 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
           dove_pts: ai.score < 0 ? Math.round(-ai.score * 10) : 0,
           reasons: ['ai:' + (ai.reasoning || 'rescored')],
           word_count: text ? text.split(/\s+/).length : 0,
-          policy_dimensions: ai.dimensions ? { ...ai.dimensions, scoring_audit: ai.audit } : null,
+          // keep the row's other fields (Layer-1 relevance, speaker data); replace the scoring ones
+          policy_dimensions: { ...(r.policy_dimensions || {}), ...(ai.dimensions || {}), ...(ai.audit ? { scoring_audit: ai.audit } : {}) },
         }),
       });
       if (patch.ok) { fixed++; console.log(`${bank}: re-read "${r.title}" (${r.item_date}) → ${ai.score}`); }
@@ -1463,10 +841,10 @@ async function rescoreTranscripts(bank: string, sbUrl: string, sbKey: string, ai
 
 
 // ── Load existing STATISTICAL items for dedup ──
-async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
+async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string, from: string): Promise<It[]> {
   try {
     const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}&is_statistical=eq.true&limit=500`,
+      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}&is_statistical=eq.true&item_date=gte.${from}&order=item_date.desc&limit=1000`,
       { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
     );
     if (!resp.ok) return [];
@@ -1482,14 +860,13 @@ async function loadExistingStatItems(bank: string, sbUrl: string, sbKey: string)
 }
 
 // ── Load ALL existing items from DB for aggregation ──
+// The headline is decay-weighted (half-lives of weeks), so a year of items fully determines it;
+// the history before that (back to 2015) is read by the charts, not by this aggregate.
 async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: string): Promise<It[]> {
   try {
-    const resp = await fetch(
-      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}&limit=1000`,
-      { headers: { 'Authorization': `Bearer ${sbKey}`, 'apikey': sbKey } }
-    );
-    if (!resp.ok) return [];
-    const data = await resp.json();
+    const data = await restRows<any>(
+      `${sbUrl}/rest/v1/sentiment_items?select=bank,source,item_date,title,url,is_statistical,hawk_pts,dove_pts,net_score,label,word_count,reasons,stat_metric,stat_value,stat_weight&bank=eq.${bank}` +
+      `&item_date=gte.${isoDaysAgo(400)}`, sbKey);
     return (data || []).map((d: any) => ({
       bank: d.bank, source: d.source, item_date: d.item_date, title: d.title,
       url: d.url || '', is_statistical: d.is_statistical,
@@ -1501,7 +878,11 @@ async function loadAllItemsForAggregation(bank: string, sbUrl: string, sbKey: st
 }
 
 // ── FRED (Fed Funds EXCLUDED — it's the target variable, not a predictor) ──
-interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir: string; w: number }
+// tr: lv level | d1 change | p1 % change | p12 % change over 12 periods |
+//     bs balance sheet growth: total assets y/y at the first weekly statement of each month (QE ↔ QT).
+// lag / maxLag: usual days from the observation date to publication, and the most a first release
+// may lag before its ALFRED date is treated as a late vintage start (see stat-series releaseDate).
+interface FS { id: string; met: string; tr: string; ht: number; dt: number; dir: string; w: number; bank?: 'FED' | 'ECB'; lag?: number; maxLag?: number }
 const FR: FS[] = [
   { id: 'CPIAUCSL', met: 'CPI YoY', tr: 'p12', ht: 3, dt: 2, dir: 'hh', w: 3 },
   { id: 'CPIAUCSL', met: 'CPI MoM Trend', tr: 'p1', ht: 0.4, dt: 0.1, dir: 'hh', w: 2 },
@@ -1514,11 +895,29 @@ const FR: FS[] = [
   { id: 'INDPRO', met: 'Ind Prod', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
   { id: 'MANEMP', met: 'Mfg Employment Trend', tr: 'p1', ht: 0.3, dt: -0.3, dir: 'hh', w: 2 },
   // Higher-frequency releases so the US channel never goes stale between monthly prints
-  { id: 'ICSA', met: 'Initial Claims (4wk chg)', tr: 'd1', ht: -15000, dt: 15000, dir: 'lh', w: 2 },
+  { id: 'ICSA', met: 'Initial Claims (4wk chg)', tr: 'd1', ht: -15000, dt: 15000, dir: 'lh', w: 2, lag: 5, maxLag: 14 },
   { id: 'CES0500000003', met: 'Avg Hourly Earnings YoY', tr: 'p12', ht: 4, dt: 3, dir: 'hh', w: 2 },
-  { id: 'T5YIE', met: '5Y Breakeven Inflation', tr: 'lv', ht: 2.5, dt: 2, dir: 'hh', w: 2 },
-  { id: 'T10Y2Y', met: '10Y-2Y Spread', tr: 'lv', ht: 0.6, dt: -0.2, dir: 'hh', w: 1 },
+  { id: 'T5YIE', met: '5Y Breakeven Inflation', tr: 'lv', ht: 2.5, dt: 2, dir: 'hh', w: 2, lag: 1, maxLag: 7 },
+  { id: 'T10Y2Y', met: '10Y-2Y Spread', tr: 'lv', ht: 0.6, dt: -0.2, dir: 'hh', w: 1, lag: 1, maxLag: 7 },
+  // Balance sheet policy (QE/QT): growing total assets is easing (dovish), shrinking is tightening.
+  // Neutral near +2% y/y; hawkish from −4% (QT), dovish from +8% (QE). One item per month.
+  { id: 'WALCL', met: 'Fed Balance Sheet YoY', tr: 'bs', ht: -4, dt: 8, dir: 'lh', w: 2, lag: 1, maxLag: 10 },
+  { id: 'ECBASSETSW', met: 'ECB Balance Sheet YoY', tr: 'bs', ht: -4, dt: 8, dir: 'lh', w: 2, bank: 'ECB', lag: 4, maxLag: 14 },
 ];
+
+const fredBank = (s: FS) => s.bank ?? 'FED';
+const fredItem = (s: FS, val: number, released: string, period: string, extra: string[] = []): It => {
+  const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
+  return {
+    bank: fredBank(s), source: 'FRED', item_date: released,
+    title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ', ref ' + period + ')',
+    url: 'https://fred.stlouisfed.org/series/' + s.id,
+    is_statistical: true, hawk_pts: 0, dove_pts: 0,
+    net_score: r2.net_score, label: r2.label, word_count: 0,
+    reasons: ['fred', ...extra, 'released:' + released, 'period:' + period], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
+  };
+};
+const plusDays = (d: string, n: number) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 
 /** Latest publication (release) date per FRED series — observation dates are period starts. */
 async function fetchFredReleaseDates(key: string, ids: string[]): Promise<Record<string, string>> {
@@ -1533,18 +932,20 @@ async function fetchFredReleaseDates(key: string, ids: string[]): Promise<Record
   return out;
 }
 
-async function fetchFred(key: string, days: number): Promise<It[]> {
+async function fetchFred(key: string, days: number, bank: 'FED' | 'ECB' = 'FED'): Promise<It[]> {
   const co = new Date(); co.setDate(co.getDate() - days);
   const cs = co.toISOString().split('T')[0];
   const today = new Date().toISOString().split('T')[0];
+  const series = FR.filter(s => fredBank(s) === bank);
   // Deduplicate by series ID to avoid fetching same series twice (e.g. CPI YoY + CPI MoM)
-  const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
+  const uniqueSeriesIds = [...new Set(series.map(s => s.id))];
   const seriesCache: Record<string, any[]> = {};
 
   // Fetch each unique series once, plus its publication date
   const [, releaseDates] = await Promise.all([
     Promise.allSettled(uniqueSeriesIds.map(async id => {
-      const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=15');
+      const limit = series.some(s => s.id === id && s.tr === 'bs') ? 70 : 15;   // a year of weekly statements
+      const r = await sf('https://api.stlouisfed.org/fred/series/observations?series_id=' + id + '&api_key=' + key + '&file_type=json&sort_order=desc&limit=' + limit);
       if (!r || !r.ok) return;
       const d = await r.json();
       seriesCache[id] = (d.observations || []).filter((o: any) => o.value !== '.');
@@ -1553,9 +954,18 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
   ]);
 
   const results: It[] = [];
-  for (const s of FR) {
+  for (const s of series) {
     const obs = seriesCache[s.id];
     if (!obs || !obs.length) continue;
+    if (s.tr === 'bs') {
+      const yoy = balanceSheetYoY(obs.map((o: any) => ({ date: o.date as string, value: parseFloat(o.value) })).reverse());
+      const last = yoy[yoy.length - 1];
+      if (!last) continue;
+      const released = plusDays(last.date, s.lag ?? 1);
+      if (released < cs || released > today) continue;
+      results.push(fredItem(s, last.value, released, last.date, ['balance-sheet']));
+      continue;
+    }
     // Score by RELEASE date (when markets saw it), not by the reference period.
     const period = obs[0].date as string;
     const released = releaseDates[s.id] && releaseDates[s.id] <= today ? releaseDates[s.id] : period;
@@ -1567,56 +977,55 @@ async function fetchFred(key: string, days: number): Promise<It[]> {
     else if (s.tr === 'p1' && v.length >= 2 && v[1] !== 0) val = ((v[0] - v[1]) / Math.abs(v[1])) * 100;
     else if (s.tr === 'p12' && v.length >= 13 && v[12] !== 0) val = ((v[0] - v[12]) / Math.abs(v[12])) * 100;
     if (val === null) continue;
-    const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
-    results.push({
-      bank: 'FED', source: 'FRED', item_date: released,
-      title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ', ref ' + period + ')',
-      url: 'https://fred.stlouisfed.org/series/' + s.id,
-      is_statistical: true, hawk_pts: 0, dove_pts: 0,
-      net_score: r2.net_score, label: r2.label, word_count: 0,
-      reasons: ['fred', 'released:' + released, 'period:' + period], stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
-    } as It);
+    results.push(fredItem(s, val, released, period));
   }
   return results;
 }
 
 /**
- * Historical backfill of the US statistical channel.
- * The live fetch only keeps the newest vintage of each series, so months where our
- * scraper was broken end up with no statistical items at all. ALFRED's
- * `output_type=4` returns each observation's FIRST release together with the real
- * publication date (`realtime_start`), which lets us rebuild the true history.
+ * Historical backfill of the statistical channel from FRED, one series per call.
+ * ALFRED's `output_type=4` returns each observation's FIRST release together with its
+ * publication date (`realtime_start`), so the history is what markets saw at the time.
+ * Series whose vintage history starts late get their usual publication lag instead
+ * (stat-series releaseDate). Returns the items of series `id` released from `fromDate`.
  */
-async function backfillFred(key: string, fromDate: string): Promise<It[]> {
+async function backfillFred(key: string, fromDate: string, id: string): Promise<{ items: It[]; status: number | null }> {
   const today = new Date().toISOString().split('T')[0];
-  const uniqueSeriesIds = [...new Set(FR.map(s => s.id))];
-  // period -> { value, released } per series, ordered oldest → newest
-  const hist: Record<string, { period: string; value: number; released: string }[]> = {};
-
-  await Promise.allSettled(uniqueSeriesIds.map(async id => {
-    const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${key}` +
-      `&file_type=json&output_type=4&realtime_start=2024-01-01&observation_start=2023-01-01&sort_order=asc`;
-    const r = await sf(url, 20000);
-    if (!r || !r.ok) return;
-    const d = await r.json();
-    const rows: { period: string; value: number; released: string }[] = [];
-    for (const o of (d.observations || [])) {
-      if (o.value === '.' || o.value === undefined) continue;
-      const v = parseFloat(o.value);
-      if (!isFinite(v)) continue;
-      const released = (o.realtime_start && o.realtime_start !== '1776-07-04') ? o.realtime_start : o.date;
-      rows.push({ period: o.date, value: v, released: released > today ? today : released });
-    }
-    hist[id] = rows;
-  }));
+  const series = FR.filter(s => s.id === id);
+  if (!series.length) return { items: [], status: null };
+  // Two years before `fromDate`: the base periods of the 12-month and 52-week changes.
+  const start = plusDays(fromDate, -731);
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${key}` +
+    `&file_type=json&output_type=4&realtime_start=${start}&observation_start=${start}&sort_order=asc`;
+  const r = await sf(url, 25000);
+  if (!r || !r.ok) return { items: [], status: r ? r.status : null };
+  const d = await r.json();
+  const rows: { period: string; value: number; realtime: string | undefined }[] = [];
+  for (const o of (d.observations || [])) {
+    if (o.value === '.' || o.value === undefined) continue;
+    const v = parseFloat(o.value);
+    if (isFinite(v)) rows.push({ period: o.date, value: v, realtime: o.realtime_start });
+  }
 
   const out: It[] = [];
-  for (const s of FR) {
-    const rows = hist[s.id];
-    if (!rows || rows.length < 14) continue;
+  for (const s of series) {
+    const released = (period: string, realtime: string | undefined) => {
+      const day = releaseDate(period, realtime, s.lag ?? 45, s.maxLag ?? 75);
+      return day > today ? today : day;
+    };
+    if (s.tr === 'bs') {
+      const realtimeOf = new Map(rows.map(r => [r.period, r.realtime]));
+      for (const y of balanceSheetYoY(rows.map(r => ({ date: r.period, value: r.value })))) {
+        const rel = released(y.date, realtimeOf.get(y.date));
+        if (rel >= fromDate) out.push(fredItem(s, y.value, rel, y.date, ['backfill', 'balance-sheet']));
+      }
+      continue;
+    }
+    if (rows.length < 14) continue;
     for (let i = 13; i < rows.length; i++) {
       const cur = rows[i];
-      if (cur.released < fromDate || cur.released > today) continue;
+      const rel = released(cur.period, cur.realtime);
+      if (rel < fromDate) continue;
       const v = [cur.value, ...rows.slice(0, i).reverse().map(r => r.value)]; // newest → oldest
       let val: number | null = null;
       if (s.tr === 'lv') val = v[0];
@@ -1624,39 +1033,20 @@ async function backfillFred(key: string, fromDate: string): Promise<It[]> {
       else if (s.tr === 'p1' && v.length >= 2 && v[1] !== 0) val = ((v[0] - v[1]) / Math.abs(v[1])) * 100;
       else if (s.tr === 'p12' && v.length >= 13 && v[12] !== 0) val = ((v[0] - v[12]) / Math.abs(v[12])) * 100;
       if (val === null || !isFinite(val)) continue;
-      const r2 = sv(val, s.ht, s.dt, s.dir, s.w, s.met);
-      out.push({
-        bank: 'FED', source: 'FRED', item_date: cur.released,
-        title: s.met + ': ' + val.toFixed(2) + ' (' + s.id + ', ref ' + cur.period + ')',
-        url: 'https://fred.stlouisfed.org/series/' + s.id,
-        is_statistical: true, hawk_pts: 0, dove_pts: 0,
-        net_score: r2.net_score, label: r2.label, word_count: 0,
-        reasons: ['fred', 'backfill', 'released:' + cur.released, 'period:' + cur.period],
-        stat_metric: r2.metric, stat_value: r2.value, stat_weight: s.w,
-      } as It);
+      out.push(fredItem(s, val, rel, cur.period, ['backfill']));
     }
   }
-  console.log(`FRED backfill: ${out.length} historical statistical items since ${fromDate}`);
-  return out;
+  console.log(`FRED backfill ${id}: ${out.length} historical statistical items since ${fromDate}`);
+  return { items: out, status: r.status };
 }
 
-
-
 // ── FOMC Minutes ──
-const KNOWN_FOMC_DATES = [
-  '20260128','20260318','20260506','20260617','20260729','20260917','20261028','20261216',
-  '20250129','20250319','20250507','20250618','20250730','20250917','20251029','20251210',
-];
+// Meeting dates (and which meetings had a press conference / SEP) come from _shared/meeting-calendar.ts.
+const todayIso = () => new Date().toISOString().split('T')[0];
 
-async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+async function fetchFomcMinutes(cutoffDate: string, toDate = todayIso()): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
-  const now = new Date();
-  const cutoff = new Date(cutoffDate);
-  const relevantDates = KNOWN_FOMC_DATES.filter(ds => {
-    const y = parseInt(ds.slice(0, 4)), m = parseInt(ds.slice(4, 6)) - 1, day = parseInt(ds.slice(6, 8));
-    const meetDate = new Date(y, m, day);
-    return meetDate >= cutoff && meetDate <= now;
-  });
+  const relevantDates = fomcMeetingsBetween(cutoffDate, toDate).map(m => m.date.replace(/-/g, ''));
   console.log('FOMC Minutes: checking ' + relevantDates.length + ' dates');
   const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
     const url = 'https://www.federalreserve.gov/monetarypolicy/fomcminutes' + dateStr + '.htm';
@@ -1677,17 +1067,12 @@ async function fetchFomcMinutes(cutoffDate: string): Promise<{ title: string; te
 }
 
 // ── FOMC Press Conference Transcript PDFs ──
-async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+async function fetchFomcPressConferences(cutoffDate: string, toDate = todayIso()): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
-  const now = new Date();
-  const cutoff = new Date(cutoffDate);
-  const relevantDates = KNOWN_FOMC_DATES.filter(ds => {
-    const y = parseInt(ds.slice(0, 4)), m = parseInt(ds.slice(4, 6)) - 1, day = parseInt(ds.slice(6, 8));
-    const meetDate = new Date(y, m, day);
-    return meetDate >= cutoff && meetDate <= now;
-  });
-  console.log('FOMC Press Conf+Statement+SEP: checking ' + relevantDates.length + ' dates');
-  const results = await Promise.allSettled(relevantDates.map(async (dateStr) => {
+  const meetings = fomcMeetingsBetween(cutoffDate, toDate);
+  console.log('FOMC Press Conf+Statement+SEP: checking ' + meetings.length + ' dates');
+  const results = await Promise.allSettled(meetings.map(async (meeting) => {
+    const dateStr = meeting.date.replace(/-/g, '');
     const y = dateStr.slice(0, 4), m = dateStr.slice(4, 6), day = dateStr.slice(6, 8);
     const foundItems: { title: string; text: string; date: string; url: string }[] = [];
 
@@ -1707,8 +1092,9 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
 
     // 2. Try the press conference transcript PDF — inflated content streams,
     //    and only accepted when the extracted text is real prose.
+    //    Only meetings that had a press conference (quarterly until 2018, every meeting since 2019).
     const pdfUrl = 'https://www.federalreserve.gov/mediacenter/files/FOMCpresconf' + dateStr + '.pdf';
-    const pdfResp = await sf(pdfUrl, 20000);
+    const pdfResp = meeting.pressConf ? await sf(pdfUrl, 20000) : null;
     if (pdfResp && pdfResp.ok) {
       const ct = pdfResp.headers.get('content-type') || '';
       if (ct.includes('pdf')) {
@@ -1723,7 +1109,7 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
     }
 
     // 3. Try the press conference HTML page as fallback
-    if (!foundItems.some(f => f.title.includes('Transcript'))) {
+    if (meeting.pressConf && !foundItems.some(f => f.title.includes('Transcript'))) {
       const pcUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcpressconf' + dateStr + '.htm';
       const pcResp = await sf(pcUrl, 12000);
       if (pcResp && pcResp.ok) {
@@ -1741,8 +1127,7 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
 
     // 4. Summary of Economic Projections (SEP) — try HTML first, then PDF
     // SEP is only published at projection meetings (March, June, September, December)
-    const SEP_MONTHS = ['03', '06', '09', '12'];
-    if (SEP_MONTHS.includes(m)) {
+    if (meeting.sep) {
       const sepHtmlUrl = 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl' + dateStr + '.htm';
       const sepPdfUrl = 'https://www.federalreserve.gov/monetarypolicy/files/fomcprojtabl' + dateStr + '.pdf';
       let sepText = '';
@@ -1784,75 +1169,85 @@ async function fetchFomcPressConferences(cutoffDate: string): Promise<{ title: s
   return items;
 }
 
-// ── ECB Press Conferences (Monetary Policy Statement) ──
-// Known ECB Governing Council meeting dates for press conferences
-const KNOWN_ECB_DATES = [
-  '250130', '250306', '250417', '250605', '250724', '250911', '251030', '251218',
-  '260205', '260319', '260430', '260611', '260723', '260910', '261029', '261217',
-];
+/** FOMC documents as communications, with their source labels. */
+function fomcComms(minutes: { title: string; text: string; date: string; url: string }[], docs: { title: string; text: string; date: string; url: string }[]): RawComm[] {
+  const out: RawComm[] = minutes.map(m => ({ title: m.title, text: m.text, date: m.date, url: m.url, source: 'FOMC Minutes', bank: 'FED' }));
+  for (const pc of docs) {
+    let src = 'FOMC Press Conf';
+    if (pc.title.includes('Statement')) src = 'FOMC Statement';
+    else if (pc.title.includes('Summary of Economic Projections')) src = 'FOMC SEP';
+    out.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: src, bank: 'FED' });
+  }
+  return out;
+}
 
-async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
-  const items: { title: string; text: string; date: string; url: string }[] = [];
-  const now = new Date();
+// ── ECB yearly index pages ──
+// Statement, account and decision URLs carry a hash that cannot be guessed, so each year's
+// index_include page is read (newer path first; older years may only answer on the old one).
+type EcbIndexKind = 'statements' | 'accounts' | 'decisions' | 'speeches';
+const ECB_INDEX_PATHS: Record<EcbIndexKind, (yr: number) => string[]> = {
+  statements: yr => [`/press/press_conference/monetary-policy-statement/${yr}/html/index_include.en.html`, `/press/pressconf/${yr}/html/index_include.en.html`],
+  accounts: yr => [`/press/accounts/${yr}/html/index_include.en.html`],
+  decisions: yr => [`/press/govcdec/mopo/${yr}/html/index_include.en.html`, `/press/pr/date/${yr}/html/index_include.en.html`],
+  speeches: yr => [`/press/key/date/${yr}/html/index_include.en.html`],
+};
+const ECB_KIND_FILTER: Record<EcbIndexKind, (l: EcbLink) => boolean> = {
+  statements: l => l.kind === 'is',
+  accounts: l => l.kind === 'mg',
+  decisions: isEcbDecision,
+  speeches: l => l.kind === 'sp' || l.kind === 'in',
+};
 
-  // ECB monetary policy statement URLs contain a hash we can't guess.
-  // Strategy 1: Fetch year-specific include files which list all statements with full URLs.
-  const currentYear = now.getFullYear();
-  const years = [currentYear, currentYear - 1];
-
-  try {
-    const includeResults = await Promise.allSettled(years.map(async (yr) => {
-      const includeUrl = `https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/${yr}/html/index_include.en.html`;
-      const r = await sf(includeUrl, 15000);
-      if (!r || !r.ok) { console.log('ECB include file not found for ' + yr); return []; }
-      const html = await r.text();
-      
-      const linkRe = /href="([^"]*ecb\.is\d{6}~[^"]*\.en\.html)"/gi;
-      let m;
-      const links: { url: string; dateStr: string }[] = [];
-      while ((m = linkRe.exec(html)) !== null) {
-        let link = m[1];
-        if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
-        const dateMatch = link.match(/ecb\.is(\d{2})(\d{2})(\d{2})/);
-        if (dateMatch) {
-          const fullDate = '20' + dateMatch[1] + '-' + dateMatch[2] + '-' + dateMatch[3];
-          if (fullDate >= cutoffDate && new Date(fullDate) <= now) {
-            links.push({ url: link, dateStr: fullDate });
-          }
-        }
-      }
-      return links;
-    }));
-
-    const allLinksRaw: { url: string; dateStr: string }[] = [];
-    for (const r of includeResults) {
-      if (r.status === 'fulfilled') allLinksRaw.push(...r.value);
+/** The year's links of one kind, in date order; one per date except speeches. `tried` reports each index page. */
+async function ecbYearLinks(kind: EcbIndexKind, yr: number): Promise<{ links: EcbLink[]; tried: { url: string; status: number | null; links: number }[] }> {
+  const tried: { url: string; status: number | null; links: number }[] = [];
+  const byKey = new Map<string, EcbLink>();
+  for (const path of ECB_INDEX_PATHS[kind](yr)) {
+    const url = 'https://www.ecb.europa.eu' + path;
+    const r = await sf(url, 15000);
+    const found = r && r.ok ? parseEcbIndex(await r.text()).filter(ECB_KIND_FILTER[kind]).filter(l => l.date.startsWith(String(yr))) : [];
+    tried.push({ url, status: r ? r.status : null, links: found.length });
+    for (const l of found) {
+      const key = kind === 'speeches' ? l.url : l.date;
+      if (!byKey.has(key)) byKey.set(key, l);
     }
-    // Deduplicate by date (same meeting can appear in multiple year files)
+  }
+  return { links: [...byKey.values()].sort((a, b) => a.date.localeCompare(b.date)), tried };
+}
+
+const usDate = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`;
+const yearsBetween = (from: string, to: string) => {
+  const out: number[] = [];
+  for (let y = +to.slice(0, 4); y >= +from.slice(0, 4); y--) out.push(y);
+  return out;
+};
+
+// ── ECB Press Conferences (Monetary Policy Statement) ──
+async function fetchEcbPressConferences(cutoffDate: string, aiKey: string, toDate = todayIso()): Promise<{ title: string; text: string; date: string; url: string }[]> {
+  const items: { title: string; text: string; date: string; url: string }[] = [];
+
+  // Strategy 1: the year index pages list every statement with its full URL.
+  try {
     const seenDates = new Set<string>();
-    const allLinks: { url: string; dateStr: string }[] = [];
-    for (const l of allLinksRaw) {
-      if (!seenDates.has(l.dateStr)) {
-        seenDates.add(l.dateStr);
+    const allLinks: EcbLink[] = [];
+    for (const yr of yearsBetween(cutoffDate, toDate)) {
+      for (const l of (await ecbYearLinks('statements', yr)).links) {
+        if (l.date < cutoffDate || l.date > toDate || seenDates.has(l.date)) continue;
+        seenDates.add(l.date);
         allLinks.push(l);
       }
     }
+    allLinks.sort((a, b) => a.date.localeCompare(b.date));
     console.log('ECB Press Conf: found ' + allLinks.length + ' unique statement links from include files');
 
     // Fetch each statement page
-    const fetchResults = await Promise.allSettled(allLinks.slice(0, 10).map(async ({ url, dateStr }) => {
+    const fetchResults = await Promise.allSettled(allLinks.slice(-10).map(async ({ url, date }) => {
       const r = await sf(url, 12000);
       if (!r || !r.ok) return null;
-      const pageHtml = await r.text();
-      const text = extractText(pageHtml);
+      const text = extractText(await r.text());
       if (text.length < 500) return null;
-      
-      const parts = dateStr.split('-');
-      console.log('ECB Press Conf found: ' + dateStr + ' (' + text.length + ' chars)');
-      return {
-        title: 'ECB Monetary Policy Press Conference — ' + parts[1] + '/' + parts[2] + '/' + parts[0],
-        text, date: dateStr, url,
-      };
+      console.log('ECB Press Conf found: ' + date + ' (' + text.length + ' chars)');
+      return { title: 'ECB Monetary Policy Press Conference — ' + usDate(date), text, date, url };
     }));
     for (const r of fetchResults) {
       if (r.status === 'fulfilled' && r.value) items.push(r.value);
@@ -1863,11 +1258,7 @@ async function fetchEcbPressConferences(cutoffDate: string, aiKey: string): Prom
   if (items.length === 0 && aiKey) {
     console.log('ECB Press Conf: include files empty, trying AI search for URLs');
     try {
-      const relevantDates = KNOWN_ECB_DATES.filter(ds => {
-        const yr = '20' + ds.slice(0, 2), mn = ds.slice(2, 4), dy = ds.slice(4, 6);
-        const fullDate = yr + '-' + mn + '-' + dy;
-        return fullDate >= cutoffDate && new Date(fullDate) <= now;
-      });
+      const relevantDates = ecbMeetingsBetween(cutoffDate, toDate).map(d => d.slice(2).replace(/-/g, ''));
 
       // Ask AI to find the URLs for each known meeting date
       const searchPrompt = `Find the exact URLs for ECB monetary policy press conference transcripts (the full Q&A text, not video) for these meeting dates: ${relevantDates.map(d => '20' + d.slice(0,2) + '-' + d.slice(2,4) + '-' + d.slice(4,6)).join(', ')}.
@@ -1922,64 +1313,23 @@ Respond with ONLY a JSON array of objects: [{"date": "YYYY-MM-DD", "url": "full_
 
 // ── ECB Monetary Policy Accounts (Meeting Minutes equivalent) ──
 // Published ~4 weeks after each Governing Council meeting
-async function fetchEcbAccounts(cutoffDate: string): Promise<{ title: string; text: string; date: string; url: string }[]> {
+async function fetchEcbAccounts(cutoffDate: string, toDate = todayIso()): Promise<{ title: string; text: string; date: string; url: string }[]> {
   const items: { title: string; text: string; date: string; url: string }[] = [];
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const years = [currentYear, currentYear - 1];
-
   try {
-    const includeResults = await Promise.allSettled(years.map(async (yr) => {
-      const includeUrl = `https://www.ecb.europa.eu/press/accounts/${yr}/html/index_include.en.html`;
-      const r = await sf(includeUrl, 15000);
-      if (!r || !r.ok) { console.log('ECB accounts include file not found for ' + yr); return []; }
-      const html = await r.text();
-
-      // Match links to account pages: ecb.mg{YYMMDD}~HASH.en.html
-      const linkRe = /href="([^"]*ecb\.mg\d{6}~[^"]*\.en\.html)"/gi;
-      let m;
-      const links: { url: string; dateStr: string }[] = [];
-      while ((m = linkRe.exec(html)) !== null) {
-        let link = m[1];
-        if (!link.startsWith('http')) link = 'https://www.ecb.europa.eu' + link;
-        const dateMatch = link.match(/ecb\.mg(\d{2})(\d{2})(\d{2})/);
-        if (dateMatch) {
-          const fullDate = '20' + dateMatch[1] + '-' + dateMatch[2] + '-' + dateMatch[3];
-          if (fullDate >= cutoffDate && new Date(fullDate) <= now) {
-            links.push({ url: link, dateStr: fullDate });
-          }
-        }
-      }
-      return links;
-    }));
-
-    const allLinksRaw: { url: string; dateStr: string }[] = [];
-    for (const r of includeResults) {
-      if (r.status === 'fulfilled') allLinksRaw.push(...r.value);
+    const allLinks: EcbLink[] = [];
+    for (const yr of yearsBetween(cutoffDate, toDate)) {
+      allLinks.push(...(await ecbYearLinks('accounts', yr)).links.filter(l => l.date >= cutoffDate && l.date <= toDate));
     }
-    const seenDates = new Set<string>();
-    const allLinks: { url: string; dateStr: string }[] = [];
-    for (const l of allLinksRaw) {
-      if (!seenDates.has(l.dateStr)) {
-        seenDates.add(l.dateStr);
-        allLinks.push(l);
-      }
-    }
+    allLinks.sort((a, b) => a.date.localeCompare(b.date));
     console.log('ECB Accounts: found ' + allLinks.length + ' unique account links from include files');
 
-    const fetchResults = await Promise.allSettled(allLinks.slice(0, 12).map(async ({ url, dateStr }) => {
+    const fetchResults = await Promise.allSettled(allLinks.slice(-12).map(async ({ url, date }) => {
       const r = await sf(url, 15000);
       if (!r || !r.ok) return null;
-      const pageHtml = await r.text();
-      const text = extractText(pageHtml);
+      const text = extractText(await r.text());
       if (text.length < 500) return null;
-
-      const parts = dateStr.split('-');
-      console.log('ECB Account found: ' + dateStr + ' (' + text.length + ' chars)');
-      return {
-        title: 'ECB Monetary Policy Account — ' + parts[1] + '/' + parts[2] + '/' + parts[0],
-        text, date: dateStr, url,
-      };
+      console.log('ECB Account found: ' + date + ' (' + text.length + ' chars)');
+      return { title: 'ECB Monetary Policy Account — ' + usDate(date), text, date, url };
     }));
     for (const r of fetchResults) {
       if (r.status === 'fulfilled' && r.value) items.push(r.value);
@@ -2275,34 +1625,55 @@ function ag(sub: It[], bank?: string) {
 // Re-reads stored communications and scores them with the frozen scorer, with no
 // Gemini calls. apply=false (default) only writes the result into
 // policy_dimensions.scoring_audit.frozen, so the live index is untouched and the
-// two scorers can be compared. apply=true also overwrites net_score / label, which
-// is what you run once, for the whole history, right before setting
-// SCORER_MODE=frozen, so speaker baselines are rebuilt on one consistent scale.
+// two scorers can be compared. apply=true also overwrites net_score / label: run it
+// once over the whole history so every stored score (and the speaker baselines built
+// from them) comes from the frozen scorer.
 // Speaker calibration of the score being replaced (speaker-calibration.ts); stale once net_score is rescored.
 const LEGACY_AI_FIELDS = ['speaker', 'speaker_baseline', 'speaker_sd', 'speaker_n', 'raw_score', 'deviation', 'calibrated_score'];
 
-async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: boolean, offset = 0, limit = 40): Promise<{ scored: number; skipped: number; next_offset: number | null }> {
+const FROZEN_MODEL = 'frozen lexicon + linear ensemble (no LLM)';
+
+async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: boolean, offset = 0, limit = 40): Promise<{ scored: number; skipped: number; cleared: number; next_offset: number | null }> {
   const hd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey };
   const resp = await fetch(
     `${sbUrl}/rest/v1/sentiment_items?select=id,source,title,url,item_date,net_score,reasons,policy_dimensions&bank=eq.${bank}&is_statistical=eq.false&order=item_date.desc&offset=${offset}&limit=${limit}`,
     { headers: hd },
   );
-  if (!resp.ok) return { scored: 0, skipped: 0, next_offset: null };
+  if (!resp.ok) return { scored: 0, skipped: 0, cleared: 0, next_offset: null };
   const rows: { id: string; source: string; title: string; url: string; item_date: string; net_score: number; reasons: string[] | null; policy_dimensions: Record<string, any> | null }[] = await resp.json();
-  let scored = 0, skipped = 0;
+  let scored = 0, skipped = 0, cleared = 0;
+  // A row the frozen scorer cannot score keeps its score only if that score came from the frozen scorer;
+  // with apply, any other published score (an old Gemini score) is set to 0, the old value kept for reference.
+  const skip = async (r: typeof rows[number], why: string) => {
+    skipped++;
+    const pd = r.policy_dimensions || {};
+    if (!apply || Math.abs(Number(r.net_score) || 0) < 0.001 || pd.scoring_audit?.model === FROZEN_MODEL) return;
+    const patch = await fetch(`${sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+      method: 'PATCH', headers: { ...hd, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        net_score: 0, label: 'neutral', hawk_pts: 0, dove_pts: 0,
+        reasons: [`not scored — ${why}; the previous score was not from the frozen scorer`, ...(r.reasons || []).filter(x => !/^ai:|^layer3:/.test(x))],
+        policy_dimensions: { ...pd, legacy_ai: { ...(pd.legacy_ai || {}), cleared_score: r.net_score, cleared_at: new Date().toISOString() } },
+      }),
+    });
+    if (patch.ok) cleared++;
+  };
   for (const r of rows) {
-    const stored = typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
+    // An unverified AI-found remark only stores the model's summary: never scored.
+    const unverifiedRemark = REMARK_SOURCES.includes(r.source) && r.policy_dimensions?.source_resolution?.verified !== true;
+    const stored = !unverifiedRemark && typeof r.policy_dimensions?.source_text === 'string' ? r.policy_dimensions.source_text as string : '';
     // Tier 4 is still scored (as new items are): the tier sets an item's weight, not whether it is scored.
-    if ((!r.url && !stored) || isSepDoc(r.title || '', r.source || '')) { skipped++; continue; }
+    if (isSepDoc(r.title || '', r.source || '')) { skipped++; continue; }              // scored from FRED (runSEPDeltaScoring)
     if (r.policy_dimensions?.relevance === 'operational') { skipped++; continue; }   // Layer 1 set it aside: not scored
+    if (unverifiedRemark) { await skip(r, 'unverified AI-found remark'); continue; }
+    if (!r.url && !stored) { await skip(r, 'no source text'); continue; }
     // Stored text wins: for a verified AI-found remark it is the speaker's extract, not the whole article.
     // An AI-found remark is never scored from its URL alone (the URL may be unverified).
     const text = stored || (r.url && !REMARK_SOURCES.includes(r.source) ? await fetchPageText(r.url) : '');
-    if (!isReadableProse(text || '', 40)) { skipped++; continue; }
-    const f = await scoreCombined(text, async () => ({ score: 0, label: 'neutral', reasoning: '' }), 'frozen-only',
-      isDecisionDoc(r.title || '', r.source || '') ? 'decision' : 'general');
+    if (!isReadableProse(text || '', 40)) { await skip(r, 'the source text could not be read'); continue; }
+    const f = scoreCombined(text, isDecisionDoc(r.title || '', r.source || '') ? 'decision' : 'general');
     const frozen = (f.audit as any)?.frozen;
-    if (!frozen || frozen.n_sentences === 0) { skipped++; continue; }
+    if (!frozen || frozen.n_sentences === 0) { await skip(r, 'no policy-relevant sentences'); continue; }
     const pd = { ...(r.policy_dimensions || {}) };
     const priorAi = pd.scoring_audit?.ai_score ?? r.net_score;
     if (apply) {
@@ -2327,7 +1698,7 @@ async function rescoreFrozen(bank: string, sbUrl: string, sbKey: string, apply: 
     });
     if (patch.ok) scored++; else skipped++;
   }
-  return { scored, skipped, next_offset: rows.length === limit ? offset + limit : null };
+  return { scored, skipped, cleared, next_offset: rows.length === limit ? offset + limit : null };
 }
 
 
@@ -2681,32 +2052,345 @@ async function bundesbankEnglishTitles(): Promise<{ title: string; date: string 
 }
 
 async function fetchBisMemberSpeeches(bank: string, existing: Set<string>, cutoffDate: string): Promise<RawComm[]> {
-  const out: RawComm[] = [];
+  let out: RawComm[] = [];
   try {
     const r = await sf(BIS_FEED, 20000);
     if (!r || !r.ok) { console.error('BIS feed unavailable:', r?.status); return out; }
-    const members = parseBisRss(await r.text()).map(classifyMember)
-      .filter((m): m is NonNullable<typeof m> => !!m && m.bank === bank);
-    for (const m of members) {
-      const date = m.delivered || m.published;
-      if (!date || date < cutoffDate) continue;
-      if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
-      // The Bundesbank President comes from the Bundesbank feed (it has his interviews too); BIS only
-      // supplies his speeches that the Bundesbank publishes in German only.
-      if (/bundesbank/i.test(m.institution)) {
-        const english = await bundesbankEnglishTitles();
-        if (english.some(e => sameTitle(e.title, m.title) && daysBetween(e.date, date) <= 7)) continue;
-      }
-      const title = monpoliqTitle(m);
-      if (existing.has(`${title}|${date}`)) continue;
-      let text = await fetchPageText(m.url);
-      if (text.split(/\s+/).length < 300 && m.pdf) text = await fetchPageText(m.pdf);
-      if (!isReadableProse(text, 150)) { console.log('BIS: unreadable text, skipped', m.url); continue; }
-      out.push({ title, text, date, url: m.url, source: 'Member Speech (BIS)', bank });
-    }
+    out = await bisMemberComms(parseBisRss(await r.text()), bank, existing, cutoffDate, todayIso());
     console.log(`BIS member speeches (${bank}): ${out.length} new`);
   } catch (e) { console.error('BIS member speeches error:', e); }
   return out;
+}
+
+/**
+ * BIS speeches by rate-setters of `bank` delivered in [from, to], not yet stored, with readable text.
+ * `texts` holds page texts already fetched (the history backfill reads each review page once).
+ */
+async function bisMemberComms(items: BisItem[], bank: string, existing: Set<string>, from: string, to: string,
+  texts: Map<string, string> = new Map()): Promise<RawComm[]> {
+  const out: RawComm[] = [];
+  const members = items.map(classifyMember).filter((m): m is NonNullable<typeof m> => !!m && m.bank === bank);
+  for (const m of members) {
+    const date = m.delivered || m.published;
+    if (!date || date < from || date > to) continue;
+    if (m.bank === 'FED' && !isFomcVoter(m.institution, date)) continue;          // regional presidents count only in their voting year
+    if (m.bank === 'ECB' && !isEuroAreaMember(m.institution, date)) continue;    // governors count from their country's euro entry
+    // The Bundesbank President comes from the Bundesbank feed (it has his interviews too); BIS only
+    // supplies his speeches that the Bundesbank publishes in German only.
+    if (/bundesbank/i.test(m.institution)) {
+      const english = await bundesbankEnglishTitles();
+      if (english.some(e => sameTitle(e.title, m.title) && daysBetween(e.date, date) <= 7)) continue;
+    }
+    const title = monpoliqTitle(m);
+    if (existing.has(`${title}|${date}`)) continue;
+    let text = texts.get(m.url) ?? await fetchPageText(m.url);
+    if (text.split(/\s+/).length < 300 && m.pdf) text = await fetchPageText(m.pdf);
+    if (!isReadableProse(text, 150)) { console.log('BIS: unreadable text, skipped', m.url); continue; }
+    out.push({ title, text, date, url: m.url, source: 'Member Speech (BIS)', bank });
+  }
+  return out;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── HISTORY BACKFILL (admin) — 2015 onwards ──
+// ══════════════════════════════════════════════════════════════
+// One bank / year / part per call, paged with offset/limit; apply=false reports without writing.
+//   policy    FED: FOMC statements, minutes, press conference transcripts, SEP (meeting calendar)
+//             ECB: monetary policy statements, "Monetary policy decisions", accounts (year index pages)
+//   speeches  FED: Board members' speeches; ECB: Executive Board speeches and interviews
+//   members   BIS speeches of euro-area NCB governors / regional Fed presidents in their voting year
+//   stats     FED: FRED (first releases), incl. balance sheet; ECB: ECB Data Portal + balance sheet
+// Communications go through the live pipeline (Layer 1, frozen scorer, dedup) and are stored with
+// their raw frozen score, as the frozen rescore leaves them: no speaker calibration, since a 2015
+// item would otherwise be calibrated against today's baselines. SEP items are scored from FRED.
+
+type HistoryPart = 'policy' | 'speeches' | 'members' | 'stats';
+
+interface HistoryArgs {
+  bank: 'FED' | 'ECB'; year: number; part: HistoryPart; offset: number; limit: number; apply: boolean;
+  /** stats only: first release date to import. */
+  from: string;
+  fk: string; sbUrl: string; sbKey: string; persistHd: Record<string, string>;
+}
+
+/** One page of work: a meeting, a document link, a BIS week, or a statistical series. */
+interface HistoryUnit { key: string; load: (existing: Set<string>) => Promise<RawComm[]> }
+
+async function persistItems(items: It[], sbUrl: string, persistHd: Record<string, string>): Promise<number> {
+  let saved = 0;
+  for (let i = 0; i < items.length; i += 50) {
+    const batch = items.slice(i, i + 50);
+    const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
+      method: 'POST', headers: persistHd,
+      body: JSON.stringify(batch.map(it => ({
+        bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
+        url: it.url || '', is_statistical: it.is_statistical,
+        hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
+        label: it.label, word_count: it.word_count, reasons: it.reasons,
+        stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
+        policy_dimensions: it.policy_dimensions ?? null,
+      }))),
+    });
+    if (resp.ok) saved += batch.length;
+    else console.error('history persist error:', resp.status, await resp.text().catch(() => ''));
+  }
+  return saved;
+}
+
+const itemSample = (items: It[]) => items.slice(0, 8).map(it => ({
+  date: it.item_date, source: it.source, title: it.title.slice(0, 120), score: it.net_score, label: it.label,
+  ...(it.is_statistical ? { metric: it.stat_metric, value: it.stat_value } : { relevance: (it.policy_dimensions as any)?.relevance }),
+}));
+
+/** FRED history for one series of `bank` (offset = series index). */
+async function backfillFredSeries(bank: 'FED' | 'ECB', from: string, offset: number, apply: boolean, fk: string, sbUrl: string, persistHd: Record<string, string>) {
+  const ids = [...new Set(FR.filter(s => fredBank(s) === bank).map(s => s.id))];
+  const id = ids[offset];
+  if (!fk) return { error: 'FRED_API_KEY is not set', series: id ?? null, found: 0, saved: 0, next_offset: null, units_total: ids.length };
+  const r = id ? await backfillFred(fk, from, id) : { items: [] as It[], status: null };
+  const saved = apply ? await persistItems(r.items, sbUrl, persistHd) : 0;
+  return {
+    from, series: id ?? null, fred_status: r.status, found: r.items.length, saved,
+    first: r.items[0]?.item_date ?? null, last: r.items[r.items.length - 1]?.item_date ?? null,
+    sample: itemSample(r.items.slice(-4)),
+    units_total: ids.length, next_offset: offset + 1 < ids.length ? offset + 1 : null,
+  };
+}
+
+/** ECB statistics before the live ECB/Eurostat feeds start (offset = series index; the balance sheet comes from FRED). */
+async function backfillEcbStats(a: HistoryArgs) {
+  const fredIds = [...new Set(FR.filter(s => fredBank(s) === 'ECB').map(s => s.id))];
+  const total = ECB_SERIES.length + fredIds.length;
+  if (a.offset >= ECB_SERIES.length) {
+    const r = await backfillFredSeries('ECB', a.from, a.offset - ECB_SERIES.length, a.apply, a.fk, a.sbUrl, a.persistHd);
+    return { ...r, units_total: total, next_offset: a.offset + 1 < total ? a.offset + 1 : null };
+  }
+  const series = ECB_SERIES[a.offset];
+  // The live feeds own every month from their first stored print on: history stops there (no double count).
+  const firstLive = await fetch(
+    `${a.sbUrl}/rest/v1/sentiment_items?select=item_date&bank=eq.ECB&is_statistical=eq.true&source=in.(%22ECB%20Stats%22,%22Eurostat%22)&order=item_date.asc&limit=1`,
+    { headers: { 'Authorization': 'Bearer ' + a.sbKey, 'apikey': a.sbKey } },
+  ).then(r => r.ok ? r.json() : []).then((rows: { item_date: string }[]) => rows[0]?.item_date).catch(() => undefined);
+  const before = firstLive || todayIso();
+  const start = plusDays(a.from, -400).slice(0, 7);
+  // Every candidate key; the one with the most recent data wins (the ECB retires and renames series).
+  const tried: { key: string; status: number | null; obs: number; last: string | null }[] = [];
+  let best: Obs[] = [], bestKey = series.keys[0];
+  for (const key of series.keys) {
+    const r = await sf(ecbDataUrl(key, start), 25000);
+    const obs = r && r.ok ? parseEcbCsv(await r.text()) : [];
+    tried.push({ key, status: r ? r.status : null, obs: obs.length, last: obs[obs.length - 1]?.period ?? null });
+    if (obs.length && (!best.length || obs[obs.length - 1].period > best[best.length - 1].period)) { best = obs; bestKey = key; }
+  }
+  const [flow, seriesKey] = bestKey.split('/');
+  const rule = EU.find(r => r.met === series.metric);
+  const items: It[] = [];
+  if (rule && rule.ht !== null && rule.dt !== null) {
+    for (const row of ecbRows(series, best, a.from, before)) {
+      const st = sv(row.value, rule.ht, rule.dt, rule.dir, rule.w, rule.met);
+      items.push({
+        bank: 'ECB', source: 'ECB Data Portal', item_date: row.release,
+        title: `${series.label}: ${row.value.toFixed(2)}% (ref ${row.period})`,
+        url: `https://data.ecb.europa.eu/data/datasets/${flow}/${flow}.${seriesKey}`,
+        is_statistical: true, hawk_pts: 0, dove_pts: 0, net_score: st.net_score, label: st.label, word_count: 0,
+        reasons: ['ecb-data-portal', 'backfill', 'series:' + bestKey, 'period:' + row.period, 'release:approx', 'vintage:current'],
+        stat_metric: st.metric, stat_value: st.value, stat_weight: rule.w,
+      });
+    }
+  }
+  const saved = a.apply ? await persistItems(items, a.sbUrl, a.persistHd) : 0;
+  return {
+    series: series.metric, tried, until: before, found: items.length, saved,
+    first: items[0]?.item_date ?? null, last: items[items.length - 1]?.item_date ?? null, sample: itemSample(items.slice(-4)),
+    units_total: total, next_offset: a.offset + 1 < total ? a.offset + 1 : null,
+  };
+}
+
+/** The year's work units for a part, plus what was read to list them. */
+async function historyUnits(a: HistoryArgs): Promise<{ units: HistoryUnit[]; listing: unknown[] }> {
+  const y0 = `${a.year}-01-01`, y1 = `${a.year}-12-31`;
+  const listing: unknown[] = [];
+
+  if (a.part === 'policy' && a.bank === 'FED') {
+    const meetings = fomcMeetingsBetween(y0, y1 < todayIso() ? y1 : todayIso());
+    listing.push({ source: 'meeting calendar', meetings: meetings.length });
+    return {
+      listing,
+      units: meetings.map(m => ({
+        key: `FOMC ${m.date}${m.pressConf ? ' +press conf' : ''}${m.sep ? ' +SEP' : ''}`,
+        load: async () => fomcComms(await fetchFomcMinutes(m.date, m.date), await fetchFomcPressConferences(m.date, m.date)),
+      })),
+    };
+  }
+  if (a.part === 'policy' && a.bank === 'ECB') {
+    const kinds: { kind: EcbIndexKind; source: string; title: (d: string) => string }[] = [
+      { kind: 'statements', source: 'ECB Press Conf', title: d => 'ECB Monetary Policy Press Conference — ' + usDate(d) },
+      { kind: 'decisions', source: 'ECB Press', title: () => 'Monetary policy decisions' },
+      { kind: 'accounts', source: 'ECB Monetary Policy Accounts', title: d => 'ECB Monetary Policy Account — ' + usDate(d) },
+    ];
+    const units: HistoryUnit[] = [];
+    for (const k of kinds) {
+      const { links, tried } = await ecbYearLinks(k.kind, a.year);
+      listing.push({ kind: k.kind, tried, links: links.length });
+      for (const l of links) {
+        if (l.date > todayIso()) continue;
+        units.push({
+          key: `${k.kind} ${l.date}`,
+          load: async (existing) => {
+            const title = k.title(l.date);
+            if (existing.has(`${title}|${l.date}`)) return [];
+            const r = await sf(l.url, 15000);
+            const text = r && r.ok ? extractText(await r.text()) : '';
+            return text.length < 500 ? [] : [{ title, text, date: l.date, url: l.url, source: k.source, bank: 'ECB' }];
+          },
+        });
+      }
+    }
+    units.sort((x, y) => x.key.slice(-10).localeCompare(y.key.slice(-10)));
+    return { units, listing };
+  }
+  if (a.part === 'speeches' && a.bank === 'FED') {
+    const url = `https://www.federalreserve.gov/newsevents/speech/${a.year}-speeches.htm`;
+    const r = await sf(url, 20000);
+    const links = r && r.ok ? parseFedSpeechIndex(await r.text(), a.year) : [];
+    listing.push({ url, status: r ? r.status : null, speeches: links.length });
+    return {
+      listing,
+      units: links.map(l => ({
+        key: `${l.date} ${l.surname}`,
+        load: async (existing) => {
+          const title = fedSpeechTitle(l);
+          if (existing.has(`${title}|${l.date}`)) return [];
+          return [{ title, text: await fetchPageText(l.url), date: l.date, url: l.url, source: 'Fed Speech', bank: 'FED' }];
+        },
+      })),
+    };
+  }
+  if (a.part === 'speeches' && a.bank === 'ECB') {
+    const { links, tried } = await ecbYearLinks('speeches', a.year);
+    const board = links.map(l => ({ l, sp: ecbBoardSpeaker(l.context) })).filter(x => x.sp);
+    listing.push({ tried, links: links.length, executive_board: board.length });
+    return {
+      listing,
+      units: board.map(({ l, sp }) => ({
+        key: `${l.date} ${sp!.surname}`,
+        load: async (existing) => {
+          const title = ecbSpeechTitle(sp!.surname, l.text);
+          if (existing.has(`${title}|${l.date}`)) return [];
+          return [{ title, text: await fetchPageText(l.url), date: l.date, url: l.url, source: l.kind === 'in' ? 'ECB Interview' : 'ECB Speech', bank: 'ECB' }];
+        },
+      })),
+    };
+  }
+  if (a.part === 'members') {
+    // BIS publishes each speech as review/r{yymmdd}{a,b,…}.htm on its publication day: one unit per week.
+    const units: HistoryUnit[] = [];
+    const last = y1 < todayIso() ? y1 : todayIso();
+    for (let d = y0; d <= last; d = plusDays(d, 7)) {
+      const from = d, till = plusDays(d, 6) < last ? plusDays(d, 6) : last;
+      units.push({
+        key: `BIS ${from}..${till}`,
+        load: async (existing) => {
+          const items: BisItem[] = [];
+          const texts = new Map<string, string>();
+          const days: string[] = [];
+          for (let x = from; x <= till; x = plusDays(x, 1)) days.push(x);
+          await Promise.all(days.map(async day => {
+            for (let n = 0; n < 26; n++) {
+              const url = bisReviewUrl(day, n);
+              const r = await sf(url, 15000);
+              if (!r || !r.ok) break;
+              const html = await r.text();
+              const it = parseBisReviewPage(html, url, day);
+              if (!it && !/<h1\b/i.test(html)) break;                  // a "not found" page served with 200
+              if (it) { items.push(it); texts.set(url, extractText(html)); }
+            }
+          }));
+          // Fallback: the feed with a date window, when it honours the dates.
+          if (!items.length) {
+            const dmy = (x: string) => `${x.slice(8, 10)}/${x.slice(5, 7)}/${x.slice(0, 4)}`;
+            const r = await sf(`${BIS_FEED}?from=${encodeURIComponent(dmy(from))}&till=${encodeURIComponent(dmy(till))}`, 20000);
+            const feed = r && r.ok ? parseBisRss(await r.text()) : [];
+            if (coversWindow(feed.map(f => f.published), plusDays(from, -3), plusDays(till, 3))) items.push(...feed);
+          }
+          // Delivered up to two weeks before publication.
+          return await bisMemberComms(items, a.bank, existing, plusDays(from, -14), till, texts);
+        },
+      });
+    }
+    listing.push({ source: 'bis.org/review', weeks: units.length });
+    return { units, listing };
+  }
+  return { units: [], listing };
+}
+
+/**
+ * Statistical rows rescored by the old Gemini consensus "surprise" pass get their level score back:
+ * the metric's own thresholds applied to the stored value, and its table weight.
+ */
+async function restoreLevelScores(a: HistoryArgs): Promise<{ found: number; restored: number }> {
+  const rows = await restRows<{ id: string; stat_metric: string | null; stat_value: number | null; reasons: string[] | null }>(
+    `${a.sbUrl}/rest/v1/sentiment_items?select=id,stat_metric,stat_value,reasons&bank=eq.${a.bank}&is_statistical=eq.true&item_date=gte.2015-01-01`, a.sbKey);
+  const hit = rows.filter(r => (r.reasons || []).some(x => x.startsWith('surprise:')));
+  let restored = 0;
+  for (const r of hit) {
+    const rule = FR.find(s => s.met === r.stat_metric && fredBank(s) === a.bank) ?? EU.find(e => e.met === r.stat_metric);
+    if (!rule || rule.ht === null || rule.dt === null || r.stat_value === null) continue;
+    if (!a.apply) { restored++; continue; }
+    const st = sv(Number(r.stat_value), rule.ht, rule.dt, rule.dir, rule.w, rule.met);
+    const patch = await fetch(`${a.sbUrl}/rest/v1/sentiment_items?id=eq.${r.id}`, {
+      method: 'PATCH', headers: { ...a.persistHd, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ net_score: st.net_score, label: st.label, stat_weight: rule.w, reasons: (r.reasons || []).filter(x => !x.startsWith('surprise:')) }),
+    });
+    if (patch.ok) restored++;
+  }
+  return { found: hit.length, restored };
+}
+
+async function backfillHistory(a: HistoryArgs) {
+  if (a.part === 'stats') {
+    const r = a.bank === 'ECB' ? await backfillEcbStats(a) : await backfillFredSeries('FED', a.from, a.offset, a.apply, a.fk, a.sbUrl, a.persistHd);
+    return a.offset === 0 ? { ...r, surprise_rescored: await restoreLevelScores(a) } : r;
+  }
+  const maxLimit = { policy: 4, speeches: 12, members: 2, stats: 1 }[a.part];
+  const defLimit = { policy: a.bank === 'FED' ? 2 : 4, speeches: 6, members: 1, stats: 1 }[a.part];
+  const limit = Math.max(1, Math.min(maxLimit, a.limit || defLimit));
+  const { units, listing } = await historyUnits(a);
+  const pageUnits = units.slice(a.offset, a.offset + limit);
+  const existing = pageUnits.length
+    ? await loadExistingItems(a.bank, a.sbUrl, a.sbKey, plusDays(`${a.year}-01-01`, -31), plusDays(`${a.year}-12-31`, 31))
+    : new Set<string>();
+
+  const comms: RawComm[] = [];
+  const errors: string[] = [];
+  for (const u of pageUnits) {
+    try { comms.push(...await u.load(existing)); }
+    catch (e) { errors.push(`${u.key}: ${e instanceof Error ? e.message : String(e)}`); }
+  }
+  const fresh = comms.filter(c => !existing.has(`${c.title}|${c.date}`));
+  let items = dedupItems(await buildCommItems(a.bank, fresh));
+  // SEP: the change in median projections, from FRED (the text is a table, never scored)
+  for (const it of items) {
+    if (!isSepDoc(it.title, it.source)) continue;
+    const sep = await scoreSepFromFred(it.item_date, a.fk);
+    if (!sep) continue;
+    Object.assign(it, {
+      net_score: sep.score, label: sep.label, reasons: sep.reasons,
+      hawk_pts: sep.score > 0 ? Math.round(sep.score * 10) : 0, dove_pts: sep.score < 0 ? Math.round(-sep.score * 10) : 0,
+      policy_dimensions: { ...(it.policy_dimensions || {}), ...sep.policy_dimensions },
+    });
+  }
+  items = items.sort((x, y) => x.item_date.localeCompare(y.item_date));
+  const saved = a.apply ? await persistItems(items, a.sbUrl, a.persistHd) : 0;
+  const next = a.offset + limit;
+  return {
+    listing, units_total: units.length, page: pageUnits.map(u => u.key),
+    found: comms.length, new: fresh.length,
+    scored: items.filter(i => Math.abs(i.net_score) > 0.001).length,
+    operational: items.filter(i => (i.policy_dimensions as any)?.relevance === 'operational').length,
+    saved, errors, sample: itemSample(items),
+    next_offset: next < units.length ? next : null,
+  };
 }
 
 // ── Admin check for write/maintenance modes ──
@@ -2725,6 +2409,52 @@ async function isAdminRequest(req: Request, sbUrl: string): Promise<boolean> {
     const u = await r.json();
     return admins.includes(String(u?.email || '').toLowerCase());
   } catch { return false; }
+}
+
+// ── Layers 1–2 for a batch of communications (live scrape and history backfill) ──
+// Layer 1 sets administrative/operational noise aside (stored at 0, never scored);
+// Layer 2 scores the rest with the frozen scorer.
+async function buildCommItems(bank: string, comms: RawComm[]): Promise<It[]> {
+  const out: It[] = [];
+  const part = partitionForScoring(comms.map(c => ({ ...c, source: c.source, text: c.text })));
+  console.log(bank + ' layer1: ' + part.scorable.length + ' scorable, ' + part.noise.length + ' filtered as noise');
+  for (const { doc: c, verdict } of part.noise) {
+    out.push({
+      bank, source: c.source, item_date: c.date, title: c.title, url: c.url,
+      is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
+      word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
+      stat_metric: null, stat_value: null, stat_weight: 0,
+      policy_dimensions: { relevance: verdict.relevance },
+    });
+  }
+  // An AI-found remark that could not be verified only has the model's own summary: it is stored
+  // (verified:false) but never scored, since that text was written by the model, not the speaker.
+  const unverified = (c: RawComm) => REMARK_SOURCES.includes(c.source) && c.resolution?.verified !== true;
+  const scores = await scoreDocuments(part.scorable.map(({ doc: c }) =>
+    ({ title: c.title, text: unverified(c) ? '' : c.text, bank: c.bank, source: c.source })));
+  for (let i = 0; i < part.scorable.length; i++) {
+    const { doc: c, verdict } = part.scorable[i];
+    const s: AIScore = unverified(c)
+      ? { score: 0, label: 'neutral', reasoning: 'not scored — unverified AI-found remark (only the model summary is available)' }
+      : scores[i];
+    out.push({
+      bank, source: c.source, item_date: c.date,
+      title: c.title, url: c.url,
+      is_statistical: false,
+      hawk_pts: s.score > 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+      dove_pts: s.score < 0 ? Math.round(Math.abs(s.score) * 10) : 0,
+      net_score: s.score,
+      label: s.label,
+      word_count: c.text.split(/\s+/).length,
+      reasons: ['ai:' + s.reasoning, verdict.reason],
+      stat_metric: null, stat_value: null, stat_weight: 0,
+      policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
+        // no URL to re-read later, or the text is an extract of the page (verified AI-found remark): keep the exact text that was scored
+        ...(c.url && !c.keepText ? {} : { source_text: (c.text || '').slice(0, 6000) }),
+        ...(c.resolution ? { source_resolution: c.resolution } : {}) },
+    });
+  }
+  return out;
 }
 
 // ── DB persistence ──
@@ -2783,9 +2513,11 @@ Deno.serve(async (req) => {
 
     const co = new Date(); co.setDate(co.getDate() - days);
     const cs = co.toISOString().split('T')[0];
+    // Stored items a scrape can meet again: its window plus a margin (BIS publishes after delivery).
+    const seenFrom = isoDaysAgo(30, co);
     const fk = Deno.env.get('FRED_API_KEY') || '';
-    // Gemini remains available for scraping helpers (member-remark discovery, cross-language dedup,
-    // ECB URL fallback) and for SEP projections. It never scores other communications in frozen modes.
+    // Gemini remains available for scraping helpers only (member-remark discovery, cross-language dedup,
+    // ECB URL fallback). It never sets a score.
     const aiKey = Deno.env.get('LOVABLE_API_KEY') || '';
     const sbUrl = Deno.env.get('SUPABASE_URL')!;
     const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -2793,12 +2525,22 @@ Deno.serve(async (req) => {
 
     const persistHd = { 'Authorization': 'Bearer ' + sbKey, 'apikey': sbKey, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
 
+    // Every maintenance mode is admin-only (this function runs with verify_jwt = false).
+    if (['scoring-status', 'rescore-frozen', 'resolve-remarks', 'probe-member-sources', 'fed-speeches-report', 'bundesbank-check',
+      'repair-transcripts', 'backfill-fred', 'backfill-history'].includes(body.mode)) {
+      if (!(await isAdminRequest(req, sbUrl))) {
+        return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
+          status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     // One-off / repeatable historical repair of the US statistical channel.
     // Re-read transcripts/PDFs with the fixed extractor and rescore them.
     if (body.mode === 'repair-transcripts') {
       const banks = bank === 'both' ? ['FED', 'ECB'] : [bank];
       const out: Record<string, number> = {};
-      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, aiKey, body.limit || 12, body.refs === true, body.stale === true);
+      for (const b of banks) out[b] = await rescoreTranscripts(b, sbUrl, sbKey, body.limit || 12, body.refs === true, body.stale === true);
       return new Response(JSON.stringify({ mode: 'repair-transcripts', run_id: run.run_id, rescored: out }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
@@ -2807,13 +2549,6 @@ Deno.serve(async (req) => {
 
     // Frozen-scorer backfill, paged: call repeatedly with the returned next_offset.
     //   { "mode": "rescore-frozen", "bank": "fed", "offset": 0, "apply": false }
-    if (['scoring-status', 'rescore-frozen', 'resolve-remarks', 'probe-member-sources', 'fed-speeches-report', 'bundesbank-check'].includes(body.mode)) {
-      if (!(await isAdminRequest(req, sbUrl))) {
-        return new Response(JSON.stringify({ error: 'admin only: sign in with an email listed in ADMIN_EMAILS' }), {
-          status: 403, headers: { ...CH, 'Content-Type': 'application/json' },
-        });
-      }
-    }
     if (body.mode === 'scoring-status') {
       return new Response(JSON.stringify({
         mode: 'scoring-status', scorer_mode: scorerMode(),
@@ -2841,7 +2576,7 @@ Deno.serve(async (req) => {
     // Read-only: what the next scrapes would import from the regional Fed banks' sites.
     //   { "mode": "fed-speeches-report", "per_source": 4, "days": 365 }
     if (body.mode === 'fed-speeches-report') {
-      const existing = await loadExistingItems('FED', sbUrl, sbKey);
+      const existing = await loadExistingItems('FED', sbUrl, sbKey, seenFrom);
       const r = await fetchFedSiteSpeeches(existing, cs, Math.min(body.per_source || 4, 10), true);
       return new Response(JSON.stringify({ mode: 'fed-speeches-report', run_id: run.run_id, cutoff: cs, rows: r.rows }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
@@ -2866,34 +2601,34 @@ Deno.serve(async (req) => {
       });
     }
 
+    // FRED history (first releases), one series per call; apply=false only reports.
+    //   { "mode": "backfill-fred", "bank": "fed", "from": "2015-01-01", "offset": 0, "apply": false }
     if (body.mode === 'backfill-fred') {
+      const b = bank === 'ECB' ? 'ECB' : 'FED';
+      const r = await backfillFredSeries(b, body.from || '2015-01-01', body.offset || 0, body.apply === true, fk, sbUrl, persistHd);
+      return new Response(JSON.stringify({ mode: 'backfill-fred', run_id: run.run_id, bank: b, apply: body.apply === true, ...r }), {
+        headers: { ...CH, 'Content-Type': 'application/json' },
+      });
+    }
 
-      const from = body.from || '2026-01-01';
-      const items = fk ? await backfillFred(fk, from) : [];
-      let saved = 0;
-      for (let i = 0; i < items.length; i += 50) {
-        const batch = items.slice(i, i + 50);
-        const resp = await fetch(sbUrl + '/rest/v1/sentiment_items?on_conflict=bank,source,title,item_date', {
-          method: 'POST', headers: persistHd,
-          body: JSON.stringify(batch.map(it => ({
-            bank: it.bank, source: it.source, item_date: it.item_date, title: it.title,
-            url: it.url || '', is_statistical: it.is_statistical,
-            hawk_pts: it.hawk_pts, dove_pts: it.dove_pts, net_score: it.net_score,
-            label: it.label, word_count: it.word_count, reasons: it.reasons,
-            stat_metric: it.stat_metric, stat_value: it.stat_value, stat_weight: it.stat_weight,
-          }))),
-        });
-        if (resp.ok) saved += batch.length;
-        else console.error('backfill persist error:', resp.status, await resp.text());
-      }
-      return new Response(JSON.stringify({ mode: 'backfill-fred', from, found: items.length, saved }), {
+    // History backfill from 2015, one bank / year / part per call, paged; apply=false only reports.
+    //   { "mode": "backfill-history", "bank": "fed", "year": 2015, "part": "policy", "offset": 0, "limit": 2, "apply": false }
+    if (body.mode === 'backfill-history') {
+      const b = bank === 'ECB' ? 'ECB' : 'FED';
+      const part = (['policy', 'speeches', 'members', 'stats'].includes(body.part) ? body.part : 'policy') as HistoryPart;
+      const year = Math.max(2015, Math.min(+new Date().getUTCFullYear(), Number(body.year) || 2015));
+      const r = await backfillHistory({
+        bank: b, year, part, offset: Math.max(0, Number(body.offset) || 0), limit: Number(body.limit) || 0,
+        apply: body.apply === true, from: body.from || '2015-01-01', fk, sbUrl, sbKey, persistHd,
+      });
+      return new Response(JSON.stringify({ mode: 'backfill-history', run_id: run.run_id, bank: b, year, part, apply: body.apply === true, ...r }), {
         headers: { ...CH, 'Content-Type': 'application/json' },
       });
     }
 
 
     if (bank === 'both' || bank === 'FED') {
-      const existing = await loadExistingItems('FED', sbUrl, sbKey);
+      const existing = await loadExistingItems('FED', sbUrl, sbKey, seenFrom);
       console.log('FED: ' + existing.size + ' existing items in DB');
 
       const [fr, rawComms, fomcRaw, pressConfRaw, fedMediaInterviews] = await Promise.allSettled([
@@ -2906,28 +2641,15 @@ Deno.serve(async (req) => {
 
       const fi: It[] = [];
       if (fr.status === 'fulfilled') fi.push(...fr.value);
-      // Re-score macro prints as standardized surprises vs market consensus
-      if (aiKey && fi.length) await applyConsensusSurprise(fi, aiKey);
 
 
       // Combine all communication sources
       const allRawComms: RawComm[] = [];
       if (rawComms.status === 'fulfilled') allRawComms.push(...rawComms.value);
-      if (fomcRaw.status === 'fulfilled') {
-        for (const m of fomcRaw.value) {
-          allRawComms.push({ title: m.title, text: m.text, date: m.date, url: m.url, source: 'FOMC Minutes', bank: 'FED' });
-        }
-      }
-      if (pressConfRaw.status === 'fulfilled') {
-        for (const pc of pressConfRaw.value) {
-          // Assign more specific source labels
-          let src = 'FOMC Press Conf';
-          if (pc.title.includes('Statement')) src = 'FOMC Statement';
-          else if (pc.title.includes('Summary of Economic Projections')) src = 'FOMC SEP';
-          else if (pc.title.includes('Transcript')) src = 'FOMC Press Conf';
-          allRawComms.push({ title: pc.title, text: pc.text, date: pc.date, url: pc.url, source: src, bank: 'FED' });
-        }
-      }
+      allRawComms.push(...fomcComms(
+        fomcRaw.status === 'fulfilled' ? fomcRaw.value : [],
+        pressConfRaw.status === 'fulfilled' ? pressConfRaw.value : [],
+      ));
 
       // Add Fed official media interview remarks
       if (fedMediaInterviews.status === 'fulfilled' && fedMediaInterviews.value.length > 0) {
@@ -2944,7 +2666,7 @@ Deno.serve(async (req) => {
           if (!text && sv.url) text = await fetchPageText(sv.url);
           surveyTexts.push({ title: sv.title, text: text || sv.title, bank: 'FED', source: sv.source });
         }
-        const surveyScores = await scoreBatchWithAI(surveyTexts, aiKey);
+        const surveyScores = await scoreDocuments(surveyTexts);
         for (let i = 0; i < fedSurveys.length; i++) {
           const c = fedSurveys[i]; const sc = surveyScores[i];
           console.log('FED: reclassifying as statistical: ' + c.title);
@@ -2964,47 +2686,8 @@ Deno.serve(async (req) => {
       const newComms = allRawComms.filter(c => !existing.has(`${c.title}|${c.date}`) && !fedSurveyKeys.has(`${c.title}|${c.date}`));
       console.log('FED: ' + allRawComms.length + ' total comms, ' + newComms.length + ' NEW to score');
 
-      // Layer 1 — drop administrative/operational noise before the NLP pass
-      const fedPart = partitionForScoring(newComms.map(c => ({ ...c, source: c.source, text: c.text })));
-      console.log('FED layer1: ' + fedPart.scorable.length + ' scorable, ' + fedPart.noise.length + ' filtered as noise');
-      for (const { doc: c, verdict } of fedPart.noise) {
-        fi.push({
-          bank: 'FED', source: c.source, item_date: c.date, title: c.title, url: c.url,
-          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
-          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
-          stat_metric: null, stat_value: null, stat_weight: 0,
-          policy_dimensions: { relevance: verdict.relevance },
-        });
-      }
-
-      // Layer 2 — semantic scoring with entity-level sub-dimensions
-      const fedScorable = fedPart.scorable;
-      if (fedScorable.length > 0) {
-        const scores = await scoreBatchWithAI(
-          fedScorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
-          aiKey,
-        );
-        for (let i = 0; i < fedScorable.length; i++) {
-          const { doc: c, verdict } = fedScorable[i];
-          const s = scores[i];
-          fi.push({
-            bank: 'FED', source: c.source, item_date: c.date,
-            title: c.title, url: c.url,
-            is_statistical: false,
-            hawk_pts: s.score > 0 ? Math.round(Math.abs(s.score) * 10) : 0,
-            dove_pts: s.score < 0 ? Math.round(Math.abs(s.score) * 10) : 0,
-            net_score: s.score,
-            label: s.label,
-            word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning, verdict.reason],
-            stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
-              // no URL to re-read later, or the text is an extract of the page (verified AI-found remark): keep the exact text that was scored
-              ...(c.url && !c.keepText ? {} : { source_text: (c.text || '').slice(0, 6000) }),
-              ...(c.resolution ? { source_resolution: c.resolution } : {}) },
-          });
-        }
-      }
+      // Layers 1–2 — set operational noise aside, score the rest with the frozen scorer
+      fi.push(...await buildCommItems('FED', newComms));
 
       // Persist new items, then aggregate from FULL DB
       let fiDedup = dedupItems(fi);
@@ -3034,7 +2717,7 @@ Deno.serve(async (req) => {
         }
       }
       await pruneDuplicateComms('FED', sbUrl, sbKey);
-      await rescoreZeroPolicyDocs('FED', sbUrl, sbKey, aiKey);
+      await rescoreZeroPolicyDocs('FED', sbUrl, sbKey);
       const allFedItems = await loadAllItemsForAggregation('FED', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allFedItems.filter(i => !i.is_statistical), 'FED');
@@ -3055,23 +2738,23 @@ Deno.serve(async (req) => {
 
     if (bank === 'both' || bank === 'ECB') {
       const [existing, existingStatItems] = await Promise.all([
-        loadExistingItems('ECB', sbUrl, sbKey),
-        loadExistingStatItems('ECB', sbUrl, sbKey),
+        loadExistingItems('ECB', sbUrl, sbKey, seenFrom),
+        loadExistingStatItems('ECB', sbUrl, sbKey, isoDaysAgo(60, co)),
       ]);
       console.log('ECB: ' + existing.size + ' existing items in DB, ' + existingStatItems.length + ' stat items for dedup');
 
-      const [rawComms, st, ecbPressConf, ecbAccounts, mediaInterviews] = await Promise.allSettled([
+      const [rawComms, st, ecbPressConf, ecbAccounts, mediaInterviews, ecbFred] = await Promise.allSettled([
         fetchRssRaw(cs, 'ECB'),
         fetchEcbStats(cs, existingStatItems),
         fetchEcbPressConferences(cs, aiKey),
         fetchEcbAccounts(cs),
         fetchMemberCommunications('ECB', aiKey, existing, cs),
+        fk ? fetchFred(fk, days, 'ECB') : Promise.resolve([] as It[]),   // ECB balance sheet (weekly financial statement)
       ]);
 
       const ei: It[] = [];
       if (st.status === 'fulfilled') ei.push(...st.value);
-      // Re-score macro prints as standardized surprises vs market consensus
-      if (aiKey && ei.length) await applyConsensusSurprise(ei, aiKey);
+      if (ecbFred.status === 'fulfilled') ei.push(...ecbFred.value);
 
 
       const allRawComms: RawComm[] = rawComms.status === 'fulfilled' ? rawComms.value : [];
@@ -3098,19 +2781,19 @@ Deno.serve(async (req) => {
       }
 
       // Reclassify consumer expectations surveys and similar as statistical
-      // But score them with AI since they contain policy-relevant textual content
+      // (scored by the frozen scorer, since they contain policy-relevant text)
       const actualComms: RawComm[] = [];
       const reclassifiedSurveys: RawComm[] = [];
       for (const c of allRawComms) {
         if (shouldReclassifyAsStatistical(c.title, c.source)) {
-          console.log('Reclassifying as statistical (will AI-score): ' + c.title);
+          console.log('Reclassifying as statistical: ' + c.title);
           reclassifiedSurveys.push(c);
         } else {
           actualComms.push(c);
         }
       }
 
-      // AI-score reclassified surveys and add as statistical items
+      // Score reclassified surveys and add them as statistical items
       if (reclassifiedSurveys.length > 0) {
         const surveyTexts: { title: string; text: string; bank: string }[] = [];
         for (const s of reclassifiedSurveys) {
@@ -3119,7 +2802,7 @@ Deno.serve(async (req) => {
           if (!text && s.url) text = await fetchPageText(s.url);
           surveyTexts.push({ title: s.title, text: text || s.title, bank: s.bank });
         }
-        const surveyScores = await scoreBatchWithAI(surveyTexts, aiKey);
+        const surveyScores = await scoreDocuments(surveyTexts);
         for (let i = 0; i < reclassifiedSurveys.length; i++) {
           const c = reclassifiedSurveys[i];
           const sc = surveyScores[i];
@@ -3151,48 +2834,10 @@ Deno.serve(async (req) => {
       }
 
       const newComms = actualComms.filter(c => !existing.has(`${c.title}|${c.date}`));
-      console.log('ECB: ' + actualComms.length + ' actual comms, ' + newComms.length + ' NEW to score with AI');
+      console.log('ECB: ' + actualComms.length + ' actual comms, ' + newComms.length + ' NEW to score');
 
-      // Layer 1 — drop administrative/operational noise before the NLP pass
-      const ecbPart = partitionForScoring(newComms);
-      console.log('ECB layer1: ' + ecbPart.scorable.length + ' scorable, ' + ecbPart.noise.length + ' filtered as noise');
-      for (const { doc: c, verdict } of ecbPart.noise) {
-        ei.push({
-          bank: 'ECB', source: c.source, item_date: c.date, title: c.title, url: c.url,
-          is_statistical: false, hawk_pts: 0, dove_pts: 0, net_score: 0, label: 'neutral',
-          word_count: (c.text || '').split(/\s+/).length, reasons: [verdict.reason],
-          stat_metric: null, stat_value: null, stat_weight: 0,
-          policy_dimensions: { relevance: verdict.relevance },
-        });
-      }
-
-      // Layer 2 — semantic scoring with entity-level sub-dimensions
-      if (ecbPart.scorable.length > 0) {
-        const scores = await scoreBatchWithAI(
-          ecbPart.scorable.map(({ doc: c }) => ({ title: c.title, text: c.text, bank: c.bank, source: c.source })),
-          aiKey,
-        );
-        for (let i = 0; i < ecbPart.scorable.length; i++) {
-          const { doc: c, verdict } = ecbPart.scorable[i];
-          const s = scores[i];
-          ei.push({
-            bank: 'ECB', source: c.source, item_date: c.date,
-            title: c.title, url: c.url,
-            is_statistical: false,
-            hawk_pts: s.score > 0 ? Math.round(Math.abs(s.score) * 10) : 0,
-            dove_pts: s.score < 0 ? Math.round(Math.abs(s.score) * 10) : 0,
-            net_score: s.score,
-            label: s.label,
-            word_count: c.text.split(/\s+/).length,
-            reasons: ['ai:' + s.reasoning, verdict.reason],
-            stat_metric: null, stat_value: null, stat_weight: 0,
-            policy_dimensions: { relevance: verdict.relevance, ...(s.dimensions || {}), ...(s.audit ? { scoring_audit: s.audit } : {}),
-              // no URL to re-read later, or the text is an extract of the page (verified AI-found remark): keep the exact text that was scored
-              ...(c.url && !c.keepText ? {} : { source_text: (c.text || '').slice(0, 6000) }),
-              ...(c.resolution ? { source_resolution: c.resolution } : {}) },
-          });
-        }
-      }
+      // Layers 1–2 — set operational noise aside, score the rest with the frozen scorer
+      ei.push(...await buildCommItems('ECB', newComms));
 
       // Persist new items, then aggregate from FULL DB
       // Deduplicate items by canonical URL / normalized title before persist
@@ -3229,7 +2874,7 @@ Deno.serve(async (req) => {
         }
       }
       await pruneDuplicateComms('ECB', sbUrl, sbKey);
-      await rescoreZeroPolicyDocs('ECB', sbUrl, sbKey, aiKey);
+      await rescoreZeroPolicyDocs('ECB', sbUrl, sbKey);
       const allEcbItems = await loadAllItemsForAggregation('ECB', sbUrl, sbKey);
       // Layer 4 — α·S_text + (1−α)·S_stats
       const s1 = ag(allEcbItems.filter(i => !i.is_statistical), 'ECB');
@@ -3248,11 +2893,11 @@ Deno.serve(async (req) => {
       console.log('ECB: ' + allEcbItems.length + ' items (comms: ' + s1.n + ', total: ' + s2.n + ')');
     }
 
-    // Run SEP delta scoring (compare projections between meetings)
-    if (aiKey) {
+    // SEP delta scoring: change in the FOMC median projections, read from FRED (no LLM)
+    if (fk) {
       try {
         console.log('Running SEP delta scoring...');
-        const sepResult = await runSEPDeltaScoring(sbUrl, sbKey, aiKey);
+        const sepResult = await runSEPDeltaScoring(sbUrl, sbKey, fk);
         console.log('SEP delta scoring: updated=' + sepResult.updated);
         result.sep_delta = sepResult;
       } catch (e) { console.error('SEP delta scoring error:', e); }

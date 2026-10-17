@@ -11,6 +11,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { FROZEN_MODEL } from '@/lib/scoring-provenance';
+import { HistoryBackfill } from '@/components/admin/HistoryBackfill';
 
 /**
  * Admin page for the switch from Gemini scoring to the frozen scorer.
@@ -26,7 +27,7 @@ interface CmpRow {
 }
 interface Status { scorer_mode: string; member_source: string; gemini_key_present: boolean }
 type Bank = 'both' | 'fed' | 'ecb';
-interface Progress { scored: number; skipped: number; offset: number; done: boolean }
+interface Progress { scored: number; skipped: number; cleared: number; offset: number; done: boolean }
 interface RemarkRow {
   id: string; bank: string; date: string; title: string; speaker?: string | null; status: string;
   verified?: boolean; via?: string; url?: string; reason?: string; sentences?: number;
@@ -161,10 +162,13 @@ export default function AdminScoring() {
           body: { mode: 'rescore-frozen', bank, offset, limit: 20, apply },
         });
         if (error) { setRunErr(String(error.message || error)); break; }
-        const result = (data?.result ?? {}) as Record<string, { scored: number; skipped: number; next_offset: number | null }>;
+        const result = (data?.result ?? {}) as Record<string, { scored: number; skipped: number; cleared?: number; next_offset: number | null }>;
         for (const [b, r] of Object.entries(result)) {
-          const prev = acc[b] ?? { scored: 0, skipped: 0, offset: 0, done: false };
-          acc[b] = { scored: prev.scored + r.scored, skipped: prev.skipped + r.skipped, offset: r.next_offset ?? prev.offset, done: r.next_offset === null };
+          const prev = acc[b] ?? { scored: 0, skipped: 0, cleared: 0, offset: 0, done: false };
+          acc[b] = {
+            scored: prev.scored + r.scored, skipped: prev.skipped + r.skipped, cleared: prev.cleared + (r.cleared ?? 0),
+            offset: r.next_offset ?? prev.offset, done: r.next_offset === null,
+          };
         }
         setProgress({ ...acc });
         const next = Object.values(result).map(r => r.next_offset).filter((n): n is number => n !== null);
@@ -257,9 +261,9 @@ export default function AdminScoring() {
         <h2 className="text-sm font-semibold">Status</h2>
         {statusErr ? <p className="text-sm text-destructive">{statusErr}</p> : (
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-            <span>SCORER_MODE: <span className="font-mono">{status?.scorer_mode ?? '…'}</span></span>
+            <span>Scorer: <span className="font-mono">{status?.scorer_mode ?? '…'}</span></span>
             <span>MEMBER_SOURCE: <span className="font-mono">{status?.member_source ?? '…'}</span></span>
-            <span>Gemini key (scraping, SEP): <span className="font-mono">{status ? (status.gemini_key_present ? 'present' : 'missing') : '…'}</span></span>
+            <span>Gemini key (scraping and discovery only, never scoring): <span className="font-mono">{status ? (status.gemini_key_present ? 'present' : 'missing') : '…'}</span></span>
             <span>Scorer in use on the 20 newest texts: <span className="font-mono">{modeInUse ?? '…'}</span></span>
           </div>
         )}
@@ -289,7 +293,9 @@ export default function AdminScoring() {
         <p className="text-xs text-muted-foreground leading-snug">
           Unchecked: writes the frozen score next to the existing one (nothing published changes).
           Checked: overwrites the published score, label and the three dimensions, and keeps the previous
-          Gemini score for reference. SEP rows are always skipped. Each call re-reads up to 20 source pages per bank.
+          Gemini score for reference. A row the frozen scorer cannot score (unreadable source, no policy sentences,
+          unverified AI remark) is set to 0 when its published score did not come from the frozen scorer (cleared).
+          SEP rows are always skipped (they are scored from FRED). Each call re-reads up to 20 source pages per bank.
         </p>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex gap-1.5">
@@ -310,7 +316,7 @@ export default function AdminScoring() {
         {Object.keys(progress).length > 0 && (
           <div className="text-xs font-mono space-y-0.5">
             {Object.entries(progress).map(([b, p]) => (
-              <div key={b}>{b}: scored {p.scored} · skipped {p.skipped} · offset {p.offset}{p.done ? ' · done' : running ? ' · running' : ''}</div>
+              <div key={b}>{b}: scored {p.scored} · skipped {p.skipped} · cleared {p.cleared} · offset {p.offset}{p.done ? ' · done' : running ? ' · running' : ''}</div>
             ))}
           </div>
         )}
@@ -318,6 +324,8 @@ export default function AdminScoring() {
       </section>
 
       {/* Bundesbank items: keep only English items by the President */}
+      <HistoryBackfill />
+
       <section className="rounded-xl border border-border bg-card p-4 space-y-3">
         <h2 className="text-sm font-semibold">Bundesbank items: check</h2>
         <p className="text-xs text-muted-foreground leading-snug">

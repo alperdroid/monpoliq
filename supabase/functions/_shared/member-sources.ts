@@ -48,6 +48,19 @@ const EURO_NCBS = [
   'National Bank of Slovakia', 'Eesti Pank', 'Bank of Estonia', 'Latvijas Banka', 'Bank of Latvia', 'Bank of Lithuania',
   'Central Bank of Luxembourg', 'Banque centrale du Luxembourg', 'Croatian National Bank', 'Bulgarian National Bank',
 ];
+// Euro adoption after 2015: the governor joins the Governing Council on that date.
+// (Lithuania joined on 1 January 2015; every other NCB above was a member before 2015.)
+const EURO_ENTRY: { re: RegExp; from: string }[] = [
+  { re: /Croatian National Bank/i, from: '2023-01-01' },
+  { re: /Bulgarian National Bank/i, from: '2026-01-01' },
+];
+
+/** Whether the NCB's governor sat on the ECB Governing Council on `date` (YYYY-MM-DD). */
+export function isEuroAreaMember(institution: string, date: string): boolean {
+  const e = EURO_ENTRY.find(x => x.re.test(institution));
+  return !e || date >= e.from;
+}
+
 const ncbAlt = EURO_NCBS.map(n => n.replace(/\s+/g, '\\s+')).join('|');
 // "Governor of the Bank of Italy", "President of the Deutsche Bundesbank" — but not "Deputy Governor", "Vice-President"
 const NCB_ROLE = new RegExp(`(?<!Deputy\\s)(?<!Vice-)(?<!Vice\\s)\\b(Governor|President)\\b(?:\\s+and\\s+[A-Z][\\w ]{0,40}?)?\\s+of\\s+(?:the\\s+)?(${ncbAlt})`, 'i');

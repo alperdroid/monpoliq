@@ -102,30 +102,58 @@ export async function runSentimentAnalysis(
   return resp.json();
 }
 
-/**
- * Fetch the latest cached sentiment items from the database.
- */
-export async function getCachedSentimentItems(bank?: 'FED' | 'ECB'): Promise<SentimentItem[]> {
-  // PostgREST caps a response at 1000 rows — page through so the full history
-  // (statistical backfill included) reaches the charts.
+/** Pages load this much history; the full archive (back to 2015) is read only for the index history export. */
+export const RECENT_HISTORY_DAYS = 730;
+
+/** First date (YYYY-MM-DD) of the history the pages load. */
+export function recentHistoryStart(now = new Date()): string {
+  return new Date(now.getTime() - RECENT_HISTORY_DAYS * 86400000).toISOString().split('T')[0];
+}
+
+/** Every row of a query, newest first: PostgREST caps a response at 1000 rows. */
+async function allPages<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>): Promise<T[]> {
   const PAGE = 1000;
-  const all: SentimentItem[] = [];
+  const all: T[] = [];
   for (let from = 0; ; from += PAGE) {
-    let query = supabase
-      .from('sentiment_items')
-      .select('*')
-      .order('item_date', { ascending: false })
-      .range(from, from + PAGE - 1);
-
-    if (bank) query = query.eq('bank', bank);
-
-    const { data, error } = await query;
+    const { data, error } = await page(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
-    const rows = (data || []) as unknown as SentimentItem[];
+    const rows = (data || []) as T[];
     all.push(...rows);
     if (rows.length < PAGE) break;
   }
   return all;
+}
+
+/**
+ * Fetch the cached sentiment items from the database: the last RECENT_HISTORY_DAYS by default
+ * (statistical backfill included), or everything with `sinceDays = null`.
+ */
+export async function getCachedSentimentItems(bank?: 'FED' | 'ECB', sinceDays: number | null = RECENT_HISTORY_DAYS): Promise<SentimentItem[]> {
+  const since = sinceDays === null ? null : new Date(Date.now() - sinceDays * 86400000).toISOString().split('T')[0];
+  return allPages<SentimentItem>((from, to) => {
+    let query = supabase
+      .from('sentiment_items')
+      .select('*')
+      .order('item_date', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to);
+    if (bank) query = query.eq('bank', bank);
+    if (since) query = query.gte('item_date', since);
+    return query;
+  });
+}
+
+/** Columns the monthly index needs (scoring-weights WeightableItem), for every scored item back to 2015. */
+export type IndexHistoryItem = Pick<SentimentItem, 'bank' | 'source' | 'title' | 'item_date' | 'net_score' | 'is_statistical' | 'label' | 'stat_weight'>;
+
+export async function getIndexHistoryItems(): Promise<IndexHistoryItem[]> {
+  return allPages<IndexHistoryItem>((from, to) => supabase
+    .from('sentiment_items')
+    .select('bank,source,title,item_date,net_score,is_statistical,label,stat_weight')
+    .neq('net_score', 0)
+    .order('item_date', { ascending: false })
+    .order('id', { ascending: true })
+    .range(from, to));
 }
 
 

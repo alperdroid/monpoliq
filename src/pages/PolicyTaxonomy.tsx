@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { getCachedSentimentItems, recentHistoryStart, type SentimentItem } from '@/lib/api/sentiment';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { TaxonomyMatrix } from '@/components/meetings/TaxonomyMatrix';
 import { supabase } from '@/integrations/supabase/client';
@@ -11,7 +11,8 @@ import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
 import { hasTaxonomyDimensions, statementItemsForMeeting, taxonomyCacheKey } from '../../supabase/functions/_shared/policy-taxonomy';
 
 const todayISO = new Date().toISOString().slice(0, 10);
-const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date < todayISO);
+// The meeting pages cover the history the pages load (two years), not the full calendar back to 2015.
+const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date >= recentHistoryStart() && m.date < todayISO);
 
 const PolicyTaxonomy = () => {
   const [classifying, setClassifying] = useState(false);

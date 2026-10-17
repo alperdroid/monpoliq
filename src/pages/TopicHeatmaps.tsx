@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getCachedSentimentItems, type SentimentItem } from '@/lib/api/sentiment';
+import { getCachedSentimentItems, recentHistoryStart, type SentimentItem } from '@/lib/api/sentiment';
 import { TooltipInfo } from '@/components/ui/tooltip-info';
 import { TopicHeatmap, TopicHeatmapMatrix } from '@/components/meetings/TopicHeatmap';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,7 +15,8 @@ import { CENTRAL_BANK_MEETINGS } from '@/data/meeting-schedule';
  *  are built from the official policy statement released after the meeting, so
  *  future / same-day meetings must not appear. */
 const todayISO = new Date().toISOString().slice(0, 10);
-const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date < todayISO);
+// The meeting pages cover the history the pages load (two years), not the full calendar back to 2015.
+const MEETINGS = CENTRAL_BANK_MEETINGS.filter(m => m.date >= recentHistoryStart() && m.date < todayISO);
 
 const POLICY_SOURCES = [
   'fomc press conference', 'fomc minutes', 'fomc statement', 'fomc sep',

@@ -26,7 +26,30 @@ export const MEETINGS_2026: Record<string, string[]> = {
  * Mirrors the `bps` field in src/data/meeting-schedule.ts.
  */
 export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
+  // Fed: change in the federal funds target range (upper bound).
   FED: [
+    { date: '2015-01-28', bps: 0 }, { date: '2015-03-18', bps: 0 }, { date: '2015-04-29', bps: 0 }, { date: '2015-06-17', bps: 0 },
+    { date: '2015-07-29', bps: 0 }, { date: '2015-09-17', bps: 0 }, { date: '2015-10-28', bps: 0 }, { date: '2015-12-16', bps: 25 },
+    { date: '2016-01-27', bps: 0 }, { date: '2016-03-16', bps: 0 }, { date: '2016-04-27', bps: 0 }, { date: '2016-06-15', bps: 0 },
+    { date: '2016-07-27', bps: 0 }, { date: '2016-09-21', bps: 0 }, { date: '2016-11-02', bps: 0 }, { date: '2016-12-14', bps: 25 },
+    { date: '2017-02-01', bps: 0 }, { date: '2017-03-15', bps: 25 }, { date: '2017-05-03', bps: 0 }, { date: '2017-06-14', bps: 25 },
+    { date: '2017-07-26', bps: 0 }, { date: '2017-09-20', bps: 0 }, { date: '2017-11-01', bps: 0 }, { date: '2017-12-13', bps: 25 },
+    { date: '2018-01-31', bps: 0 }, { date: '2018-03-21', bps: 25 }, { date: '2018-05-02', bps: 0 }, { date: '2018-06-13', bps: 25 },
+    { date: '2018-08-01', bps: 0 }, { date: '2018-09-26', bps: 25 }, { date: '2018-11-08', bps: 0 }, { date: '2018-12-19', bps: 25 },
+    { date: '2019-01-30', bps: 0 }, { date: '2019-03-20', bps: 0 }, { date: '2019-05-01', bps: 0 }, { date: '2019-06-19', bps: 0 },
+    { date: '2019-07-31', bps: -25 }, { date: '2019-09-18', bps: -25 }, { date: '2019-10-30', bps: -25 }, { date: '2019-12-11', bps: 0 },
+    { date: '2020-01-29', bps: 0 }, { date: '2020-03-03', bps: -50 }, { date: '2020-03-15', bps: -100 }, { date: '2020-04-29', bps: 0 },
+    { date: '2020-06-10', bps: 0 }, { date: '2020-07-29', bps: 0 }, { date: '2020-09-16', bps: 0 }, { date: '2020-11-05', bps: 0 },
+    { date: '2020-12-16', bps: 0 },
+    { date: '2021-01-27', bps: 0 }, { date: '2021-03-17', bps: 0 }, { date: '2021-04-28', bps: 0 }, { date: '2021-06-16', bps: 0 },
+    { date: '2021-07-28', bps: 0 }, { date: '2021-09-22', bps: 0 }, { date: '2021-11-03', bps: 0 }, { date: '2021-12-15', bps: 0 },
+    { date: '2022-01-26', bps: 0 }, { date: '2022-03-16', bps: 25 }, { date: '2022-05-04', bps: 50 }, { date: '2022-06-15', bps: 75 },
+    { date: '2022-07-27', bps: 75 }, { date: '2022-09-21', bps: 75 }, { date: '2022-11-02', bps: 75 }, { date: '2022-12-14', bps: 50 },
+    { date: '2023-02-01', bps: 25 }, { date: '2023-03-22', bps: 25 }, { date: '2023-05-03', bps: 25 }, { date: '2023-06-14', bps: 0 },
+    { date: '2023-07-26', bps: 25 }, { date: '2023-09-20', bps: 0 }, { date: '2023-11-01', bps: 0 }, { date: '2023-12-13', bps: 0 },
+    { date: '2024-01-31', bps: 0 }, { date: '2024-03-20', bps: 0 }, { date: '2024-05-01', bps: 0 }, { date: '2024-06-12', bps: 0 },
+    { date: '2024-07-31', bps: 0 }, { date: '2024-09-18', bps: -50 }, { date: '2024-11-07', bps: -25 }, { date: '2024-12-18', bps: -25 },
+    { date: '2025-01-29', bps: 0 }, { date: '2025-03-19', bps: 0 }, { date: '2025-05-07', bps: 0 },
     { date: '2025-06-18', bps: 0 }, { date: '2025-07-30', bps: 0 },
     { date: '2025-09-17', bps: -25 }, { date: '2025-10-29', bps: -25 },
     { date: '2025-12-10', bps: -25 }, { date: '2026-01-28', bps: 0 },
@@ -34,7 +57,29 @@ export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
     { date: '2026-06-17', bps: 0 }, { date: '2026-07-29', bps: 0 },
     { date: '2026-09-16', bps: 25 },
   ],
+  // ECB: change in the deposit facility rate.
   ECB: [
+    { date: '2015-01-22', bps: 0 }, { date: '2015-03-05', bps: 0 }, { date: '2015-04-15', bps: 0 }, { date: '2015-06-03', bps: 0 },
+    { date: '2015-07-16', bps: 0 }, { date: '2015-09-03', bps: 0 }, { date: '2015-10-22', bps: 0 }, { date: '2015-12-03', bps: -10 },
+    { date: '2016-01-21', bps: 0 }, { date: '2016-03-10', bps: -10 }, { date: '2016-04-21', bps: 0 }, { date: '2016-06-02', bps: 0 },
+    { date: '2016-07-21', bps: 0 }, { date: '2016-09-08', bps: 0 }, { date: '2016-10-20', bps: 0 }, { date: '2016-12-08', bps: 0 },
+    { date: '2017-01-19', bps: 0 }, { date: '2017-03-09', bps: 0 }, { date: '2017-04-27', bps: 0 }, { date: '2017-06-08', bps: 0 },
+    { date: '2017-07-20', bps: 0 }, { date: '2017-09-07', bps: 0 }, { date: '2017-10-26', bps: 0 }, { date: '2017-12-14', bps: 0 },
+    { date: '2018-01-25', bps: 0 }, { date: '2018-03-08', bps: 0 }, { date: '2018-04-26', bps: 0 }, { date: '2018-06-14', bps: 0 },
+    { date: '2018-07-26', bps: 0 }, { date: '2018-09-13', bps: 0 }, { date: '2018-10-25', bps: 0 }, { date: '2018-12-13', bps: 0 },
+    { date: '2019-01-24', bps: 0 }, { date: '2019-03-07', bps: 0 }, { date: '2019-04-10', bps: 0 }, { date: '2019-06-06', bps: 0 },
+    { date: '2019-07-25', bps: 0 }, { date: '2019-09-12', bps: -10 }, { date: '2019-10-24', bps: 0 }, { date: '2019-12-12', bps: 0 },
+    { date: '2020-01-23', bps: 0 }, { date: '2020-03-12', bps: 0 }, { date: '2020-04-30', bps: 0 }, { date: '2020-06-04', bps: 0 },
+    { date: '2020-07-16', bps: 0 }, { date: '2020-09-10', bps: 0 }, { date: '2020-10-29', bps: 0 }, { date: '2020-12-10', bps: 0 },
+    { date: '2021-01-21', bps: 0 }, { date: '2021-03-11', bps: 0 }, { date: '2021-04-22', bps: 0 }, { date: '2021-06-10', bps: 0 },
+    { date: '2021-07-22', bps: 0 }, { date: '2021-09-09', bps: 0 }, { date: '2021-10-28', bps: 0 }, { date: '2021-12-16', bps: 0 },
+    { date: '2022-02-03', bps: 0 }, { date: '2022-03-10', bps: 0 }, { date: '2022-04-14', bps: 0 }, { date: '2022-06-09', bps: 0 },
+    { date: '2022-07-21', bps: 50 }, { date: '2022-09-08', bps: 75 }, { date: '2022-10-27', bps: 75 }, { date: '2022-12-15', bps: 50 },
+    { date: '2023-02-02', bps: 50 }, { date: '2023-03-16', bps: 50 }, { date: '2023-05-04', bps: 25 }, { date: '2023-06-15', bps: 25 },
+    { date: '2023-07-27', bps: 25 }, { date: '2023-09-14', bps: 25 }, { date: '2023-10-26', bps: 0 }, { date: '2023-12-14', bps: 0 },
+    { date: '2024-01-25', bps: 0 }, { date: '2024-03-07', bps: 0 }, { date: '2024-04-11', bps: 0 }, { date: '2024-06-06', bps: -25 },
+    { date: '2024-07-18', bps: 0 }, { date: '2024-09-12', bps: -25 }, { date: '2024-10-17', bps: -25 }, { date: '2024-12-12', bps: -25 },
+    { date: '2025-01-30', bps: -25 },
     { date: '2025-03-06', bps: -25 }, { date: '2025-04-17', bps: -25 },
     { date: '2025-06-05', bps: -25 }, { date: '2025-07-24', bps: 0 },
     { date: '2025-09-11', bps: 0 }, { date: '2025-10-30', bps: 0 },
@@ -45,8 +90,8 @@ export const POLICY_ACTIONS: Record<string, { date: string; bps: number }[]> = {
   ],
 };
 
-/** Policy rate before the first action listed above (Fed: upper bound of the target range; ECB: deposit rate). */
-const RATE_BEFORE_ACTIONS: Record<string, number> = { FED: 4.50, ECB: 2.75 };
+/** Policy rate before the first action listed above (Fed: upper bound of the target range, 0.25% in January 2015; ECB: deposit rate, −0.20%). */
+const RATE_BEFORE_ACTIONS: Record<string, number> = { FED: 0.25, ECB: -0.20 };
 
 /** Current policy rate implied by POLICY_ACTIONS, e.g. "3.75–4.00%" (Fed) or "2.50%" (ECB deposit facility). */
 export function currentPolicyRate(bank: string, now: Date = new Date()): string {
