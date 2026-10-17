@@ -1,6 +1,8 @@
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { downloadCsv } from '@/lib/download-csv';
+import { indexHistoryRows, monthlyAverages } from '@/lib/index-history';
+import { Button } from '@/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { BankPanel } from '@/components/dashboard/BankPanel';
@@ -48,42 +50,11 @@ function computeAvg(items: SentimentItem[]) {
   return Math.round(scored.reduce((s, i) => s + i.net_score, 0) / scored.length * 1000) / 1000;
 }
 
-/**
- * Group items by month using the SAME methodology as the headline aggregate:
- * α · S_text + (1 − α) · S_stats with time-decay and document-tier weighting
- * inside each channel. A plain mean would let the (far more numerous) macro
- * releases drown out communications and would not match the live score.
- */
-function monthlyAverages(items: SentimentItem[], bank?: string) {
-  const filtered = (bank ? items.filter(i => i.bank === bank) : items).filter(i => Math.abs(i.net_score) > 0.001);
-  const byMonth: Record<string, SentimentItem[]> = {};
-  for (const it of filtered) {
-    const month = it.item_date.slice(0, 7);
-    (byMonth[month] ||= []).push(it);
-  }
-  return Object.entries(byMonth)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, monthItems]) => {
-      // Evaluate each month as of its own end date so decay is applied within-month.
-      const asOf = new Date(`${month}-01T00:00:00Z`);
-      asOf.setUTCMonth(asOf.getUTCMonth() + 1);
-      const blended = blendedAggregate(monthItems as unknown as WeightableItem[], bank, asOf);
-      return { month, avg: blended.avg, count: monthItems.length };
-    });
-}
-
-
-
 const Dashboard = () => {
   const { user } = useAuth();
   const downloadIndexHistory = () => {
-    const rows = allMonths.map(month => [
-      month,
-      fedMonthly.find(m => m.month === month)?.avg ?? '',
-      fedMonthly.find(m => m.month === month)?.count ?? 0,
-      ecbMonthly.find(m => m.month === month)?.avg ?? '',
-      ecbMonthly.find(m => m.month === month)?.count ?? 0,
-    ]);
+    if (!user) return;
+    const rows = indexHistoryRows(allItems);
     downloadCsv(
       rows,
       ['month', 'fed_index', 'fed_items', 'ecb_index', 'ecb_items'],
@@ -280,13 +251,15 @@ const Dashboard = () => {
             <h3 className="text-sm font-semibold">Sentiment Fluctuation (Monthly Avg)</h3>
             <div className="ml-auto">
               {user ? (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={downloadIndexHistory}
                   className="text-[10px] uppercase tracking-wider text-primary border border-primary/25 hover:bg-primary/10 px-2 py-1 rounded transition-colors font-medium"
                 >
                   <Download className="w-3 h-3 inline mr-1" /> Download CSV
-                </button>
+                </Button>
               ) : (
                 <Link
                   to="/login"
