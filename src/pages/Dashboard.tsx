@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { downloadCsv } from '@/lib/download-csv';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCard } from '@/components/analytics/MetricCard';
 import { BankPanel } from '@/components/dashboard/BankPanel';
@@ -17,7 +19,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, Brain } from 'lucide-react';
+import { TrendingUp, Brain, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { CIEWidget } from '@/components/dashboard/CIEWidget';
 import { StanceDecomposition } from '@/components/analytics/StanceDecomposition';
