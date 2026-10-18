@@ -2,4 +2,4 @@
 - [x] Explain and consolidate duplicate speech entries in the evidence ledger without changing scores.
 - [x] Verify the dashboard and duplicate-document regression tests.
 - [x] Restore Policy Taxonomy for the latest completed meetings and verify real statement coverage.
-- [ ] Export all available monthly index history, independent of the chart window, and verify the signed-in download.
+- [x] Export all available monthly index history, independent of the chart window, and verify the signed-in download.
